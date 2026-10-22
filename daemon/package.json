@@ -1,0 +1,17 @@
+{
+  "name": "@omp-mobile/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tailscale-only OMP session daemon for the native omp-mobile app",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

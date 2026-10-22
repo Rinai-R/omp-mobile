@@ -1,0 +1,14 @@
+{
+  "name": "omp-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "daemon",
+    "app"
+  ],
+  "scripts": {
+    "daemon": "npm run start -w @omp-mobile/daemon",
+    "test": "npm test -w @omp-mobile/daemon",
+    "typecheck": "npm run typecheck -w @omp-mobile/app"
+  }
+}
