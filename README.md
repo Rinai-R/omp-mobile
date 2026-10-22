@@ -30,10 +30,15 @@ node daemon/src/server.mjs --host 100.64.0.10 --port 7390 --cwd ~/project
 #   listening  http://100.64.0.10:7390
 #   token      <token>
 #   pair       omp-mobile://pair?url=...&token=...
+# and the same pairing URI as a terminal QR code (`--no-qr` to skip it).
 ```
 
-Then start the app (`npm start -w @omp-mobile/app`) and add the address + token.
-A pairing URI can be pasted into the address field; it fills both.
+Then start the app (`npm start -w @omp-mobile/app`) and tap **Scan to pair**
+on the Machines screen. The scanner accepts only a pairing code whose address
+is on the tailnet (100.64.0.0/10 or a `*.ts.net` name). Opening an
+`omp-mobile://pair?...` link on the phone fills in the Add machine sheet; tap
+Connect to add it. **Enter address** takes the address + token by hand, or a
+pasted pairing URI.
 
 For local development use `--host 127.0.0.1` and `adb reverse tcp:7390 tcp:7390`.
 
@@ -60,8 +65,7 @@ session may block on a terminal prompt.
 ## Not yet aligned with Kivotos
 
 - Background notifications and an Android foreground service.
-- QR camera pairing and Tailscale peer discovery (manual address + token now;
-  pairing URI paste works).
+- Tailscale peer discovery (pairing is by QR code, link, or address + token).
 - Sessions created outside this daemon; only sessions it created are listed.
 - Background notifications and an Android foreground service.
 - Federation across machines with a switcher and relay fallback.

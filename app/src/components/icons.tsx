@@ -116,3 +116,23 @@ export function ChatGlyph({ size = 20, color }: GlyphProps): ReactNode {
     </Svg>
   );
 }
+
+export function QrGlyph({ size = 20, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <Rect x={3} y={3} width={5.5} height={5.5} rx={1.2} stroke={color} strokeWidth={1.5} />
+      <Rect x={11.5} y={3} width={5.5} height={5.5} rx={1.2} stroke={color} strokeWidth={1.5} />
+      <Rect x={3} y={11.5} width={5.5} height={5.5} rx={1.2} stroke={color} strokeWidth={1.5} />
+      <Path d="M11.5 11.5h2v2M17 11.5v2M11.5 17h2.5M17 15.5V17" stroke={color} strokeWidth={1.5} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
+export function KeyboardGlyph({ size = 18, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 20 20" fill="none">
+      <Rect x={2} y={5} width={16} height={10} rx={2} stroke={color} strokeWidth={1.5} />
+      <Path d="M5.5 8.5h1M9.5 8.5h1M13.5 8.5h1M6.5 12h7" stroke={color} strokeWidth={1.5} strokeLinecap="round" />
+    </Svg>
+  );
+}

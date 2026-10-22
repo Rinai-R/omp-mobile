@@ -14,6 +14,7 @@ import { homedir, hostname, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { renderQr } from "./qr.mjs";
 import { RpcSession } from "./rpc-session.mjs";
 
 const VERSION = "0.1.0";
@@ -36,6 +37,7 @@ function parseArgs(argv) {
     token: "",
     sessionDir: "",
     autoApprove: true,
+    qr: true,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -76,6 +78,9 @@ function parseArgs(argv) {
       case "--no-auto-approve":
         options.autoApprove = false;
         break;
+      case "--no-qr":
+        options.qr = false;
+        break;
       case "--help":
       case "-h":
         printHelp();
@@ -104,6 +109,7 @@ Usage: node src/server.mjs [options]
   --token-file <path>    Token file (default ~/.omp-mobile/token)
   --registry-file <path> Session registry (default ~/.omp-mobile/sessions.json)
   --no-auto-approve      Do not pass --auto-approve to omp (approval requests may block)
+  --no-qr                Do not print the pairing QR code at startup
 `);
 }
 
@@ -572,6 +578,13 @@ class Daemon {
   }
 }
 
+/** 100.64.0.0/10 or a MagicDNS *.ts.net name: what the app accepts in a pairing code. */
+function isTailnetAddress(host) {
+  const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (octets !== null) return octets[1] === "100" && Number(octets[2]) >= 64 && Number(octets[2]) <= 127;
+  return /\.ts\.net$/i.test(host);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const token = loadToken(options);
@@ -584,6 +597,16 @@ async function main() {
   console.log(`  cwd        ${options.cwd}`);
   console.log(`  token      ${token}`);
   console.log(`  pair       ${pair}`);
+  if (options.qr) {
+    console.log("");
+    console.log("  Scan with OMP on your phone (Machines > Scan to pair):");
+    console.log(renderQr(pair));
+    // The app accepts only tailnet addresses from a code; say so before the user tries.
+    if (!isTailnetAddress(options.host)) {
+      console.log(`  note: ${options.host} is not a Tailscale address, so the app will refuse this code.`);
+      console.log("        Start with --host <this computer's Tailscale IP> to pair a phone.");
+    }
+  }
   const shutdown = async () => {
     await daemon.close();
     process.exit(0);

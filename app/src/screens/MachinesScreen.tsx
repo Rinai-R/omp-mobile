@@ -1,7 +1,7 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
-import { hello, normalizeUrl, parsePairing } from "../api";
-import { ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
+import { pairMachine } from "../api";
+import { ComputerGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
 import { MachineSheet } from "../components/MachineSheet";
 import {
   Button,
@@ -15,15 +15,29 @@ import {
   Sheet,
   StateDot,
 } from "../components/ui";
+import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
 import { summaryOf, type Probe } from "../probe";
 import { useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
+
+/** A request to open the Add machine sheet, optionally pre-filled from a pairing link. */
+export interface AddRequest {
+  /** Distinguishes two requests for the same link. */
+  nonce: number;
+  /** An `omp-mobile://pair?...` link to pre-fill from; null opens the sheet empty. */
+  link: string | null;
+}
 
 interface Props {
   machines: Machine[];
   /** The latest probe of each machine by id; missing until its first probe finished. */
   probes: ReadonlyMap<string, Probe>;
   onAdd: (machine: Machine) => void;
+  /** Open the QR scanner. */
+  onScan: () => void;
+  /** Open the Add machine sheet; cleared with `onAddRequestHandled` once it is open. */
+  addRequest: AddRequest | null;
+  onAddRequestHandled: () => void;
   onOpen: (machine: Machine) => void;
   onRemove: (machine: Machine) => void;
   onSettings: () => void;
@@ -35,6 +49,9 @@ export function MachinesScreen({
   machines,
   probes,
   onAdd,
+  onScan,
+  addRequest,
+  onAddRequestHandled,
   onOpen,
   onRemove,
   onSettings,
@@ -48,6 +65,8 @@ export function MachinesScreen({
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The sheet was filled from a pairing link: one tap on Connect adds it. */
+  const [fromLink, setFromLink] = useState(false);
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
@@ -56,29 +75,57 @@ export function MachinesScreen({
     setAdding(false);
     setError(null);
     setBusy(false);
-  }, []);
+    // A link's token is not left behind in a sheet the user dismissed.
+    if (fromLink) {
+      setUrl("");
+      setToken("");
+      setFromLink(false);
+    }
+  }, [fromLink]);
+
+  // A pairing link or the scanner's "Enter address" opens the sheet.
+  useEffect(() => {
+    if (addRequest === null) return;
+    onAddRequestHandled();
+    setBusy(false);
+    setAdding(true);
+    if (addRequest.link === null) {
+      setError(null);
+      return;
+    }
+    const pairing = readPairing(addRequest.link);
+    if (pairing.ok) {
+      setUrl(pairing.url);
+      setToken(pairing.token);
+      setFromLink(true);
+      setError(null);
+    } else {
+      setUrl(addRequest.link);
+      setToken("");
+      setFromLink(false);
+      setError(pairingMessage(pairing.problem, pairing.host));
+    }
+  }, [addRequest, onAddRequestHandled]);
 
   const connect = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      const paired = parsePairing(url);
-      const base = normalizeUrl(paired?.url ?? url);
-      const secret = (paired?.token ?? token).trim();
-      if (machines.some((machine) => machine.url === base)) throw new Error("This machine is already in the list");
-      const info = await hello(base, secret);
-      onAdd({
-        id: base,
-        url: base,
-        token: secret,
-        name: info.name,
-        os: info.os,
-        version: info.version,
-        cwd: info.cwd,
-        lastSeen: Date.now(),
-      });
+      let base: string;
+      let secret: string;
+      if (isPairingLink(url)) {
+        const pairing = readPairing(url);
+        if (!pairing.ok) throw new Error(pairingMessage(pairing.problem, pairing.host));
+        base = pairing.url;
+        secret = pairing.token;
+      } else {
+        base = normalizeUrl(url);
+        secret = token;
+      }
+      onAdd(await pairMachine(base, secret, machines));
       setUrl("");
       setToken("");
+      setFromLink(false);
       setAdding(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -110,7 +157,7 @@ export function MachinesScreen({
         right={
           <>
             {machines.length > 0 ? (
-              <IconButton onPress={openAdd} label="Add machine">
+              <IconButton onPress={onScan} label="Add machine">
                 <PlusGlyph color={colors.text} />
               </IconButton>
             ) : null}
@@ -131,8 +178,13 @@ export function MachinesScreen({
           <EmptyState
             icon={<ComputerGlyph size={28} color={colors.textSecondary} />}
             title="Connect your first computer"
-            body="Start the omp-mobile daemon on the computer, then add its Tailscale address and token here."
-            action={<Button label="Add machine" onPress={openAdd} icon={<PlusGlyph size={18} color={colors.onPrimary} />} />}
+            body="Start the omp-mobile daemon on the computer, then scan the QR code it prints."
+            action={
+              <View style={styles.emptyActions}>
+                <Button label="Scan to pair" onPress={onScan} icon={<QrGlyph size={18} color={colors.onPrimary} />} />
+                <Button label="Enter address" kind="plain" onPress={openAdd} />
+              </View>
+            }
           />
         ) : (
           <>
@@ -178,14 +230,16 @@ export function MachinesScreen({
 
       <Sheet visible={adding} title="Add a machine" onClose={close}>
         <Text style={styles.hint}>
-          The daemon prints its address, token and pairing URI when it starts. Use the Tailscale IP, not localhost.
+          {fromLink
+            ? "Opened from a pairing link. Check the address, then tap Connect."
+            : "The daemon prints its address, token and pairing URI when it starts. Use the Tailscale IP, not localhost."}
         </Text>
         <Field
           label="Address or pairing link"
           value={url}
           onChangeText={setUrl}
           placeholder="100.64.0.1:7390 or omp-mobile://pair?..."
-          autoFocus
+          autoFocus={!fromLink}
         />
         <Field label="Token" value={token} onChangeText={setToken} placeholder="daemon token" secure />
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
@@ -193,7 +247,7 @@ export function MachinesScreen({
           label="Connect"
           onPress={() => void connect()}
           busy={busy}
-          disabled={url.trim() === "" || (token.trim() === "" && parsePairing(url) === null)}
+          disabled={url.trim() === "" || (token.trim() === "" && !isPairingLink(url))}
         />
       </Sheet>
     </View>
@@ -205,6 +259,7 @@ function createStyles(c: Palette) {
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
     emptyContent: { flexGrow: 1 },
+    emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontSize: 13, lineHeight: 18, color: c.textSecondary },
     state: { flexDirection: "row", alignItems: "center", gap: 4 },
     footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
