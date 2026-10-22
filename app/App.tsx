@@ -7,6 +7,7 @@ import { MachinesScreen } from "./src/screens/MachinesScreen";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
+import { palette } from "./src/theme";
 import type { Machine, SessionSummary } from "./src/types";
 
 type Route =
@@ -14,6 +15,8 @@ type Route =
   | { kind: "sessions"; machine: Machine }
   | { kind: "chat"; machine: Machine; session: SessionSummary }
   | { kind: "settings" };
+
+const EDGES = ["top", "left", "right"] as const;
 
 export default function App(): ReactNode {
   const scheme = useColorScheme();
@@ -121,7 +124,7 @@ export default function App(): ReactNode {
   return (
     <SafeAreaProvider>
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
-      <SafeAreaView style={{ flex: 1 }} edges={["top", "left", "right"]}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: palette(scheme).bg }} edges={EDGES}>
         {content}
       </SafeAreaView>
     </SafeAreaProvider>

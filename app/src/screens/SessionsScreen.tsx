@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { createSession, deleteSession, listSessions } from "../api";
-import { Button, Field, Sheet, StatusDot, styles as ui } from "../components/ui";
-import { radius, type, useColors } from "../theme";
+import { ChatGlyph, PlusGlyph } from "../components/icons";
+import {
+  Banner,
+  Button,
+  EmptyState,
+  Field,
+  Group,
+  Header,
+  IconButton,
+  Row,
+  SectionHeader,
+  Sheet,
+} from "../components/ui";
+import { useColors, useStyles, type Palette } from "../theme";
 import type { Machine, SessionSummary } from "../types";
 
 interface Props {
   machine: Machine;
   onBack: () => void;
   onOpen: (machine: Machine, session: SessionSummary) => void;
+}
+
+function basename(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function ago(timestamp: number): string {
@@ -30,7 +37,7 @@ function ago(timestamp: number): string {
 
 export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
   const colors = useColors();
-  const styles = useStyles(colors);
+  const styles = useStyles(createStyles);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,108 +96,110 @@ export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
     [machine],
   );
 
+  const openCreate = useCallback(() => setCreating(true), []);
+  const running = sessions.filter((session) => session.status === "streaming").length;
+
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
-      <View style={styles.header}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
-          <Text style={{ color: colors.textSecondary, fontSize: 28, marginTop: -4 }}>‹</Text>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={[type.heading, { color: colors.text }]}>{machine.name}</Text>
-          <Text style={[type.small, { color: colors.textSecondary }]}>{machine.os} · OMP {machine.version}</Text>
-        </View>
-        <Pressable
-          onPress={() => setCreating(true)}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="New session"
-        >
-          <Text style={{ color: colors.link, fontSize: 28, marginTop: -4 }}>+</Text>
-        </Pressable>
-      </View>
+    <View style={styles.root}>
+      <Header
+        title={machine.name}
+        subtitle={`${machine.os} · OMP ${machine.version}`}
+        onBack={onBack}
+        right={
+          <IconButton onPress={openCreate} label="New session">
+            <PlusGlyph color={colors.text} />
+          </IconButton>
+        }
+      />
+      {error !== null && !creating ? <Banner text={error} onPress={() => setError(null)} /> : null}
 
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator color={colors.textSecondary} />
         </View>
       ) : (
-        <FlatList
-          data={sessions}
-          keyExtractor={(session) => session.id}
-          contentContainerStyle={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.textSecondary} />}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Text style={[type.heading, { color: colors.text }]}>No sessions yet</Text>
-              <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: 8 }]}>
-                Start one in {machine.cwd.split("/").filter(Boolean).at(-1) ?? "the default directory"}.
-              </Text>
-              <View style={{ height: 18 }} />
-              <Button label="New session" onPress={() => setCreating(true)} />
-            </View>
+        <ScrollView
+          contentContainerStyle={sessions.length === 0 ? styles.emptyContent : styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.textSecondary} />
           }
-          renderItem={({ item }) => (
-            <Pressable
-              onPress={() => onOpen(machine, item)}
-              onLongPress={() => confirmDelete(item)}
-              style={({ pressed }) => [
-                styles.card,
-                { backgroundColor: pressed ? colors.pressed : colors.surface, borderColor: colors.border },
-              ]}
-            >
-              <StatusDot color={item.status === "streaming" ? colors.warn : colors.success} size={7} />
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={[type.heading, { color: colors.text }]} numberOfLines={1}>
-                  {item.title}
-                </Text>
-                <Text style={[type.small, { color: colors.textSecondary }]} numberOfLines={1}>
-                  {item.cwd} · {item.model ?? "default model"}
-                </Text>
-              </View>
-              <View style={{ alignItems: "flex-end", gap: 4 }}>
-                <Text style={[type.tiny, { color: colors.textTertiary }]}>{item.status === "streaming" ? "running" : ago(item.updatedAt)}</Text>
-                <Text style={{ color: colors.textTertiary, fontSize: 20 }}>›</Text>
-              </View>
-            </Pressable>
+        >
+          {sessions.length === 0 ? (
+            <EmptyState
+              icon={<ChatGlyph size={26} color={colors.textSecondary} />}
+              title="No sessions yet"
+              body={`Start one in ${basename(machine.cwd) || "the default directory"}.`}
+              action={
+                <Button
+                  label="New session"
+                  onPress={openCreate}
+                  icon={<PlusGlyph size={18} color={colors.onPrimary} />}
+                />
+              }
+            />
+          ) : (
+            <>
+              <SectionHeader title={running > 0 ? `Sessions · ${running} running` : "Sessions"} />
+              <Group>
+                {sessions.map((session, index) => {
+                  const live = session.status === "streaming";
+                  return (
+                    <Row
+                      key={session.id}
+                      title={session.title}
+                      detail={
+                        <Text style={styles.detail} numberOfLines={1}>
+                          {basename(session.cwd)} · {session.model ?? "default model"}
+                        </Text>
+                      }
+                      trailing={
+                        <View style={styles.trailing}>
+                          {live ? <View style={styles.liveDot} /> : null}
+                          <Text style={live ? styles.timeLive : styles.time} numberOfLines={1}>
+                            {live ? "running" : ago(session.updatedAt)}
+                          </Text>
+                        </View>
+                      }
+                      last={index === sessions.length - 1}
+                      onPress={() => onOpen(machine, session)}
+                      onLongPress={() => confirmDelete(session)}
+                      accessibilityLabel={`${session.title}, ${live ? "running" : ago(session.updatedAt)}`}
+                    />
+                  );
+                })}
+              </Group>
+              <Text style={styles.footnote}>Long-press a session to delete it.</Text>
+            </>
           )}
-          ListHeaderComponent={error !== null ? <Text style={[type.small, { color: colors.danger, marginBottom: 10 }]}>{error}</Text> : null}
-        />
+        </ScrollView>
       )}
 
       <Sheet visible={creating} title="New session" onClose={() => setCreating(false)}>
-        <Text style={[type.small, { color: colors.textSecondary }]}>
+        <Text style={styles.hint}>
           The session starts a new OMP process on the computer. Leave the directory empty for {machine.cwd}.
         </Text>
         <Field label="Working directory" value={cwd} onChangeText={setCwd} placeholder={machine.cwd} autoFocus />
-        {error !== null ? <Text style={[type.small, { color: colors.danger }]}>{error}</Text> : null}
+        {error !== null ? <Text style={styles.error}>{error}</Text> : null}
         <Button label="Start session" onPress={() => void create()} busy={busy} />
       </Sheet>
     </View>
   );
 }
 
-function useStyles(colors: ReturnType<typeof useColors>) {
-  return StyleSheet.create({
-    root: { flex: 1 },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 14,
-      paddingHorizontal: 20,
-      paddingTop: 16,
-      paddingBottom: 14,
-    },
-    list: { paddingHorizontal: 16, paddingBottom: 40, flexGrow: 1 },
-    card: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      padding: 14,
-      borderRadius: radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      marginBottom: 10,
-    },
+function createStyles(c: Palette) {
+  const time = { fontSize: 12, lineHeight: 16, color: c.textTertiary } as const;
+  return {
+    root: { flex: 1, backgroundColor: c.bg },
     center: { flex: 1, alignItems: "center", justifyContent: "center" },
-    empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24, paddingTop: 60 },
-  });
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
+    emptyContent: { flexGrow: 1 },
+    detail: { fontSize: 13, lineHeight: 18, color: c.textSecondary },
+    trailing: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
+    liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: c.warn },
+    time,
+    timeLive: { ...time, color: c.warn, fontWeight: "600" },
+    footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
+    hint: { fontSize: 13, lineHeight: 18, color: c.textSecondary, marginHorizontal: 4 },
+    error: { fontSize: 13, lineHeight: 18, color: c.danger, marginHorizontal: 4 },
+  } as const;
 }
