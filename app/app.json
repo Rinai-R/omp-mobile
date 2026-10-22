@@ -14,7 +14,8 @@
       "versionCode": 1,
       "permissions": [
         "android.permission.INTERNET"
-      ]
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "bundleIdentifier": "com.rinai.ompmobile",

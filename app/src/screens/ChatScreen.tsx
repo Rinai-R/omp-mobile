@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -8,12 +9,17 @@ import {
   Text,
   TextInput,
   View,
+  type ListRenderItem,
+  type PressableStateCallbackType,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SessionSocket } from "../api";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { ChatItem } from "../components/ChatItem";
+import { ChatGlyph, SendGlyph, StopGlyph } from "../components/icons";
+import { Banner, EmptyState, Header } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
-import { radius, type, useColors } from "../theme";
+import { radius, useColors, useStyles, type Palette } from "../theme";
 import type {
   ApprovalRequest,
   ChatItem as Item,
@@ -31,8 +37,10 @@ interface Props {
 
 export function ChatScreen({ machine, session: initialSession, onBack }: Props): ReactNode {
   const colors = useColors();
-  const styles = useStyles(colors);
-  const listRef = useRef<import("react-native").FlatList<Item>>(null);
+  const styles = useStyles(createStyles);
+  const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardVisible();
+  const listRef = useRef<FlatList<Item>>(null);
   const socketRef = useRef<SessionSocket | null>(null);
   const [session, setSession] = useState(initialSession);
   const [state, setState] = useState<SessionState | null>(null);
@@ -123,130 +131,171 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
 
   const streaming = state?.isStreaming === true;
   const model = state?.model?.name ?? state?.model?.id ?? initialSession.model ?? "default model";
+  const folder = session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd;
+  const hasText = draft.trim() !== "";
+  // Text in the box sends (a steer while streaming); an empty box while streaming stops the turn.
+  const mode: "send" | "stop" | "idle" = hasText ? "send" : streaming ? "stop" : "idle";
+  const actionDisabled = !connected || mode === "idle";
+  const action = mode === "stop" ? abort : send;
+  const actionStyle = useCallback(
+    ({ pressed }: PressableStateCallbackType) => [
+      mode === "stop" ? styles.stop : actionDisabled ? styles.sendOff : styles.send,
+      pressed && styles.actionPressed,
+    ],
+    [actionDisabled, mode, styles],
+  );
+  const renderItem = useCallback<ListRenderItem<Item>>(({ item }) => <ChatItem item={item} />, []);
+  const scrollToEnd = useCallback(() => listRef.current?.scrollToEnd({ animated: false }), []);
+
   return (
-    <KeyboardAvoidingView
-      style={[styles.root, { backgroundColor: colors.bg }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
-    >
-      <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <Pressable onPress={onBack} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
-          <Text style={{ color: colors.textSecondary, fontSize: 28, marginTop: -4 }}>‹</Text>
-        </Pressable>
-        <View style={{ flex: 1, gap: 2 }}>
-          <Text style={[type.heading, { color: colors.text }]} numberOfLines={1}>
-            {session.title}
-          </Text>
-          <Text style={[type.tiny, { color: colors.textTertiary }]} numberOfLines={1}>
-            {connected ? model : "reconnecting…"} · {session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd}
-          </Text>
-        </View>
-        {streaming ? (
-          <Pressable onPress={abort} hitSlop={10} accessibilityRole="button" accessibilityLabel="Stop">
-            <Text style={[type.small, { color: colors.danger, fontWeight: "600" }]}>Stop</Text>
-          </Pressable>
-        ) : (
-          <View style={[styles.liveDot, { backgroundColor: connected ? colors.success : colors.textTertiary }]} />
-        )}
-      </View>
-
-      {error !== null ? (
-        <Pressable onPress={() => setError(null)} style={[styles.banner, { backgroundColor: colors.dangerSoft }]}>
-          <Text style={[type.small, { color: colors.danger }]}>{error}</Text>
-        </Pressable>
-      ) : null}
-
-      <FlatList
-        ref={listRef}
-        data={items}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ChatItem item={item} />}
-        contentContainerStyle={styles.list}
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={[type.heading, { color: colors.text }]}>Ask OMP anything</Text>
-            <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: 8 }]}>
-              It runs on {machine.name}. Tool calls and approvals appear here as it works.
-            </Text>
-          </View>
-        }
-      />
-
-      <View style={[styles.composer, { backgroundColor: colors.bg, borderTopColor: colors.separator }]}>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={streaming ? "Steer the current turn…" : "Message OMP"}
-          placeholderTextColor={colors.textTertiary}
-          multiline
-          style={[
-            styles.input,
-            type.body,
-            { color: colors.text, backgroundColor: colors.surface, borderColor: colors.border },
-          ]}
+    <View style={styles.root}>
+      <KeyboardAvoidingView
+        style={styles.root}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+      >
+        <Header
+          title={session.title}
+          onBack={onBack}
+          subtitle={
+            <View style={styles.subtitle}>
+              <View style={connected ? (streaming ? styles.dotBusy : styles.dotLive) : styles.dotOff} />
+              <Text style={styles.subtitleText} numberOfLines={1}>
+                {connected ? (streaming ? "working · " : "") + model : "reconnecting…"} · {folder}
+              </Text>
+            </View>
+          }
         />
-        <Pressable
-          onPress={send}
-          disabled={draft.trim() === "" || !connected}
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          style={[
-            styles.send,
-            { backgroundColor: draft.trim() === "" || !connected ? colors.raised : colors.primary },
-          ]}
-        >
-          <Text
-            style={{
-              color: draft.trim() === "" || !connected ? colors.textTertiary : colors.onPrimary,
-              fontSize: 18,
-              fontWeight: "700",
-            }}
-          >
-            ↑
-          </Text>
-        </Pressable>
-      </View>
+
+        {error !== null ? <Banner text={error} onPress={() => setError(null)} /> : null}
+
+        <FlatList
+          ref={listRef}
+          data={items}
+          keyExtractor={keyOf}
+          renderItem={renderItem}
+          contentContainerStyle={styles.list}
+          onContentSizeChange={scrollToEnd}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+          ListEmptyComponent={
+            <EmptyState
+              icon={<ChatGlyph size={26} color={colors.textSecondary} />}
+              title="Ask OMP anything"
+              body={`It runs on ${machine.name} in ${folder}. Tool calls and approvals appear here as it works.`}
+            />
+          }
+        />
+
+        <View style={[styles.composer, { paddingBottom: 8 + (keyboard ? 0 : insets.bottom) }]}>
+          <View style={styles.inputWrap}>
+            <TextInput
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={streaming ? "Steer the current turn…" : "Message OMP"}
+              placeholderTextColor={colors.textTertiary}
+              multiline
+              style={styles.input}
+            />
+            <Pressable
+              onPress={action}
+              disabled={actionDisabled}
+              accessibilityRole="button"
+              accessibilityLabel={mode === "stop" ? "Stop" : "Send"}
+              hitSlop={6}
+              style={actionStyle}
+            >
+              {mode === "stop" ? (
+                <StopGlyph size={12} color="#FFFFFF" />
+              ) : (
+                <SendGlyph size={18} color={actionDisabled ? colors.textTertiary : colors.onPrimary} />
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
 
       {approval !== null ? <ApprovalSheet request={approval} onAnswer={answer} /> : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-function useStyles(colors: ReturnType<typeof useColors>) {
-  return StyleSheet.create({
-    root: { flex: 1 },
-    header: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    liveDot: { width: 8, height: 8, borderRadius: 4 },
-    banner: { paddingHorizontal: 16, paddingVertical: 8 },
-    list: { paddingVertical: 14, flexGrow: 1 },
-    empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 30, paddingTop: 100 },
+function keyOf(item: Item): string {
+  return item.id;
+}
+
+/** Whether the software keyboard is up; the composer drops the home-indicator inset meanwhile. */
+function useKeyboardVisible(): boolean {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () =>
+      setVisible(true),
+    );
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () =>
+      setVisible(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return visible;
+}
+
+/** Six lines of 22 px text plus the vertical padding. */
+const INPUT_MAX = 22 * 6 + 20;
+const ACTION = 34;
+
+function createStyles(c: Palette) {
+  const dot = { width: 6, height: 6, borderRadius: 3 } as const;
+  const action = {
+    width: ACTION,
+    height: ACTION,
+    borderRadius: ACTION / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 5,
+    marginRight: 5,
+  } as const;
+  return {
+    root: { flex: 1, backgroundColor: c.bg },
+    subtitle: { flexDirection: "row", alignItems: "center", gap: 5 },
+    subtitleText: { flexShrink: 1, fontSize: 12, lineHeight: 16, color: c.textTertiary },
+    dotLive: { ...dot, backgroundColor: c.success },
+    dotBusy: { ...dot, backgroundColor: c.warn },
+    dotOff: { ...dot, backgroundColor: c.textTertiary },
+    list: { paddingVertical: 12, flexGrow: 1 },
     composer: {
-      flexDirection: "row",
-      alignItems: "flex-end",
-      gap: 8,
       paddingHorizontal: 12,
       paddingTop: 8,
-      paddingBottom: Platform.OS === "ios" ? 24 : 12,
+      backgroundColor: c.bg,
       borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.separator,
+    },
+    inputWrap: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      borderRadius: radius.xl + 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      backgroundColor: c.surface,
     },
     input: {
       flex: 1,
-      maxHeight: 150,
-      minHeight: 42,
-      borderRadius: radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      paddingHorizontal: 14,
-      paddingVertical: 10,
+      minHeight: 44,
+      maxHeight: INPUT_MAX,
+      paddingLeft: 16,
+      paddingRight: 8,
+      paddingTop: 11,
+      paddingBottom: 11,
+      fontSize: 16,
+      lineHeight: 22,
+      color: c.text,
+      textAlignVertical: "top",
     },
-    send: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
-  });
+    send: { ...action, backgroundColor: c.primary },
+    sendOff: { ...action, backgroundColor: c.raised },
+    stop: { ...action, backgroundColor: c.danger },
+    actionPressed: { opacity: 0.8 },
+  } as const;
 }

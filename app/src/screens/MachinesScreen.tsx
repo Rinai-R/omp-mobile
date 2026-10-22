@@ -1,17 +1,20 @@
 import { useCallback, useState, type ReactNode } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { hello, normalizeUrl, parsePairing } from "../api";
-import { Button, Field, Sheet, StatusDot, styles as ui } from "../components/ui";
-import { radius, type, useColors } from "../theme";
+import { ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
+import {
+  Button,
+  EmptyState,
+  Field,
+  Group,
+  Header,
+  IconButton,
+  Row,
+  SectionHeader,
+  Sheet,
+  StatusDot,
+} from "../components/ui";
+import { useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 
 interface Props {
@@ -34,7 +37,7 @@ export function MachinesScreen({
   onRefresh,
 }: Props): ReactNode {
   const colors = useColors();
-  const styles = useStyles(colors);
+  const styles = useStyles(createStyles);
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -85,87 +88,70 @@ export function MachinesScreen({
     [onRemove],
   );
 
-  return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
-      <View style={styles.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[type.title, { color: colors.text }]}>Machines</Text>
-          <Text style={[type.small, { color: colors.textSecondary, marginTop: 3 }]}>
-            Every OMP you connect, in your pocket
-          </Text>
-        </View>
-        <Pressable
-          onPress={onSettings}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          style={styles.iconButton}
-        >
-          <Text style={{ color: colors.textSecondary, fontSize: 22 }}>⚙</Text>
-        </Pressable>
-      </View>
+  const openAdd = useCallback(() => setAdding(true), []);
 
-      <FlatList
-        data={machines}
-        keyExtractor={(machine) => machine.id}
-        contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={[styles.emptyMark, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.textSecondary, fontSize: 28 }}>⌁</Text>
-            </View>
-            <Text style={[type.heading, { color: colors.text, marginTop: 18 }]}>Connect your first computer</Text>
-            <Text style={[type.body, { color: colors.textSecondary, textAlign: "center", marginTop: 8 }]}>
-              Start the omp-mobile daemon on the computer, then add its Tailscale address and token here.
-            </Text>
-            <View style={{ height: 20 }} />
-            <Button label="Add machine" onPress={() => setAdding(true)} />
-          </View>
-        }
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => onOpen(item)}
-            onLongPress={() => confirmRemove(item)}
-            style={({ pressed }) => [
-              styles.card,
-              {
-                backgroundColor: pressed ? colors.pressed : colors.surface,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <View style={[styles.avatar, { backgroundColor: colors.raised }]}>
-              <Text style={[type.heading, { color: colors.text }]}>{item.name.slice(0, 1).toUpperCase()}</Text>
-            </View>
-            <View style={{ flex: 1, gap: 3 }}>
-              <Text style={[type.heading, { color: colors.text }]} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <Text style={[type.small, { color: colors.textSecondary }]} numberOfLines={1}>
-                {item.os} · OMP {item.version}
-              </Text>
-              <Text style={[type.tiny, { color: colors.textTertiary }]} numberOfLines={1}>
-                {item.url.replace(/^https?:\/\//, "")}
-              </Text>
-            </View>
-            <View style={styles.cardRight}>
-              <StatusDot color={colors.success} />
-              <Text style={{ color: colors.textTertiary, fontSize: 20 }}>›</Text>
-            </View>
-          </Pressable>
-        )}
-        ListFooterComponent={
-          machines.length > 0 ? (
-            <View style={{ paddingTop: 14 }}>
-              <Button label="Add machine" onPress={() => setAdding(true)} kind="plain" />
-            </View>
-          ) : null
+  return (
+    <View style={styles.root}>
+      <Header
+        large
+        title="Machines"
+        subtitle="Every OMP you connect, in your pocket"
+        right={
+          <>
+            {machines.length > 0 ? (
+              <IconButton onPress={openAdd} label="Add machine">
+                <PlusGlyph color={colors.text} />
+              </IconButton>
+            ) : null}
+            <IconButton onPress={onSettings} label="Settings">
+              <SettingsGlyph color={colors.text} />
+            </IconButton>
+          </>
         }
       />
 
+      <ScrollView
+        contentContainerStyle={machines.length === 0 ? styles.emptyContent : styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />
+        }
+      >
+        {machines.length === 0 ? (
+          <EmptyState
+            icon={<ComputerGlyph size={28} color={colors.textSecondary} />}
+            title="Connect your first computer"
+            body="Start the omp-mobile daemon on the computer, then add its Tailscale address and token here."
+            action={<Button label="Add machine" onPress={openAdd} icon={<PlusGlyph size={18} color={colors.onPrimary} />} />}
+          />
+        ) : (
+          <>
+            <SectionHeader title="Computers" />
+            <Group>
+              {machines.map((machine, index) => (
+                <Row
+                  key={machine.id}
+                  title={machine.name}
+                  detail={
+                    <Text style={styles.detail} numberOfLines={1}>
+                      {machine.os} · OMP {machine.version} · {machine.url.replace(/^https?:\/\//, "")}
+                    </Text>
+                  }
+                  leading={<ComputerGlyph color={colors.textSecondary} />}
+                  trailing={<StatusDot color={colors.success} />}
+                  last={index === machines.length - 1}
+                  onPress={() => onOpen(machine)}
+                  onLongPress={() => confirmRemove(machine)}
+                  accessibilityLabel={`${machine.name}, ${machine.os}`}
+                />
+              ))}
+            </Group>
+            <Text style={styles.footnote}>Long-press a computer to remove it.</Text>
+          </>
+        )}
+      </ScrollView>
+
       <Sheet visible={adding} title="Add a machine" onClose={close}>
-        <Text style={[type.small, { color: colors.textSecondary }]}>
+        <Text style={styles.hint}>
           The daemon prints its address, token and pairing URI when it starts. Use the Tailscale IP, not localhost.
         </Text>
         <Field
@@ -176,38 +162,26 @@ export function MachinesScreen({
           autoFocus
         />
         <Field label="Token" value={token} onChangeText={setToken} placeholder="daemon token" secure />
-        {error !== null ? <Text style={[type.small, { color: colors.danger }]}>{error}</Text> : null}
-        <Button label="Connect" onPress={() => void connect()} busy={busy} disabled={url.trim() === "" || (token.trim() === "" && parsePairing(url) === null)} />
+        {error !== null ? <Text style={styles.error}>{error}</Text> : null}
+        <Button
+          label="Connect"
+          onPress={() => void connect()}
+          busy={busy}
+          disabled={url.trim() === "" || (token.trim() === "" && parsePairing(url) === null)}
+        />
       </Sheet>
     </View>
   );
 }
 
-function useStyles(colors: ReturnType<typeof useColors>) {
-  return StyleSheet.create({
-    root: { flex: 1 },
-    header: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 14 },
-    iconButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-    list: { paddingHorizontal: 16, paddingBottom: 40, flexGrow: 1 },
-    card: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      padding: 14,
-      borderRadius: radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      marginBottom: 10,
-    },
-    avatar: { width: 42, height: 42, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-    cardRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-    empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 22, paddingTop: 80 },
-    emptyMark: {
-      width: 72,
-      height: 72,
-      borderRadius: radius.xl,
-      borderWidth: StyleSheet.hairlineWidth,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-  });
+function createStyles(c: Palette) {
+  return {
+    root: { flex: 1, backgroundColor: c.bg },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
+    emptyContent: { flexGrow: 1 },
+    detail: { fontSize: 13, lineHeight: 18, color: c.textSecondary },
+    footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
+    hint: { fontSize: 13, lineHeight: 18, color: c.textSecondary, marginHorizontal: 4 },
+    error: { fontSize: 13, lineHeight: 18, color: c.danger, marginHorizontal: 4 },
+  } as const;
 }

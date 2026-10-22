@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { StyleSheet, useColorScheme, type ColorSchemeName } from "react-native";
+import { Platform, StyleSheet, useColorScheme, type ColorSchemeName } from "react-native";
 
 /** The same resolved dsh tokens Kivotos uses, plus a chat surface. */
 export function palette(scheme: ColorSchemeName) {
@@ -57,6 +57,11 @@ export function palette(scheme: ColorSchemeName) {
 export type Palette = ReturnType<typeof palette>;
 export const radius = { sm: 8, md: 12, lg: 16, xl: 20 } as const;
 
+/**
+ * A component's style sheet for the current color scheme, built once per
+ * scheme so style props keep their identity across renders.
+ * @param create - builds the sheet from the palette; define it at module scope.
+ */
 export function useStyles<T extends StyleSheet.NamedStyles<T>>(create: (colors: Palette) => T): T {
   const scheme = useColorScheme();
   return useMemo(() => StyleSheet.create(create(palette(scheme))), [create, scheme]);
@@ -67,11 +72,17 @@ export function useColors(): Palette {
   return useMemo(() => palette(scheme), [scheme]);
 }
 
+export const MONO = Platform.select({ ios: "Menlo", default: "monospace" });
+
+/** Header height and the minimum touch target. */
+export const HEADER_HEIGHT = 56;
+export const HIT = 44;
+
 export const type = {
   title: { fontSize: 28, fontWeight: "700" as const, letterSpacing: -0.4 },
   heading: { fontSize: 17, fontWeight: "600" as const },
   body: { fontSize: 15, lineHeight: 22 },
   small: { fontSize: 13 },
   tiny: { fontSize: 11 },
-  mono: { fontFamily: "Menlo", fontSize: 12, lineHeight: 17 },
+  mono: { fontFamily: MONO, fontSize: 12, lineHeight: 17 },
 } as const;
