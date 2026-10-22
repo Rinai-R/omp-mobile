@@ -53,7 +53,7 @@ export function messageToItem(message: AgentMessage, index: number): ChatItem | 
     return undefined;
   }
   const text = textOf(message.content);
-  if (text.trim() === "" && role !== "assistant") return undefined;
+  if (text.trim() === "" && (role !== "assistant" || thinkingOf(message.content) === undefined)) return undefined;
   return {
     kind: "message",
     id: message.id ?? `m-${index}`,
@@ -96,6 +96,29 @@ function updateItem(items: ChatItem[], id: string, update: (item: MessageItem | 
 }
 
 /**
+ * The message an update or end belongs to. OMP's RPC messages carry no id, so
+ * the open message of the same role is the one being emitted; an id, when
+ * present, wins.
+ */
+function openIndex(items: ChatItem[], message: AgentMessage | undefined): number {
+  if (message?.id !== undefined) {
+    const byId = items.findIndex((entry) => entry.id === message.id);
+    if (byId !== -1) return byId;
+  }
+  const role = message === undefined ? undefined : roleOf(message);
+  for (let at = items.length - 1; at >= 0; at -= 1) {
+    const entry = items[at];
+    if (entry?.kind === "message" && entry.open === true && (role === undefined || entry.role === role)) return at;
+  }
+  return -1;
+}
+
+/** An assistant message with neither text nor thinking: a turn that only called tools. */
+function blank(item: MessageItem): boolean {
+  return item.role === "assistant" && item.text.trim() === "" && (item.thinking ?? "").trim() === "";
+}
+
+/**
  * Fold one OMP session event into the transcript.
  * Events are the same union `omp --mode rpc` emits; only the parts the native
  * UI renders are interpreted.
@@ -104,45 +127,55 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
   const type = event.type;
   if (type === "message_start") {
     const message = event.message as AgentMessage | undefined;
-    if (message === undefined) return items;
-    const item = messageToItem(message, items.length);
-    if (item === undefined || item.kind !== "message") return items;
-    if (items.some((entry) => entry.id === item.id)) return items;
-    if (item.role === "assistant") item.streaming = true;
-    return [...items, item];
+    if (message === undefined || roleOf(message) === undefined) return items;
+    const text = textOf(message.content);
+    const item: MessageItem = {
+      kind: "message",
+      id: message.id ?? nextId("msg"),
+      role: roleOf(message) ?? "assistant",
+      text,
+      thinking: thinkingOf(message.content),
+      streaming: true,
+      open: true,
+    };
+    return [...items.filter((entry) => entry.id !== item.id), item];
   }
   if (type === "message_update") {
     const message = event.message as AgentMessage | undefined;
-    const id = message?.id;
-    if (id === undefined) return items;
     const delta = streamingText(event);
     if (delta.text === undefined && delta.thinking === undefined) return items;
-    const existing = items.find((entry) => entry.id === id);
-    if (existing === undefined) {
-      if (message === undefined) return items;
-      const item = messageToItem(message, items.length);
-      if (item === undefined || item.kind !== "message") return items;
-      item.streaming = true;
-      if (delta.text !== undefined) item.text += delta.text;
-      if (delta.thinking !== undefined) item.thinking = (item.thinking ?? "") + delta.thinking;
-      return [...items, item];
-    }
-    return updateItem(items, id, (item) => {
-      if (item.kind !== "message") return;
-      if (delta.text !== undefined) item.text += delta.text;
-      if (delta.thinking !== undefined) item.thinking = (item.thinking ?? "") + delta.thinking;
-      item.streaming = true;
+    const at = openIndex(items, message);
+    if (at === -1) return items;
+    return items.map((entry, index) => {
+      if (index !== at || entry.kind !== "message") return entry;
+      return {
+        ...entry,
+        text: entry.text + (delta.text ?? ""),
+        thinking: delta.thinking === undefined ? entry.thinking : (entry.thinking ?? "") + delta.thinking,
+        streaming: true,
+      };
     });
   }
   if (type === "message_end") {
     const message = event.message as AgentMessage | undefined;
     if (message === undefined) return items;
-    const item = messageToItem(message, items.length);
-    if (item === undefined || item.kind !== "message") return items;
-    item.streaming = false;
-    const index = items.findIndex((entry) => entry.id === item.id);
-    if (index === -1) return [...items, item];
-    return items.map((entry, at) => (at === index ? item : entry));
+    const role = roleOf(message);
+    if (role === undefined) return items;
+    const at = openIndex(items, message);
+    const previous = at === -1 ? undefined : items[at];
+    const final: MessageItem = {
+      kind: "message",
+      id: previous?.id ?? message.id ?? nextId("msg"),
+      role,
+      text: textOf(message.content),
+      thinking: thinkingOf(message.content),
+      streaming: false,
+      open: false,
+    };
+    const keep = !blank(final) && !(role !== "assistant" && final.text.trim() === "");
+    if (at === -1) return keep ? [...items, final] : items;
+    if (!keep) return items.filter((_, index) => index !== at);
+    return items.map((entry, index) => (index === at ? final : entry));
   }
   if (type === "tool_execution_start") {
     const id = typeof event.toolCallId === "string" ? event.toolCallId : nextId("tool");
@@ -185,18 +218,33 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     return [...items, notice];
   }
   if (type === "turn_end" || type === "agent_end") {
-    return items.map((item) =>
-      item.kind === "message" && item.streaming === true ? { ...item, streaming: false } : item,
-    );
+    return items
+      .filter((item) => !(item.kind === "message" && item.open === true && blank(item)))
+      .map((item) =>
+        item.kind === "message" && (item.streaming === true || item.open === true)
+          ? { ...item, streaming: false, open: false }
+          : item,
+      );
   }
   return items;
+}
+
+/** Text a tool result carries: OMP results are `{content: [{type: "text", text}], details}`. */
+function resultText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value === null || typeof value !== "object") return undefined;
+  const content = (value as { content?: unknown }).content;
+  if (content === undefined) return undefined;
+  const text = textOf(content);
+  return text === "" ? undefined : text;
 }
 
 /** A short one-line result for a tool card. */
 export function toolSummary(tool: ToolItem): string {
   const value = tool.result ?? tool.partial ?? tool.args;
   if (value === null || value === undefined) return tool.status === "running" ? "Running…" : "";
-  if (typeof value === "string") return value.replace(/\s+/g, " ").slice(0, 300);
+  const text = resultText(value);
+  if (text !== undefined) return text.replace(/\s+/g, " ").slice(0, 300);
   try {
     return JSON.stringify(value).replace(/\s+/g, " ").slice(0, 300);
   } catch {
