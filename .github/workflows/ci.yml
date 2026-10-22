@@ -16,7 +16,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - name: Daemon tests
+      - name: Tests (daemon + app)
         run: npm test
       - name: App typecheck
         run: npm run typecheck
