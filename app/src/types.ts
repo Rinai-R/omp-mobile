@@ -62,6 +62,8 @@ export interface MessageItem {
   text: string;
   thinking?: string;
   streaming?: boolean;
+  /** The message OMP is still emitting: updates and the final message land on it. */
+  open?: boolean;
   createdAt?: number;
 }
 
