@@ -18,27 +18,6 @@ async function request<T>(machine: Machine, path: string, init: RequestInit = {}
   return (await response.json()) as T;
 }
 
-/** Normalize what a user pasted into a daemon base URL. */
-export function normalizeUrl(input: string): string {
-  let value = input.trim();
-  if (value === "") throw new Error("Enter the daemon address");
-  if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
-  const url = new URL(value);
-  if (url.pathname !== "/" && url.pathname !== "") throw new Error("Enter only the daemon base address");
-  return `${url.protocol}//${url.host}`;
-}
-
-/** Parse the daemon's `omp-mobile://pair?url=...&token=...` URI. */
-export function parsePairing(input: string): { url: string; token: string } | null {
-  const value = input.trim();
-  if (!value.startsWith("omp-mobile://pair")) return null;
-  const url = new URL(value);
-  const base = url.searchParams.get("url");
-  const token = url.searchParams.get("token");
-  if (base === null || token === null || base === "" || token === "") return null;
-  return { url: base, token };
-}
-
 export async function hello(url: string, token: string): Promise<Hello> {
   const response = await fetch(`${url}/hello`);
   if (!response.ok) throw new Error(`The daemon answered HTTP ${response.status}`);
@@ -47,6 +26,27 @@ export async function hello(url: string, token: string): Promise<Hello> {
   // /hello is public; this verifies the token before the machine is saved.
   await request<{ sessions: SessionSummary[] }>({ id: url, url, token, name: data.name, os: data.os, version: data.version, cwd: data.cwd }, "/sessions");
   return data;
+}
+
+/**
+ * Check a daemon and build the machine to save: the one add path shared by the
+ * manual sheet, the QR scanner and pairing links. Refuses a machine already in `machines`.
+ */
+export async function pairMachine(url: string, token: string, machines: readonly Machine[]): Promise<Machine> {
+  const secret = token.trim();
+  if (secret === "") throw new Error("Enter the daemon token");
+  if (machines.some((machine) => machine.url === url)) throw new Error("This machine is already in the list");
+  const info = await hello(url, secret);
+  return {
+    id: url,
+    url,
+    token: secret,
+    name: info.name,
+    os: info.os,
+    version: info.version,
+    cwd: info.cwd,
+    lastSeen: Date.now(),
+  };
 }
 
 export async function listSessions(machine: Machine): Promise<SessionSummary[]> {

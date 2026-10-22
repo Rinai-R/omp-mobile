@@ -1,9 +1,11 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, AppState, BackHandler, Platform, useColorScheme, View } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Linking, Platform, useColorScheme, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { ChatScreen } from "./src/screens/ChatScreen";
-import { MachinesScreen } from "./src/screens/MachinesScreen";
+import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
+import { PairScanner } from "./src/screens/PairScanner";
+import { isPairingLink } from "./src/pairing";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
@@ -15,7 +17,8 @@ type Route =
   | { kind: "machines" }
   | { kind: "sessions"; machine: Machine }
   | { kind: "chat"; machine: Machine; session: SessionSummary }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  | { kind: "scan" };
 
 const EDGES = ["top", "left", "right"] as const;
 
@@ -35,6 +38,10 @@ export default function App(): ReactNode {
   const machinesRef = useRef<Machine[]>([]);
   /** The probe in flight per machine, so rounds do not pile up on a slow link. */
   const inFlight = useRef(new Map<string, Promise<void>>());
+  /** Open the Add machine sheet on the machines screen, maybe pre-filled from a pairing link. */
+  const [addRequest, setAddRequest] = useState<AddRequest | null>(null);
+  /** A pairing link that arrived before the stored machines were restored. */
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([loadMachines(), loadSettings()]).then(([stored, storedSettings]) => {
@@ -43,6 +50,34 @@ export default function App(): ReactNode {
       setSettings(storedSettings);
       setRestored(true);
     });
+  }, []);
+
+  // `omp-mobile://pair?...` links, whether they launched the app or arrived while it ran.
+  useEffect(() => {
+    const take = (url: string | null) => {
+      if (url !== null && isPairingLink(url)) setPendingLink(url);
+    };
+    void Linking.getInitialURL()
+      .then(take)
+      .catch(() => undefined);
+    const subscription = Linking.addEventListener("url", ({ url }) => take(url));
+    return () => subscription.remove();
+  }, []);
+
+  // Once restored, a link opens the Add machine sheet pre-filled; Connect is the one confirmation.
+  useEffect(() => {
+    if (!restored || pendingLink === null) return;
+    setPendingLink(null);
+    setAddRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, link: pendingLink }));
+    setRoute({ kind: "machines" });
+  }, [pendingLink, restored]);
+
+  const clearAddRequest = useCallback(() => setAddRequest(null), []);
+  const openScanner = useCallback(() => setRoute({ kind: "scan" }), []);
+  const closeScanner = useCallback(() => setRoute({ kind: "machines" }), []);
+  const scannerToManual = useCallback(() => {
+    setAddRequest({ nonce: Date.now(), link: null });
+    setRoute({ kind: "machines" });
   }, []);
 
   const back = useCallback(() => {
@@ -161,6 +196,10 @@ export default function App(): ReactNode {
         onOpen={(machine, session) => setRoute({ kind: "chat", machine, session })}
       />
     );
+  } else if (route.kind === "scan") {
+    content = (
+      <PairScanner machines={machines} onAdd={addMachine} onClose={closeScanner} onManual={scannerToManual} />
+    );
   } else if (route.kind === "settings") {
     content = (
       <SettingsScreen
@@ -176,6 +215,9 @@ export default function App(): ReactNode {
         machines={machines}
         probes={probes}
         onAdd={addMachine}
+        onScan={openScanner}
+        addRequest={addRequest}
+        onAddRequestHandled={clearAddRequest}
         onOpen={(machine) => setRoute({ kind: "sessions", machine })}
         onRemove={removeMachine}
         onSettings={() => setRoute({ kind: "settings" })}
@@ -190,10 +232,15 @@ export default function App(): ReactNode {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={scheme === "dark" ? "light" : "dark"} />
-      <SafeAreaView style={{ flex: 1, backgroundColor: palette(scheme).bg }} edges={EDGES}>
-        {content}
-      </SafeAreaView>
+      <StatusBar style={route.kind === "scan" || scheme === "dark" ? "light" : "dark"} />
+      {route.kind === "scan" ? (
+        // The camera runs edge to edge; the scanner pads its own bars by the safe area.
+        content
+      ) : (
+        <SafeAreaView style={{ flex: 1, backgroundColor: palette(scheme).bg }} edges={EDGES}>
+          {content}
+        </SafeAreaView>
+      )}
     </SafeAreaProvider>
   );
 }

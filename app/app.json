@@ -2,6 +2,7 @@
   "expo": {
     "name": "OMP",
     "slug": "omp-mobile",
+    "scheme": "omp-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -39,6 +40,13 @@
           "android": {
             "usesCleartextTraffic": true
           }
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "OMP uses the camera to scan the pairing QR code your computer shows.",
+          "recordAudioAndroid": false
         }
       ]
     ],
