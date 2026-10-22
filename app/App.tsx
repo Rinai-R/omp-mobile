@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { BackHandler, Platform, useColorScheme } from "react-native";
+import { ActivityIndicator, BackHandler, Platform, useColorScheme, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MachinesScreen } from "./src/screens/MachinesScreen";
@@ -78,7 +78,11 @@ export default function App(): ReactNode {
 
   let content: ReactNode;
   if (!restored) {
-    content = null;
+    content = (
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator color={palette(scheme).textSecondary} />
+      </View>
+    );
   } else if (route.kind === "chat") {
     content = (
       <ChatScreen

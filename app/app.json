@@ -15,7 +15,13 @@
       "permissions": [
         "android.permission.INTERNET"
       ],
-      "softwareKeyboardLayoutMode": "resize"
+      "softwareKeyboardLayoutMode": "resize",
+      "splash": {
+        "backgroundColor": "#FFFFFF",
+        "dark": {
+          "backgroundColor": "#151517"
+        }
+      }
     },
     "ios": {
       "bundleIdentifier": "com.rinai.ompmobile",
@@ -35,6 +41,12 @@
           }
         }
       ]
-    ]
+    ],
+    "splash": {
+      "backgroundColor": "#FFFFFF",
+      "dark": {
+        "backgroundColor": "#151517"
+      }
+    }
   }
 }

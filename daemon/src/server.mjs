@@ -250,6 +250,8 @@ class SessionEntry {
     this.title = cwd.split("/").filter(Boolean).at(-1) ?? "session";
     /** @type {Set<import("ws").WebSocket>} */
     this.clients = new Set();
+    /** @type {((entry: SessionEntry) => void) | undefined} */
+    this.onChange = undefined;
     this.closed = false;
   }
 
@@ -307,6 +309,12 @@ class SessionEntry {
       if (event.type === "message_end" && event.message) {
         this.messages.push(event.message);
         if (this.messages.length > 5_000) this.messages.splice(0, this.messages.length - 5_000);
+        // The first prompt names a session that was created untitled.
+        const title = titleOf(this.messages, this.state, this.cwd);
+        if (title !== this.title) {
+          this.title = title;
+          this.onChange?.(this);
+        }
       }
       if (event.type === "turn_end" || event.type === "agent_end") void this.refreshState();
       this.broadcast({ type: "event", event });
@@ -451,6 +459,7 @@ class Daemon {
     const entry = new SessionEntry(stored.cwd, rpc);
     await entry.hydrate();
     entry.id = id;
+    entry.onChange = (changed) => this.remember(changed);
     entry.bind();
     this.sessions.set(id, entry);
     this.remember(entry);
@@ -471,6 +480,7 @@ class Daemon {
       rpc.close();
       throw new Error("omp returned no session id");
     }
+    entry.onChange = (changed) => this.remember(changed);
     entry.bind();
     this.sessions.set(entry.id, entry);
     this.remember(entry);
