@@ -155,8 +155,10 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+        // Android 15+ draws edge to edge, so the window no longer resizes for
+        // the keyboard; pad on both platforms.
+        behavior="padding"
+        keyboardVerticalOffset={insets.top}
       >
         <Header
           title={session.title}

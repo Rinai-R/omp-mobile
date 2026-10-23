@@ -77,7 +77,7 @@ export function ApprovalSheet({
   const input = request.method === "input" || request.method === "editor";
   const options = request.options ?? [];
   return (
-    <KeyboardAvoidingView style={styles.wrap} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+    <KeyboardAvoidingView style={styles.wrap} behavior="padding">
       <Animated.View style={[styles.scrim, motion.backdrop]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={cancel} accessibilityLabel="Cancel" />
       </Animated.View>

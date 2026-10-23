@@ -450,7 +450,7 @@ export function Sheet({
   const motion = sheetTransforms(progress, height);
   return (
     <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.sheetRoot} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={styles.sheetRoot} behavior="padding">
         <Animated.View style={[styles.scrim, motion.backdrop]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
         </Animated.View>
