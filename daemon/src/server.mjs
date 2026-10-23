@@ -37,7 +37,8 @@ function parseArgs(argv) {
     registryFile: DEFAULT_REGISTRY_FILE,
     token: "",
     sessionDir: "",
-    autoApprove: true,
+    autoApprove: false,
+    approvalMode: "",
     tailscale: "tailscale",
     whois: true,
     qr: true,
@@ -85,8 +86,12 @@ function parseArgs(argv) {
       case "--no-whois":
         options.whois = false;
         break;
-      case "--no-auto-approve":
-        options.autoApprove = false;
+      case "--auto-approve":
+        options.autoApprove = true;
+        break;
+      case "--approval-mode":
+        options.approvalMode = value;
+        i += 1;
         break;
       case "--no-qr":
         options.qr = false;
@@ -118,7 +123,8 @@ Usage: node src/server.mjs [options]
   --token <token>        Fixed bearer token (otherwise generated and stored)
   --token-file <path>    Token file (default ~/.omp-mobile/token)
   --registry-file <path> Session registry (default ~/.omp-mobile/sessions.json)
-  --no-auto-approve      Do not pass --auto-approve to omp (approval requests may block)
+  --auto-approve         Pass --auto-approve to omp (no tool approvals reach the phone)
+  --approval-mode <m>    Pass --approval-mode to omp (always-ask, always-ask-cached, write, yolo)
   --tailscale <path>     tailscale CLI used for admission (default "tailscale")
   --no-whois             Skip the whois user check (the Host check and token still apply)
 
@@ -519,6 +525,7 @@ class Daemon {
       sessionDir: this.options.sessionDir || undefined,
       resume: stored.sessionFile,
       autoApprove: this.options.autoApprove,
+      extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
     });
     await rpc.start();
     const entry = new SessionEntry(stored.cwd, rpc);
@@ -537,6 +544,7 @@ class Daemon {
       ompBin: this.options.omp,
       sessionDir: this.options.sessionDir || undefined,
       autoApprove: this.options.autoApprove,
+      extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
     });
     await rpc.start();
     const entry = new SessionEntry(cwd, rpc);

@@ -35,7 +35,7 @@ export class RpcSession extends EventEmitter {
     this.extraArgs = options.extraArgs ?? [];
     this.sessionDir = options.sessionDir;
     this.resume = options.resume;
-    this.autoApprove = options.autoApprove !== false;
+    this.autoApprove = options.autoApprove === true;
     /** @type {import("node:child_process").ChildProcessWithoutNullStreams | undefined} */
     this.child = undefined;
     /** @type {Map<string, {resolve: (value: any) => void, reject: (error: Error) => void}>} */
@@ -53,7 +53,9 @@ export class RpcSession extends EventEmitter {
 
   /** Start the process and resolve once it printed `ready`. */
   async start() {
-    const args = ["--mode", "rpc", "--cwd", this.cwd, ...this.extraArgs];
+    // rpc-ui gives tools an interactive UI: OMP's approval prompt reaches the
+    // phone as an extension `select` request instead of failing closed.
+    const args = ["--mode", "rpc-ui", "--cwd", this.cwd, ...this.extraArgs];
     if (this.resume) args.push("--resume", this.resume);
     if (this.autoApprove) args.push("--auto-approve");
     if (this.sessionDir) args.push("--session-dir", this.sessionDir);
