@@ -37,6 +37,36 @@ A pairing URI can be pasted into the address field; it fills both.
 
 For local development use `--host 127.0.0.1` and `adb reverse tcp:7390 tcp:7390`.
 
+## Admission (Tailscale identity)
+
+On a non-loopback `--host` the daemon admits a request only when it reaches
+this node on purpose and comes from one of your own devices, the same rules as
+Kivotos. Every HTTP request (including the public `/hello`) and every
+WebSocket upgrade is checked **before** the bearer token, in this order:
+
+1. **Host** — the `Host` header must name this node: the bind address, one of
+   its Tailscale IPs, or its MagicDNS name (a port is allowed). Anything else
+   is answered `421` (DNS-rebinding guard).
+2. **User** — the source address (IPv4-mapped IPv6 normalized) must be a
+   tailnet device whose `tailscale whois` user is this node's user (from
+   `tailscale status`). Another user's device, a tagged device (tagged devices
+   have no user) or an address outside the tailnet is answered `403`. The
+   node's own Tailscale IPs are admitted as the same user. Whois answers are
+   cached per address for 60 s, failures for 5 s.
+
+Refusals are JSON `{"error": "<reason>"}` with the status; refused WebSocket
+upgrades get the HTTP status line and the socket is closed. The token is still
+required after admission. `/hello` reports the node's login name as `user`.
+
+| Flag | Effect |
+| --- | --- |
+| `--host 127.0.0.1` / `::1` | Admission is off (development, `adb reverse`); the startup log says so. |
+| `--tailscale <path>` | `tailscale` CLI to use (default `tailscale`; on macOS the app bundle binary `/Applications/Tailscale.app/Contents/MacOS/Tailscale` is tried when `tailscale` is not on `PATH`). |
+| `--no-whois` | Skip the user check (the Host check and token still apply); a warning is printed. |
+
+If the `tailscale` CLI cannot be read on a non-loopback host, the daemon
+refuses to start unless `--no-whois` is given.
+
 ## What v0.1 does
 
 - Machines: add/remove, name/OS/OMP version, per-machine session list.
@@ -65,7 +95,6 @@ session may block on a terminal prompt.
 - Sessions created outside this daemon; only sessions it created are listed.
 - Background notifications and an Android foreground service.
 - Federation across machines with a switcher and relay fallback.
-- Tailscale `whois` admission (the daemon uses a bearer token).
 - Caching of transcripts/assets for instant reopen.
 
 These are intentionally separate from the core; the app never needs a WebView
@@ -76,6 +105,8 @@ for any of them.
 - `daemon/src/rpc-session.mjs` — one `omp --mode rpc` process, JSONL, requests,
   extension UI responses.
 - `daemon/src/server.mjs` — HTTP/WS API, session manager, auth.
+- `daemon/src/admission.mjs` — `tailscale status`/`whois` wrapper and the
+  Host + same-user listener admission.
 - `app/src/api.ts` — daemon REST + session socket.
 - `app/src/messages.ts` — OMP event → native transcript reducer.
 - `app/src/screens/` — Machines, Sessions, Chat, Settings.

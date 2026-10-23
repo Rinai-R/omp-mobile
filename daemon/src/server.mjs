@@ -7,7 +7,7 @@
  * for development) and requires a per-computer bearer token, so nothing needs
  * to be exposed to the public internet.
  */
-import { createServer } from "node:http";
+import { STATUS_CODES, createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
@@ -15,6 +15,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { RpcSession } from "./rpc-session.mjs";
+import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 
 const VERSION = "0.1.0";
 const PROTOCOL = 1;
@@ -36,6 +37,8 @@ function parseArgs(argv) {
     token: "",
     sessionDir: "",
     autoApprove: true,
+    tailscale: "tailscale",
+    whois: true,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -73,6 +76,13 @@ function parseArgs(argv) {
         options.sessionDir = resolve(value);
         i += 1;
         break;
+      case "--tailscale":
+        options.tailscale = value;
+        i += 1;
+        break;
+      case "--no-whois":
+        options.whois = false;
+        break;
       case "--no-auto-approve":
         options.autoApprove = false;
         break;
@@ -104,6 +114,12 @@ Usage: node src/server.mjs [options]
   --token-file <path>    Token file (default ~/.omp-mobile/token)
   --registry-file <path> Session registry (default ~/.omp-mobile/sessions.json)
   --no-auto-approve      Do not pass --auto-approve to omp (approval requests may block)
+  --tailscale <path>     tailscale CLI used for admission (default "tailscale")
+  --no-whois             Skip the whois user check (the Host check and token still apply)
+
+Admission: on a non-loopback --host every request and WebSocket upgrade must name
+this node in Host (421 otherwise) and come from a tailnet device of this node's
+user (403 otherwise), before the token is checked. Loopback hosts skip admission.
 `);
 }
 
@@ -340,20 +356,62 @@ class SessionEntry {
 }
 
 class Daemon {
-  constructor(options, token) {
+  /**
+   * @param {object} options
+   * @param {string} token
+   * @param {{admission?: {check(req: import("node:http").IncomingMessage): Promise<{ok: boolean, status?: number, error?: string}>}, user?: string}} [identity]
+   *   Listener admission (absent: none) and this node's login name for /hello.
+   */
+  constructor(options, token, identity = {}) {
     this.options = options;
     this.token = token;
+    this.admission = identity.admission;
+    this.user = identity.user ?? "";
     /** @type {Map<string, SessionEntry>} */
     this.sessions = new Map();
     /** @type {Map<string, object>} */
     this.registry = loadRegistry(options.registryFile);
-    this.server = createServer((req, res) => void this.handleHttp(req, res));
+    this.server = createServer((req, res) => void this.admitHttp(req, res));
     this.wsServer = new WebSocketServer({ noServer: true });
-    this.server.on("upgrade", (req, socket, head) => this.handleUpgrade(req, socket, head));
+    this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
   }
 
   baseUrl() {
     return `http://${this.options.host}:${this.options.port}`;
+  }
+
+  async admitHttp(req, res) {
+    if (this.admission !== undefined) {
+      let verdict;
+      try {
+        verdict = await this.admission.check(req);
+      } catch (error) {
+        verdict = { ok: false, status: 403, error: `admission failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+      if (!verdict.ok) {
+        sendJson(res, verdict.status, { error: verdict.error });
+        return;
+      }
+    }
+    await this.handleHttp(req, res);
+  }
+
+  async admitUpgrade(req, socket, head) {
+    socket.on("error", () => socket.destroy());
+    if (this.admission !== undefined) {
+      let verdict;
+      try {
+        verdict = await this.admission.check(req);
+      } catch (error) {
+        verdict = { ok: false, status: 403, error: String(error) };
+      }
+      if (!verdict.ok) {
+        socket.write(`HTTP/1.1 ${verdict.status} ${STATUS_CODES[verdict.status] ?? "Rejected"}\r\n\r\n`);
+        socket.destroy();
+        return;
+      }
+    }
+    this.handleUpgrade(req, socket, head);
   }
 
   async handleHttp(req, res) {
@@ -374,6 +432,7 @@ class Daemon {
         protocol: PROTOCOL,
         sessionCount: this.sessions.size,
         cwd: this.options.cwd,
+        user: this.user || null,
       });
       return;
     }
@@ -572,16 +631,55 @@ class Daemon {
   }
 }
 
+function startupError(message) {
+  return Object.assign(new Error(message), { startup: true });
+}
+
+/**
+ * Build the listener admission from `tailscale status`.
+ * Loopback skips admission; a non-loopback host without tailscale refuses to
+ * start unless --no-whois.
+ */
+async function resolveIdentity(options) {
+  const tailscale = new Tailscale({ binary: options.tailscale });
+  const loopback = isLoopbackHost(options.host);
+  let self;
+  let failure;
+  try {
+    self = await tailscale.status();
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+  }
+  const user = self?.loginName ?? "";
+  if (loopback) {
+    return { admission: undefined, user, notes: [`  admission  off (loopback host ${options.host}; token only)`] };
+  }
+  if (self === undefined && options.whois) {
+    throw startupError(
+      `cannot read tailscale status (${failure}); admission needs the tailscale CLI on a non-loopback host. ` +
+        `Pass --tailscale <path>, bind --host 127.0.0.1, or use --no-whois to skip the user check.`,
+    );
+  }
+  const effective = self ?? { ips: [], dnsName: "", userId: 0, loginName: "" };
+  const admission = new Admission({ self: effective, bindHost: options.host, tailscale, whois: options.whois });
+  const notes = [`  admission  host ∈ {${[...admission.hosts].join(", ")}}`];
+  if (options.whois) notes.push(`  whois      same user only (${user || `user ${effective.userId}`})`);
+  else notes.push("  WARNING    --no-whois: any device that can reach this address and holds the token is admitted");
+  return { admission, user, notes };
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const token = loadToken(options);
-  const daemon = new Daemon(options, token);
+  const identity = await resolveIdentity(options);
+  const daemon = new Daemon(options, token, identity);
   await daemon.listen();
   const url = daemon.baseUrl();
   const pair = `omp-mobile://pair?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
   console.log(`omp-mobile daemon ${VERSION}`);
   console.log(`  listening  ${url}`);
   console.log(`  cwd        ${options.cwd}`);
+  for (const line of identity.notes) (line.includes("WARNING") ? console.warn : console.log)(line);
   console.log(`  token      ${token}`);
   console.log(`  pair       ${pair}`);
   const shutdown = async () => {
@@ -595,9 +693,9 @@ async function main() {
 const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   main().catch((error) => {
-    console.error(error);
+    console.error(error?.startup === true ? `omp-mobile daemon: ${error.message}` : error);
     process.exit(1);
   });
 }
 
-export { Daemon, SessionEntry, VERSION, PROTOCOL, parseArgs };
+export { Daemon, SessionEntry, VERSION, PROTOCOL, parseArgs, resolveIdentity };
