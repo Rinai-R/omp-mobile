@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EASE_OUT, HEADER_HEIGHT, HIT, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Dot } from "../probe";
 import { GradientTile, LiveDot, Spinner, Wordmark } from "./brand";
-import { BackGlyph, ChevronGlyph, CloseGlyph } from "./icons";
+import { BackGlyph, ChevronDownGlyph, ChevronGlyph, CloseGlyph } from "./icons";
 
 export function Button({
   label,
@@ -207,18 +207,41 @@ export function Header({
   title,
   subtitle,
   onBack,
+  onTitlePress,
+  titleLabel,
   right,
   large = false,
 }: {
   title: string;
   subtitle?: ReactNode;
   onBack?: () => void;
+  /** Makes the title a button with a down chevron (the machine switcher). */
+  onTitlePress?: () => void;
+  titleLabel?: string;
   right?: ReactNode;
   /** The wordmark and the title for a root screen. */
   large?: boolean;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
+  const titleText = large ? (
+    <Wordmark app={title} />
+  ) : (
+    <View style={styles.headerTitleRow}>
+      <Text style={styles.headerTitleText} numberOfLines={1} accessibilityRole="header">
+        {title}
+      </Text>
+      {onTitlePress !== undefined ? <ChevronDownGlyph size={14} color={colors.fgMuted} /> : null}
+    </View>
+  );
+  const subtitleText =
+    subtitle === undefined ? null : typeof subtitle === "string" ? (
+      <Text style={styles.headerSubtitle} numberOfLines={1}>
+        {subtitle}
+      </Text>
+    ) : (
+      subtitle
+    );
   return (
     <View style={onBack === undefined ? styles.headerRoot : styles.header}>
       {onBack !== undefined ? (
@@ -226,22 +249,23 @@ export function Header({
           <BackGlyph size={20} color={colors.fgMuted} />
         </IconButton>
       ) : null}
-      <View style={styles.headerText}>
-        {large ? (
-          <Wordmark app={title} />
-        ) : (
-          <Text style={styles.headerTitle} numberOfLines={1} accessibilityRole="header">
-            {title}
-          </Text>
-        )}
-        {subtitle === undefined ? null : typeof subtitle === "string" ? (
-          <Text style={styles.headerSubtitle} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        ) : (
-          subtitle
-        )}
-      </View>
+      {onTitlePress !== undefined ? (
+        <Pressable
+          style={({ pressed }) => [styles.headerText, pressed && styles.headerTextPressed]}
+          onPress={onTitlePress}
+          accessibilityRole="button"
+          accessibilityLabel={titleLabel ?? title}
+          hitSlop={6}
+        >
+          {titleText}
+          {subtitleText}
+        </Pressable>
+      ) : (
+        <View style={styles.headerText}>
+          {titleText}
+          {subtitleText}
+        </View>
+      )}
       {right !== undefined ? <View style={styles.headerRight}>{right}</View> : null}
     </View>
   );
@@ -597,7 +621,9 @@ function createStyles(c: Palette) {
     header,
     headerRoot: { ...header, paddingLeft: 16 },
     headerText: { flex: 1, minWidth: 0, paddingHorizontal: 4, justifyContent: "center", gap: 1 },
-    headerTitle: { fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15, color: c.fg },
+    headerTextPressed: { opacity: 0.6 },
+    headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 },
+    headerTitleText: { flexShrink: 1, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15, color: c.fg },
     headerSubtitle: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     headerRight: { flexDirection: "row", alignItems: "center" },
 

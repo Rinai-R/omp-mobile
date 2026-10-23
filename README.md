@@ -93,6 +93,14 @@ refuses to start unless `--no-whois` is given.
   `~/.omp/run/session-owners`, read with `lsof`) is marked "in a terminal" and
   refused with `409` until that process exits; a second omp on the same file
   would fork it instead.
+- Offline reopen: the phone keeps each session's transcript (last 400 items,
+  tool text cut to 4 000 characters, 40 sessions) and each machine's session
+  list under the app's documents directory. A reopen shows them at once, also
+  when the computer is unreachable, and the daemon's snapshot replaces them
+  when it arrives. Removing a machine erases what was kept for it.
+- Machine switcher: with more than one machine, tap the Sessions title to
+  jump to another machine's sessions; the sheet probes every machine when it
+  opens.
 
 OMP runs in `--mode rpc-ui`, so its own tool approvals (the Approve / Deny
 prompt your OMP approval policy asks for) reach the phone as a native sheet;
@@ -126,8 +134,8 @@ is a no-op there.
 ## Not yet aligned with Kivotos
 
 - Tailscale peer discovery (pairing is by QR code, link, or address + token).
-- Federation across machines with a switcher and relay fallback.
-- Caching of transcripts/assets for instant reopen.
+- A relay for phones that cannot reach the computer over Tailscale (the
+  daemon is reached only on its tailnet address).
 
 These are intentionally separate from the core; the app never needs a WebView
 for any of them.
