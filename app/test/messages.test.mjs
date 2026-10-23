@@ -49,9 +49,33 @@ test("a tool card summarizes the result text, not its JSON", () => {
   assert.equal(toolSummary(items.find((item) => item.kind === "tool")), "(empty directory)");
 });
 
-test("a snapshot drops tool-only assistant messages", () => {
+test("a reopened chat renders the same cards as the live turn, with each result on its call", () => {
+  const toolCall = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "." } }] };
+  const toolResult = {
+    role: "toolResult",
+    toolCallId: "c1",
+    toolName: "read",
+    isError: false,
+    content: [{ type: "text", text: "(empty directory)" }],
+  };
+  const items = snapshotItems([user, toolCall, toolResult, answer]);
   assert.deepEqual(
-    snapshotItems([user, toolTurn, answer]).map((item) => item.kind === "message" && item.role),
-    ["user", "assistant"],
+    items.map((item) => (item.kind === "message" ? `${item.role}:${item.text}` : `${item.kind}:${item.name}`)),
+    ["user:List the files", "tool:read", "assistant:Directory is empty. Done."],
+  );
+  const tool = items[1];
+  assert.deepEqual(tool.args, { path: "." });
+  assert.equal(tool.status, "done");
+  assert.equal(toolSummary(tool), "(empty directory)");
+});
+
+test("a failed result marks its call failed; a result whose call is missing keeps its own card", () => {
+  const toolCall = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "false" } }] };
+  const failed = { role: "toolResult", toolCallId: "c1", toolName: "bash", isError: true, content: [{ type: "text", text: "exit 1" }] };
+  const orphan = { role: "toolResult", toolCallId: "gone", toolName: "grep", content: [{ type: "text", text: "3 matches" }] };
+  const items = snapshotItems([toolCall, failed, orphan]);
+  assert.deepEqual(
+    items.map((item) => `${item.name}:${item.status}`),
+    ["bash:error", "grep:done"],
   );
 });

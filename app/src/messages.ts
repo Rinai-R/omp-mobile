@@ -35,23 +35,9 @@ export function roleOf(message: AgentMessage): MessageItem["role"] | undefined {
   return undefined;
 }
 
-export function messageToItem(message: AgentMessage, index: number): ChatItem | undefined {
+function messageToItem(message: AgentMessage, index: number): ChatItem | undefined {
   const role = roleOf(message);
-  if (role === undefined) {
-    if (message.role === "toolResult" || message.role === "tool") {
-      const text = textOf(message.content).trim();
-      if (text === "") return undefined;
-      return {
-        kind: "tool",
-        id: message.id ?? nextId("tool"),
-        name: "result",
-        args: null,
-        result: text,
-        status: "done",
-      };
-    }
-    return undefined;
-  }
+  if (role === undefined) return undefined;
   const text = textOf(message.content);
   if (text.trim() === "" && (role !== "assistant" || thinkingOf(message.content) === undefined)) return undefined;
   return {
@@ -64,11 +50,62 @@ export function messageToItem(message: AgentMessage, index: number): ChatItem | 
   };
 }
 
+/** The `toolCall` parts of an assistant message, as the cards live `tool_execution_start` events produce. */
+function toolCallsOf(message: AgentMessage): ToolItem[] {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) return [];
+  const tools: ToolItem[] = [];
+  for (const part of message.content) {
+    if (part === null || typeof part !== "object") continue;
+    const call = part as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
+    if (call.type !== "toolCall" || typeof call.id !== "string") continue;
+    tools.push({
+      kind: "tool",
+      id: call.id,
+      name: typeof call.name === "string" ? call.name : "tool",
+      args: call.arguments,
+      status: "running",
+    });
+  }
+  return tools;
+}
+
+/**
+ * The transcript a session's stored messages render as: the same items the
+ * live events produce, so reopening a chat shows each tool call under its own
+ * name and arguments with its result attached, not a separate result card.
+ */
 export function snapshotItems(messages: AgentMessage[]): ChatItem[] {
   const items: ChatItem[] = [];
+  const tools = new Map<string, ToolItem>();
   messages.forEach((message, index) => {
+    if (message.role === "toolResult" || message.role === "tool") {
+      const id = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+      const tool = id === undefined ? undefined : tools.get(id);
+      if (tool !== undefined) {
+        tool.result = { content: message.content };
+        tool.isError = message.isError === true;
+        tool.status = tool.isError ? "error" : "done";
+        return;
+      }
+      const text = textOf(message.content).trim();
+      if (text === "") return;
+      items.push({
+        kind: "tool",
+        id: id ?? message.id ?? nextId("tool"),
+        name: typeof message.toolName === "string" ? message.toolName : "result",
+        args: null,
+        result: text,
+        isError: message.isError === true,
+        status: message.isError === true ? "error" : "done",
+      });
+      return;
+    }
     const item = messageToItem(message, index);
     if (item !== undefined) items.push(item);
+    for (const tool of toolCallsOf(message)) {
+      tools.set(tool.id, tool);
+      items.push(tool);
+    }
   });
   return items;
 }
