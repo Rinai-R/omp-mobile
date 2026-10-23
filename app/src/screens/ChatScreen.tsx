@@ -73,6 +73,8 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
             setState(message.state);
             break;
           case "approval":
+            // The composer's keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
+            Keyboard.dismiss();
             setApproval(message.request);
             break;
           case "notice":
