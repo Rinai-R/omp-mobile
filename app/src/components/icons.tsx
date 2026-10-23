@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Svg, { Circle, Path, Rect } from "react-native-svg";
 
-/** Line icons in the Kivotos style: 1.5 px strokes, round caps, a single color. */
+/** OMP line icons: thin 1.5 px strokes, round caps, one color each. */
 interface GlyphProps {
   size?: number;
   color: string;

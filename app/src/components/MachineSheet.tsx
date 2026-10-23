@@ -1,7 +1,7 @@
 import { useCallback, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { dotOf, linkText, type Probe } from "../probe";
-import { radius, useStyles, type Palette } from "../theme";
+import { MONO, radius, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 import { Button, Sheet, StateDot } from "./ui";
 
@@ -30,9 +30,9 @@ function InfoRow({ label, value, last = false }: { label: string; value: string;
 }
 
 /**
- * A machine's details and actions, Kivotos style: its one link (Tailscale)
- * and its state, where it is, the daemon's version and sessions, then Open and
- * Remove from this phone.
+ * A machine's details and actions: its one link (Tailscale) and its state,
+ * where it is, the daemon's version and sessions, then Open and Remove from
+ * this phone. Values are mono, labels quiet.
  */
 export function MachineSheet({ machine, probe, onOpen, onRemove, onClose }: Props): ReactNode {
   const styles = useStyles(createStyles);
@@ -89,25 +89,26 @@ function createStyles(c: Palette) {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    minHeight: 48,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    minHeight: 44,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
   } as const;
-  const linkState = { flex: 1, fontSize: 14, lineHeight: 20 } as const;
+  const mono = { fontFamily: MONO, fontSize: 12, lineHeight: 18 } as const;
   return {
     group: {
       borderRadius: radius.lg,
       overflow: "hidden",
-      backgroundColor: c.surface,
+      backgroundColor: c.raised,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
+      borderTopColor: c.edgeTop,
     },
     row,
     rowDivided: { ...row, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border },
-    via: { width: 72, fontSize: 14, lineHeight: 20, color: c.textSecondary },
-    linkState: { ...linkState, color: c.textSecondary },
-    linkUsed: { ...linkState, fontWeight: "600", color: c.text },
-    label: { flex: 1, fontSize: 14, lineHeight: 20, color: c.textSecondary },
-    value: { flexShrink: 1, fontSize: 14, lineHeight: 20, color: c.text },
+    via: { width: 76, fontSize: 13, lineHeight: 18, color: c.fgMuted },
+    linkState: { ...mono, flex: 1, color: c.fgMuted },
+    linkUsed: { ...mono, flex: 1, color: c.ok },
+    label: { flex: 1, fontSize: 13, lineHeight: 18, color: c.fgMuted },
+    value: { ...mono, flexShrink: 1, color: c.fg },
   } as const;
 }

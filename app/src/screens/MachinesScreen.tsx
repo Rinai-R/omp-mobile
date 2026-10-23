@@ -17,7 +17,7 @@ import {
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
 import { summaryOf, type Probe } from "../probe";
-import { useColors, useStyles, type Palette } from "../theme";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 
 /** A request to open the Add machine sheet, optionally pre-filled from a pairing link. */
@@ -152,17 +152,16 @@ export function MachinesScreen({
     <View style={styles.root}>
       <Header
         large
-        title="Machines"
-        subtitle="Every OMP you connect, in your pocket"
+        title="machines"
         right={
           <>
             {machines.length > 0 ? (
               <IconButton onPress={onScan} label="Add machine">
-                <PlusGlyph color={colors.text} />
+                <PlusGlyph size={20} color={colors.fgMuted} />
               </IconButton>
             ) : null}
             <IconButton onPress={onSettings} label="Settings">
-              <SettingsGlyph color={colors.text} />
+              <SettingsGlyph size={20} color={colors.fgMuted} />
             </IconButton>
           </>
         }
@@ -171,24 +170,24 @@ export function MachinesScreen({
       <ScrollView
         contentContainerStyle={machines.length === 0 ? styles.emptyContent : styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.textSecondary} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.fgMuted} colors={[colors.accent]} progressBackgroundColor={colors.overlay} />
         }
       >
         {machines.length === 0 ? (
           <EmptyState
-            icon={<ComputerGlyph size={28} color={colors.textSecondary} />}
+            icon={<ComputerGlyph size={26} color={colors.fg} />}
             title="Connect your first computer"
-            body="Start the omp-mobile daemon on the computer, then scan the QR code it prints."
+            body="Start the omp-mobile daemon on the computer, then scan the QR code it prints. Every OMP you connect, in your pocket."
             action={
               <View style={styles.emptyActions}>
-                <Button label="Scan to pair" onPress={onScan} icon={<QrGlyph size={18} color={colors.onPrimary} />} />
+                <Button label="Scan to pair" onPress={onScan} icon={<QrGlyph size={18} color={colors.accentFg} />} />
                 <Button label="Enter address" kind="plain" onPress={openAdd} />
               </View>
             }
           />
         ) : (
           <>
-            <SectionHeader title="Computers" />
+            <SectionHeader title="Computers" meta={onlineMeta(machines, probes)} />
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
@@ -206,7 +205,7 @@ export function MachinesScreen({
                         </Text>
                       </View>
                     }
-                    leading={<ComputerGlyph color={colors.textSecondary} />}
+                    leading={<ComputerGlyph size={18} color={summary.dot === "down" ? colors.fgFaint : colors.fgMuted} />}
                     last={index === machines.length - 1}
                     onPress={() => onOpen(machine)}
                     onLongPress={() => setSheet(machine)}
@@ -254,16 +253,23 @@ export function MachinesScreen({
   );
 }
 
+/** "2/3 online" once any probe has answered; nothing before. */
+function onlineMeta(machines: Machine[], probes: ReadonlyMap<string, Probe>): string | undefined {
+  if (probes.size === 0) return undefined;
+  const online = machines.filter((machine) => probes.get(machine.id)?.state === "online").length;
+  return `${online}/${machines.length} online`;
+}
+
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
     emptyContent: { flexGrow: 1 },
     emptyActions: { gap: 10 },
-    detail: { flexShrink: 1, fontSize: 13, lineHeight: 18, color: c.textSecondary },
-    state: { flexDirection: "row", alignItems: "center", gap: 4 },
-    footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
-    hint: { fontSize: 13, lineHeight: 18, color: c.textSecondary, marginHorizontal: 4 },
-    error: { fontSize: 13, lineHeight: 18, color: c.danger, marginHorizontal: 4 },
+    detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
+    state: { flexDirection: "row", alignItems: "center", gap: 5 },
+    footnote: { fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
+    hint: { fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
+    error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }

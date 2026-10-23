@@ -29,7 +29,7 @@ export function SettingsScreen({ onBack, version }: Props): ReactNode {
         <SectionHeader title="About" />
         <Group>
           <Row title="OMP mobile" detail="Native control for OMP sessions over Tailscale." />
-          <Row title="Version" detail={version} last />
+          <Row title="Version" detail={version} mono last />
         </Group>
       </ScrollView>
     </View>
@@ -39,6 +39,6 @@ export function SettingsScreen({ onBack, version }: Props): ReactNode {
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
   } as const;
 }
