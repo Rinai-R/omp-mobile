@@ -35,6 +35,36 @@ const IGNORED_UI = new Set(["setStatus", "setWidget", "setTitle", "set_editor_te
  * @property {boolean} [autoApprove]
  */
 
+/**
+ * One entry of OMP's model catalog, cut to what a phone lists: provider, name,
+ * context window and input kinds. The full object carries endpoints, cost and
+ * compatibility fields the app never shows.
+ * @param {Record<string, unknown>} model
+ */
+export function compactModel(model) {
+  const thinking = model.thinking;
+  const cost = model.cost;
+  return {
+    provider: typeof model.provider === "string" ? model.provider : "",
+    id: typeof model.id === "string" ? model.id : "",
+    name: typeof model.name === "string" ? model.name : typeof model.id === "string" ? model.id : "",
+    reasoning: model.reasoning === true,
+    input: Array.isArray(model.input) ? model.input.filter((kind) => typeof kind === "string") : [],
+    contextWindow: typeof model.contextWindow === "number" ? model.contextWindow : undefined,
+    cost:
+      cost !== null && typeof cost === "object"
+        ? {
+            input: typeof cost.input === "number" ? cost.input : undefined,
+            output: typeof cost.output === "number" ? cost.output : undefined,
+          }
+        : undefined,
+    efforts:
+      thinking !== null && typeof thinking === "object" && Array.isArray(thinking.efforts)
+        ? thinking.efforts.filter((level) => typeof level === "string")
+        : undefined,
+  };
+}
+
 export class RpcSession extends EventEmitter {
   /** @param {RpcSessionOptions} options */
   constructor(options) {
@@ -226,6 +256,41 @@ export class RpcSession extends EventEmitter {
   async getMessages() {
     const response = await this.request("get_messages");
     return response.data ?? { messages: [] };
+  }
+
+  /**
+   * The models this session can switch to, compacted for a phone list.
+   * OMP waits out background discovery first, so this can take a few seconds.
+   * @returns {Promise<ReturnType<typeof compactModel>[]>}
+   */
+  async availableModels() {
+    const response = await this.request("get_available_models");
+    const models = response.data?.models;
+    return Array.isArray(models) ? models.map(compactModel) : [];
+  }
+
+  /**
+   * Switch this session to another model. Returns the state afterwards: the
+   * model's thinking efforts decide which levels the phone may offer.
+   * @param {string} provider
+   * @param {string} modelId
+   */
+  async setModel(provider, modelId) {
+    await this.request("set_model", { provider, modelId });
+    return this.getState();
+  }
+
+  /** @returns {Promise<{levels: string[]}>} */
+  async availableThinkingLevels() {
+    const response = await this.request("get_available_thinking_levels");
+    const levels = response.data?.levels;
+    return { levels: Array.isArray(levels) ? levels.filter((level) => typeof level === "string") : [] };
+  }
+
+  /** @param {string} level */
+  async setThinkingLevel(level) {
+    await this.request("set_thinking_level", { level });
+    return this.getState();
   }
 
   /** @param {string} text */

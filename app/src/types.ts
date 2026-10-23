@@ -40,6 +40,27 @@ export interface SessionState {
   tokensPerSecond?: number | null;
   messageCount?: number;
   todoPhases?: unknown[];
+  /** Queued user input while a turn runs, as OMP's queue chips. */
+  queuedMessages?: { steering?: string[]; followUp?: string[] };
+  goal?: unknown;
+}
+
+/** One entry of OMP's model catalog, as the daemon projects it. */
+export interface ModelOption {
+  provider: string;
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: string[];
+  contextWindow?: number;
+  cost?: { input?: number; output?: number };
+  efforts?: string[];
+}
+
+/** An image OMP attached to a message or tool result: base64, or `blob:sha256:<hex>` in the computer's store. */
+export interface ImagePart {
+  mimeType?: string;
+  data: string;
 }
 
 export interface AgentMessage {
@@ -54,11 +75,15 @@ export interface ToolItem {
   kind: "tool";
   id: string;
   name: string;
+  /** OMP's one-line statement of what the call is for ("Reading hello.txt"). */
+  intent?: string;
   args: unknown;
   partial?: unknown;
   result?: unknown;
   isError?: boolean;
   status: "running" | "done" | "error";
+  /** Images a result carried, e.g. a screenshot or a picture the read tool opened. */
+  images?: ImagePart[];
 }
 
 export interface MessageItem {
@@ -67,6 +92,8 @@ export interface MessageItem {
   role: "user" | "assistant" | "system";
   text: string;
   thinking?: string;
+  /** Images the user attached, in content order. */
+  images?: ImagePart[];
   streaming?: boolean;
   /** The message OMP is still emitting: updates and the final message land on it. */
   open?: boolean;
@@ -118,6 +145,8 @@ export type ServerMessage =
   | Snapshot
   | ServerEvent
   | { type: "state"; state: SessionState }
+  | { type: "models"; models: ModelOption[] }
+  | { type: "thinking_levels"; levels: string[]; current?: string | null }
   | { type: "approval"; request: ApprovalRequest }
   /** A dialog was answered (by any client) or closed by OMP itself. */
   | { type: "approval_resolved"; id: string; reason: "answered" | "cancelled" | "closed" }

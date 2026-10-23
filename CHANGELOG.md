@@ -4,6 +4,28 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.2.0
+
+Model switching and a fuller transcript.
+
+- Tap the model chip above the composer to pick any model in OMP's catalog, grouped by provider and searchable, and set the session's thinking level. The chips follow the session when either changes.
+- The transcript shows images the user sent and images tools produce (screenshots, pictures the read tool opened). Inline images render directly; images OMP keeps in its blob store are served by the daemon at `GET /blobs/<sha256>`.
+- Tool cards lead with OMP's intent line; `edit` calls open onto a line diff, and result images show without expanding.
+- OMP's todo list appears above the composer, with the current task when collapsed; the composer also shows context usage and the number of queued messages.
+- Compaction and automatic retries are reported in the transcript; Markdown tables render.
+- The daemon answers `models`, `set_model`, `thinking_levels` and `set_thinking_level` on the session socket, and refreshes the state after model, thinking-level, todo and queue events instead of waiting for the turn to end.
+
+### 中文
+
+切换模型，以及更完整的对话记录。
+
+- 点输入框上方的模型标签，可以从 OMP 的模型目录里选择模型（按 provider 分组、可搜索），并设置会话的思考等级。两者在会话里变化时，标签会跟着更新。
+- 对话记录会显示用户发送的图片和工具产生的图片（截图、read 打开过的图片）。内联图片直接渲染；OMP 存在 blob 库里的图片由 daemon 的 `GET /blobs/<sha256>` 提供。
+- 工具卡片优先显示 OMP 的意图说明；`edit` 调用展开后是逐行 diff；结果里的图片不用展开就能看到。
+- 输入框上方会显示 OMP 的待办列表，收起时显示当前任务；输入框旁还会显示上下文用量和排队消息数。
+- 上下文压缩和自动重试会在对话里说明；支持 Markdown 表格。
+- daemon 在会话 socket 上支持 `models`、`set_model`、`thinking_levels`、`set_thinking_level`，并在模型、思考等级、待办和队列变化后刷新状态，不再等一轮结束。
+
 ## v0.1.1
 
 - `omp-mobile` installs as an OMP plugin (`omp plugin install omp-mobile`). In OMP, `/mobile` starts the daemon in the background on the computer's Tailscale address and shows the pairing code above the composer until the phone connects. The daemon runs on the Bun inside OMP, so no Node.js is needed, and it keeps running after the terminal closes or OMP exits. `/mobile status` shows it, `/mobile stop` ends it.

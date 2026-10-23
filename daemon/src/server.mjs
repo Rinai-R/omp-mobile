@@ -30,6 +30,20 @@ const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
 /** Terminal sessions listed next to the daemon's own, newest first. */
 const OMP_SESSION_LIMIT = 50;
+/**
+ * Session events after which `get_state` differs from what the phone holds:
+ * the model or thinking level changed, or the todo/queue/goal panels moved.
+ */
+const STATE_EVENTS = new Set([
+  "model_changed",
+  "thinking_level_changed",
+  "queue_update",
+  "todo_reminder",
+  "todo_auto_clear",
+  "goal_updated",
+]);
+/** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
+const BLOB_NAME = /^[0-9a-f]{64}$/;
 
 /** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean}} SessionSummary */
 
@@ -225,6 +239,39 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
+/** What a stored blob is, from its first bytes: OMP keeps the extension off the hash name. */
+export function blobType(bytes) {
+  if (bytes.length >= 4 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 4 && bytes.toString("ascii", 0, 4) === "GIF8") return "image/gif";
+  return "application/octet-stream";
+}
+
+/** A stored image: `GET /blobs/<sha256>[.ext]`, authenticated like every other route. */
+function sendBlob(res, ompHome, name) {
+  if (!BLOB_NAME.test(name)) {
+    sendJson(res, 400, { error: "bad blob name" });
+    return;
+  }
+  const path = join(ompHome, "agent", "blobs", name);
+  if (!existsSync(path) || !statSync(path).isFile()) {
+    sendJson(res, 404, { error: "no such blob" });
+    return;
+  }
+  const bytes = readFileSync(path);
+  res.writeHead(200, {
+    "content-type": blobType(bytes),
+    "content-length": bytes.length,
+    "cache-control": "private, max-age=31536000, immutable",
+  });
+  res.end(bytes);
+}
+
 function readBody(req) {
   return new Promise((resolveBody, reject) => {
     let size = 0;
@@ -359,6 +406,7 @@ class SessionEntry {
           this.onChange?.(this);
         }
       }
+      if (STATE_EVENTS.has(event.type)) void this.refreshState();
       if (event.type === "turn_end" || event.type === "agent_end") void this.refreshState();
       this.broadcast({ type: "event", event });
     });
@@ -488,6 +536,11 @@ class Daemon {
       return;
     }
     this.noteClient(req);
+    const blob = /^\/blobs\/([0-9a-f]{64})(?:\.[a-z0-9]+)?$/.exec(url.pathname);
+    if (blob !== null && req.method === "GET") {
+      sendBlob(res, this.options.ompHome, blob[1]);
+      return;
+    }
     if (url.pathname === "/status" && req.method === "GET") {
       sendJson(res, 200, {
         pid: process.pid,
@@ -730,6 +783,39 @@ class Daemon {
         case "refresh":
           await entry.refreshState();
           return;
+        case "models": {
+          const models = await entry.rpc.availableModels();
+          ws.send(JSON.stringify({ type: "models", models }));
+          return;
+        }
+        case "set_model": {
+          if (typeof message.provider !== "string" || typeof message.modelId !== "string") {
+            throw new Error("set_model needs provider and modelId");
+          }
+          const state = await entry.rpc.setModel(message.provider, message.modelId);
+          entry.state = state;
+          entry.updatedAt = Date.now();
+          entry.onChange?.(entry);
+          entry.broadcast({ type: "state", state });
+          ws.send(JSON.stringify({ type: "accepted", command: "set_model" }));
+          return;
+        }
+        case "thinking_levels": {
+          const { levels } = await entry.rpc.availableThinkingLevels();
+          ws.send(
+            JSON.stringify({ type: "thinking_levels", levels, current: entry.state?.thinkingLevel ?? null }),
+          );
+          return;
+        }
+        case "set_thinking_level": {
+          if (typeof message.level !== "string" || message.level === "") throw new Error("set_thinking_level needs a level");
+          const state = await entry.rpc.setThinkingLevel(message.level);
+          entry.state = state;
+          entry.updatedAt = Date.now();
+          entry.broadcast({ type: "state", state });
+          ws.send(JSON.stringify({ type: "accepted", command: "set_thinking_level" }));
+          return;
+        }
         default:
           throw new Error(`unknown command ${String(message.type)}`);
       }

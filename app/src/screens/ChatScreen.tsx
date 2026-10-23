@@ -19,14 +19,18 @@ import { ApprovalSheet } from "../components/ApprovalSheet";
 import { ChatItem } from "../components/ChatItem";
 import { BrandMark, GradientDot, GradientFill, LiveDot, PulseDot } from "../components/brand";
 import { SendGlyph, StopGlyph } from "../components/icons";
+import { ModelSheet } from "../components/ModelSheet";
+import { TodoPanel } from "../components/TodoPanel";
 import { Banner, Chip, EmptyState, Header } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
 import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { todoPhases } from "../todos";
 import { loadTranscript, saveTranscript } from "../transcripts";
 import type {
   ApprovalRequest,
   ChatItem as Item,
   Machine,
+  ModelOption,
   ServerMessage,
   SessionState,
   SessionSummary,
@@ -52,6 +56,11 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  const [models, setModels] = useState<ModelOption[] | null>(null);
+  const [levels, setLevels] = useState<string[] | null>(null);
+  const [picker, setPicker] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState<string | null>(null);
   /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
   const live = useRef(false);
   const itemsRef = useRef<Item[]>([]);
@@ -103,6 +112,13 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
           case "state":
             setState(message.state);
             break;
+          case "models":
+            setModels(message.models);
+            setPickerLoading(false);
+            break;
+          case "thinking_levels":
+            setLevels(message.levels);
+            break;
           case "approval":
             // The composer's keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
             Keyboard.dismiss();
@@ -123,6 +139,8 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
             break;
           case "error":
             setError(message.error);
+            setPickerError(message.error);
+            setPickerLoading(false);
             break;
           case "protocol-error":
             setError("The daemon sent an unreadable OMP frame.");
@@ -172,8 +190,41 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
     [approval],
   );
 
+  const openPicker = useCallback(() => {
+    if (!connected) {
+      setError("Not connected to the computer.");
+      return;
+    }
+    setPickerError(null);
+    setPicker(true);
+    setPickerLoading(models === null);
+    if (models === null) socketRef.current?.send({ type: "models" });
+    socketRef.current?.send({ type: "thinking_levels" });
+  }, [connected, models]);
+
+  const selectModel = useCallback((model: ModelOption) => {
+    setPicker(false);
+    setPickerError(null);
+    socketRef.current?.send({ type: "set_model", provider: model.provider, modelId: model.id });
+    // The model's own thinking efforts decide the levels, so re-ask after the switch.
+    socketRef.current?.send({ type: "thinking_levels" });
+  }, []);
+
+  const selectLevel = useCallback((level: string) => {
+    setState((current) => (current === null ? current : { ...current, thinkingLevel: level }));
+    socketRef.current?.send({ type: "set_thinking_level", level });
+  }, []);
+
   const streaming = state?.isStreaming === true;
   const model = state?.model?.name ?? state?.model?.id ?? initialSession.model ?? "default model";
+  const level = state?.thinkingLevel;
+  const usage = state?.contextUsage;
+  const context =
+    usage?.tokens !== undefined && usage.contextWindow !== undefined
+      ? `${tokens(usage.tokens)}/${tokens(usage.contextWindow)}`
+      : undefined;
+  const queued = (state?.queuedMessages?.steering?.length ?? 0) + (state?.queuedMessages?.followUp?.length ?? 0);
+  const todos = todoPhases(state?.todoPhases);
   const folder = session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd;
   const hasText = draft.trim() !== "";
   const [focused, setFocused] = useState(false);
@@ -190,7 +241,10 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
     ],
     [actionDisabled, mode, styles],
   );
-  const renderItem = useCallback<ListRenderItem<Item>>(({ item }) => <ChatItem item={item} />, []);
+  const renderItem = useCallback<ListRenderItem<Item>>(
+    ({ item }) => <ChatItem item={item} machine={machine} />,
+    [machine],
+  );
   const scrollToEnd = useCallback(() => listRef.current?.scrollToEnd({ animated: false }), []);
 
   return (
@@ -252,9 +306,28 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
           }
         />
 
+        <TodoPanel phases={todos} />
+
         <View style={[styles.composer, { paddingBottom: 10 + (keyboard ? 0 : insets.bottom) }]}>
           <View style={styles.chips}>
-            <Chip label={model} />
+            <Pressable
+              onPress={openPicker}
+              accessibilityRole="button"
+              accessibilityLabel={`Model ${model}. Change model`}
+              style={styles.chipPress}
+            >
+              <Chip label={model} tone="accent" />
+            </Pressable>
+            <Pressable
+              onPress={openPicker}
+              accessibilityRole="button"
+              accessibilityLabel={`Thinking level ${level ?? "default"}. Change`}
+              style={styles.chipPress}
+            >
+              <Chip label={level === undefined ? "think" : `think ${level}`} />
+            </Pressable>
+            {context !== undefined ? <Chip label={context} /> : null}
+            {queued > 0 ? <Chip label={`${queued} queued`} tone="warn" /> : null}
             <View style={styles.chipShrink}>
               <Chip label={session.cwd} />
             </View>
@@ -295,8 +368,28 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       </KeyboardAvoidingView>
 
       {approval !== null ? <ApprovalSheet request={approval} onAnswer={answer} /> : null}
+      <ModelSheet
+        visible={picker}
+        models={models}
+        levels={levels}
+        current={state?.model}
+        level={level}
+        loading={pickerLoading}
+        error={pickerError}
+        onClose={() => setPicker(false)}
+        onSelectModel={selectModel}
+        onSelectLevel={selectLevel}
+      />
     </View>
   );
+}
+
+/** `12345` → `12k`, `1000000` → `1M`: context usage on one chip. */
+function tokens(count: number): string {
+  if (count >= 1_000_000) return `${Math.round(count / 100_000) / 10}M`;
+  if (count >= 10_000) return `${Math.round(count / 1_000)}k`;
+  if (count >= 1_000) return `${Math.round(count / 100) / 10}k`;
+  return String(count);
 }
 
 function keyOf(item: Item): string {
@@ -367,7 +460,8 @@ function createStyles(c: Palette) {
     statusTextOff: { ...statusText, color: c.warn },
     list: { paddingTop: 6, paddingBottom: 16, flexGrow: 1 },
     composer: { paddingHorizontal: 12, paddingTop: 6, gap: 8, backgroundColor: c.bg },
-    chips: { flexDirection: "row", gap: 6, paddingHorizontal: 2 },
+    chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 2 },
+    chipPress: { flexShrink: 1, minWidth: 0 },
     chipShrink: { flexShrink: 1, minWidth: 0 },
     halo,
     haloOn: { ...halo, borderColor: c.ringSoft },
