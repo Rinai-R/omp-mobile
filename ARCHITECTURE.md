@@ -10,7 +10,7 @@ OMP is a terminal agent without a web server. Its RPC mode speaks JSON lines on 
 
 ## Daemon options
 
-`node daemon/src/server.mjs [options]`
+`omp-mobile [options]` (from a checkout: `node daemon/src/server.mjs [options]`)
 
 | Option | Default | Usage |
 | --- | --- | --- |

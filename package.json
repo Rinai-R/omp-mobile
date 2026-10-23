@@ -1,5 +1,5 @@
 {
-  "name": "omp-mobile",
+  "name": "omp-mobile-workspace",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -7,8 +7,8 @@
     "app"
   ],
   "scripts": {
-    "daemon": "npm run start -w @omp-mobile/daemon",
-    "test": "npm test -w @omp-mobile/daemon && npm test -w @omp-mobile/app",
+    "daemon": "node daemon/src/server.mjs",
+    "test": "npm test -w omp-mobile && npm test -w @omp-mobile/app",
     "typecheck": "npm run typecheck -w @omp-mobile/app"
   }
 }

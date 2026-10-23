@@ -8,7 +8,7 @@
  * to be exposed to the public internet.
  */
 import { STATUS_CODES, createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -20,7 +20,7 @@ import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
 import { listOmpSessions, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 
-const VERSION = "0.1.0";
+const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
 const DEFAULT_PORT = 7390;
 const DEFAULT_TOKEN_FILE = join(homedir(), ".omp-mobile", "token");
@@ -128,7 +128,7 @@ function parseArgs(argv) {
 function printHelp() {
   console.log(`omp-mobile daemon ${VERSION}
 
-Usage: node src/server.mjs [options]
+Usage: omp-mobile [options]
 
   --host <address>       Bind address (default 127.0.0.1; use the Tailscale IP for a phone)
   --port <port>          Port (default ${DEFAULT_PORT})
@@ -806,7 +806,8 @@ async function main() {
   process.on("SIGTERM", () => void shutdown());
 }
 
-const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// npm runs the `omp-mobile` bin through a symlink; compare real paths.
+const isMain = process.argv[1] !== undefined && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url);
 if (isMain) {
   main().catch((error) => {
     console.error(error?.startup === true ? `omp-mobile daemon: ${error.message}` : error);

@@ -30,20 +30,18 @@ OMP Mobile 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的原生
 
 ### 电脑
 
-每台电脑运行一个 daemon，绑定到它的 Tailscale IPv4 地址（`tailscale ip -4`）：
+在每台电脑上安装 daemon，并绑定到这台电脑的 Tailscale IPv4 地址（`tailscale ip -4`）运行：
 
 ```bash
-git clone https://github.com/Rinai-R/omp-mobile.git
-cd omp-mobile
-npm install
-node daemon/src/server.mjs --host 100.x.y.z --cwd ~/project
+npm install -g omp-mobile
+omp-mobile --host 100.x.y.z --cwd ~/project
 ```
 
 它会打印地址、token 和配对链接，并把同一个链接显示成二维码。新会话在 `--cwd` 目录下启动。
 
 ### 手机
 
-从 [`main` 上最新一次 CI](https://github.com/Rinai-R/omp-mobile/actions/workflows/ci.yml?query=branch%3Amain) 的 `omp-mobile-android` 产物下载 APK 并安装。在 App 里点 **Scan to pair**，扫描 daemon 打印的二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
+从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描 daemon 打印的二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
 
 需要通知时，在 App 里打开 **Settings → Notifications**。
 
@@ -67,6 +65,10 @@ cd app && npx expo prebuild --platform android --clean --no-install
 cd android && ./gradlew assembleRelease
 ```
 
-对接模拟器时，用 `--host 127.0.0.1` 运行 daemon，再用 `adb reverse tcp:7390 tcp:7390` 转发端口。daemon 的工作方式、选项、HTTP API 和源码结构见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+对接模拟器时，在仓库里用 `npm run daemon -- --host 127.0.0.1` 运行 daemon，再用 `adb reverse tcp:7390 tcp:7390` 转发端口。daemon 的工作方式、选项、HTTP API 和源码结构见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
-OMP Mobile 与 oh-my-pi、Tailscale 均无关联。
+发版就是在 `main` 上打一个 `v<version>` tag：版本号要和 `package.json`、`daemon/package.json`、`app/package.json`、`app/app.json` 一致，[CHANGELOG.md](CHANGELOG.md) 里要有对应的小节。CI 随后把 `omp-mobile` 发布到 npm，并发布带 APK 的 GitHub Release。
+
+## 许可证
+
+Apache-2.0。OMP Mobile 与 oh-my-pi、Tailscale 均无关联。
