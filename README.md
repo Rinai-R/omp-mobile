@@ -30,20 +30,18 @@ OMP Mobile is a native phone app for [oh-my-pi](https://github.com/can1357/oh-my
 
 ### Computer
 
-Run one daemon per computer, bound to its Tailscale IPv4 address (`tailscale ip -4`):
+Install the daemon on every computer and run it bound to the computer's Tailscale IPv4 address (`tailscale ip -4`):
 
 ```bash
-git clone https://github.com/Rinai-R/omp-mobile.git
-cd omp-mobile
-npm install
-node daemon/src/server.mjs --host 100.x.y.z --cwd ~/project
+npm install -g omp-mobile
+omp-mobile --host 100.x.y.z --cwd ~/project
 ```
 
 It prints its address, a token, and a pairing link with the same link as a QR code. New sessions start in `--cwd`.
 
 ### Phone
 
-Download the APK from the `omp-mobile-android` artifact of the latest [CI run on `main`](https://github.com/Rinai-R/omp-mobile/actions/workflows/ci.yml?query=branch%3Amain) and install it. In the app, tap **Scan to pair** and scan the code the daemon printed. **Enter address** takes the address and token by hand, or a pasted pairing link.
+Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Scan to pair** and scan the code the daemon printed. **Enter address** takes the address and token by hand, or a pasted pairing link.
 
 For notifications, open **Settings → Notifications** in the app.
 
@@ -67,6 +65,10 @@ cd app && npx expo prebuild --platform android --clean --no-install
 cd android && ./gradlew assembleRelease
 ```
 
-Against an emulator, run the daemon with `--host 127.0.0.1` and forward the port with `adb reverse tcp:7390 tcp:7390`. How the daemon works, its options and HTTP API, and the source map are in [ARCHITECTURE.md](ARCHITECTURE.md).
+Against an emulator, run the daemon from the checkout with `npm run daemon -- --host 127.0.0.1` and forward the port with `adb reverse tcp:7390 tcp:7390`. How the daemon works, its options and HTTP API, and the source map are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-OMP Mobile is not affiliated with oh-my-pi or Tailscale.
+A release is a `v<version>` tag on `main` whose version matches `package.json`, `daemon/package.json`, `app/package.json` and `app/app.json`, with a matching section in [CHANGELOG.md](CHANGELOG.md). CI then publishes `omp-mobile` to npm and a GitHub Release with the APK.
+
+## License
+
+Apache-2.0. OMP Mobile is not affiliated with oh-my-pi or Tailscale.

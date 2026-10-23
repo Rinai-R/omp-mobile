@@ -1,9 +1,40 @@
 {
-  "name": "@omp-mobile/daemon",
+  "name": "omp-mobile",
   "version": "0.1.0",
-  "private": true,
+  "description": "The computer side of OMP Mobile: runs oh-my-pi sessions and serves them to the phone app over Tailscale.",
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "mobile",
+    "remote",
+    "tailscale"
+  ],
+  "homepage": "https://github.com/Rinai-R/omp-mobile#readme",
+  "bugs": {
+    "url": "https://github.com/Rinai-R/omp-mobile/issues"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Rinai",
+    "email": "1130157066@qq.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Rinai-R/omp-mobile.git",
+    "directory": "daemon"
+  },
   "type": "module",
-  "description": "Tailscale-only OMP session daemon for the native omp-mobile app",
+  "bin": {
+    "omp-mobile": "src/server.mjs"
+  },
+  "files": [
+    "src",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "start": "node src/server.mjs",
     "test": "node --test"

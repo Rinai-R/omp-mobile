@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import appConfig from "./app.json";
 import * as Attention from "./modules/omp-attention/src";
 import { AttentionBanner } from "./src/components/AttentionBanner";
 import { ChatScreen } from "./src/screens/ChatScreen";
@@ -343,7 +344,7 @@ export default function App(): ReactNode {
         onOpenNotificationSettings={Attention.openNotificationSettings}
         onFixBattery={fixBattery}
         onBack={() => setRoute({ kind: "machines" })}
-        version="0.1.0"
+        version={appConfig.expo.version}
       />
     );
   } else {
