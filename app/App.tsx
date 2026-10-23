@@ -22,6 +22,7 @@ import { SettingsScreen, type NotificationState } from "./src/screens/SettingsSc
 import { probeMachine, type Probe } from "./src/probe";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
+import { dropMachine } from "./src/transcripts";
 import type { Machine, SessionSummary } from "./src/types";
 
 type Route =
@@ -253,6 +254,7 @@ export default function App(): ReactNode {
   const removeMachine = useCallback(
     (machine: Machine) => {
       persist(machinesRef.current.filter((item) => item.id !== machine.id));
+      dropMachine(machine.id);
       setProbes((current) => {
         const next = new Map(current);
         next.delete(machine.id);
