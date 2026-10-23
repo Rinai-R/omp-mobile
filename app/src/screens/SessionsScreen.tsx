@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { createSession, deleteSession, listSessions, openSession } from "../api";
 import { GradientDot, Spinner } from "../components/brand";
@@ -17,6 +17,7 @@ import {
 } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
+import { dropTranscript, loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SessionSummary } from "../types";
 
 interface Props {
@@ -53,12 +54,17 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
   const [busy, setBusy] = useState(false);
   /** The session list loaded here, so a stale unreachable probe no longer applies. */
   const [reached, setReached] = useState(false);
+  /** The daemon has answered this screen's list; a saved list arriving later must not replace it. */
+  const fetched = useRef(false);
 
   const load = useCallback(async (fresh: boolean) => {
     if (fresh) setRefreshing(true);
     setError(null);
     try {
-      setSessions(await listSessions(machine));
+      const list = await listSessions(machine);
+      fetched.current = true;
+      setSessions(list);
+      saveSessionList(machine.id, list);
       setReached(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -69,8 +75,14 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
   }, [machine]);
 
   useEffect(() => {
+    // The last list this phone saw shows while the daemon answers, or when it cannot.
+    void loadSessionList(machine.id).then((saved) => {
+      if (fetched.current || saved === undefined) return;
+      setSessions(saved);
+      setLoading(false);
+    });
     void load(false);
-  }, [load]);
+  }, [load, machine.id]);
 
   const create = useCallback(async () => {
     setBusy(true);
@@ -96,7 +108,10 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
           style: "destructive",
           onPress: () => {
             void deleteSession(machine, session.id)
-              .then(() => setSessions((current) => current.filter((item) => item.id !== session.id)))
+              .then(() => {
+                dropTranscript(machine.id, session.id);
+                setSessions((current) => current.filter((item) => item.id !== session.id));
+              })
               .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
           },
         },

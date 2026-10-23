@@ -22,6 +22,7 @@ import { SendGlyph, StopGlyph } from "../components/icons";
 import { Banner, Chip, EmptyState, Header } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
 import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { loadTranscript, saveTranscript } from "../transcripts";
 import type {
   ApprovalRequest,
   ChatItem as Item,
@@ -51,6 +52,34 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
+  const live = useRef(false);
+  const itemsRef = useRef<Item[]>([]);
+
+  // The saved transcript shows at once, offline too, until the daemon's snapshot arrives.
+  useEffect(() => {
+    let cancelled = false;
+    void loadTranscript(machine.id, initialSession.id).then((saved) => {
+      if (!cancelled && !live.current && saved !== undefined) setItems(saved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialSession.id, machine.id]);
+
+  // Saved once the chat has been quiet for a moment (not on every streamed delta), and on leaving it.
+  useEffect(() => {
+    itemsRef.current = items;
+    if (!live.current || items.length === 0) return undefined;
+    const timer = setTimeout(() => saveTranscript(machine.id, initialSession.id, items), 1_500);
+    return () => clearTimeout(timer);
+  }, [initialSession.id, items, machine.id]);
+  useEffect(
+    () => () => {
+      if (live.current && itemsRef.current.length > 0) saveTranscript(machine.id, initialSession.id, itemsRef.current);
+    },
+    [initialSession.id, machine.id],
+  );
 
   useEffect(() => {
     const socket = new SessionSocket(
@@ -59,6 +88,7 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       (message: ServerMessage) => {
         switch (message.type) {
           case "snapshot":
+            live.current = true;
             setSession(message.session);
             setState(message.state);
             setItems(snapshotItems(message.messages));
