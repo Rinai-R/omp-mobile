@@ -229,7 +229,7 @@ class AttentionService : Service() {
     try {
       if (connection.responseCode != 200) throw IllegalStateException("HTTP ${connection.responseCode}")
       if (connected.add(machine.id)) refreshServiceNotification()
-      BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
+      return BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
         val data = StringBuilder()
         var event = ""
         while (!worker.stopped) {
@@ -249,7 +249,7 @@ class AttentionService : Service() {
             }
           }
         }
-        return true
+        true
       }
     } finally {
       worker.connection = null
