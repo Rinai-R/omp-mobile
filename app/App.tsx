@@ -54,9 +54,9 @@ function notificationState(enabled: boolean): NotificationState {
   return Attention.notificationsAllowed() ? "on" : "denied";
 }
 
-/** A session known only by id (a notification tap): the chat's snapshot fills in the rest. */
+/** A session known only by id (a notification tap, so one the daemon runs): the chat's snapshot fills in the rest. */
 function placeholderSession(machine: Machine, sessionId: string, title: string): SessionSummary {
-  return { id: sessionId, title: title || "Session", cwd: machine.cwd, status: "idle", createdAt: 0, updatedAt: 0 };
+  return { id: sessionId, title: title || "Session", cwd: machine.cwd, status: "idle", createdAt: 0, updatedAt: 0, origin: "daemon" };
 }
 
 export default function App(): ReactNode {
