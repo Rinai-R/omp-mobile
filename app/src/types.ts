@@ -23,6 +23,10 @@ export interface SessionSummary {
   createdAt: number;
   updatedAt: number;
   sessionFile?: string;
+  /** `daemon`: started from this app; `omp`: an OMP session from a terminal on the computer. */
+  origin: "daemon" | "omp";
+  /** Another omp process (a terminal) has it open; the daemon will not open it until that one exits. */
+  openElsewhere?: boolean;
 }
 
 export interface SessionState {

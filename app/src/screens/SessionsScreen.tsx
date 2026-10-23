@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
-import { createSession, deleteSession, listSessions } from "../api";
+import { createSession, deleteSession, listSessions, openSession } from "../api";
 import { GradientDot, Spinner } from "../components/brand";
 import { ChatGlyph, PlusGlyph } from "../components/icons";
 import {
@@ -105,6 +105,32 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
     [machine],
   );
 
+  /** The terminal session being resumed on the computer before its chat opens. */
+  const [opening, setOpening] = useState<string | null>(null);
+  const open = useCallback(
+    (session: SessionSummary) => {
+      if (session.openElsewhere === true) {
+        Alert.alert(
+          "Open in a terminal",
+          "Another omp process on the computer has this session open. Exit it there (or /exit) to continue it here.",
+        );
+        return;
+      }
+      if (session.origin === "daemon") {
+        onOpen(machine, session);
+        return;
+      }
+      // Resume first: a refusal (it was opened in a terminal since the list loaded) shows here, not as a dead chat.
+      setOpening(session.id);
+      setError(null);
+      void openSession(machine, session.id)
+        .then(() => onOpen(machine, { ...session, origin: "daemon" }))
+        .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+        .finally(() => setOpening(null));
+    },
+    [machine, onOpen],
+  );
+
   const openCreate = useCallback(() => setCreating(true), []);
   const retry = useCallback(() => {
     onRetry(machine);
@@ -113,6 +139,41 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
   const unreachable =
     probe?.state === "unreachable" && !reached ? `Unreachable: ${reasonText(probe.reason)}` : null;
   const running = sessions.filter((session) => session.status === "streaming").length;
+  const mine = sessions.filter((session) => session.origin !== "omp");
+  const terminal = sessions.filter((session) => session.origin === "omp");
+
+  const rows = (list: SessionSummary[]) =>
+    list.map((session, index) => {
+      const live = session.status === "streaming";
+      const state = live ? "running" : session.openElsewhere === true ? "in a terminal" : ago(session.updatedAt);
+      return (
+        <Row
+          key={session.id}
+          title={session.title}
+          detail={
+            <Text style={styles.detail} numberOfLines={1}>
+              {basename(session.cwd)}
+              {session.model !== undefined ? ` · ${session.model}` : ""}
+            </Text>
+          }
+          trailing={
+            <View style={styles.trailing}>
+              {opening === session.id ? <Spinner size={10} /> : live ? <GradientDot size={7} /> : null}
+              <Text
+                style={live ? styles.timeLive : session.openElsewhere === true ? styles.timeElsewhere : styles.time}
+                numberOfLines={1}
+              >
+                {state}
+              </Text>
+            </View>
+          }
+          last={index === list.length - 1}
+          onPress={() => open(session)}
+          onLongPress={session.origin === "daemon" ? () => confirmDelete(session) : undefined}
+          accessibilityLabel={`${session.title}, ${state}`}
+        />
+      );
+    });
 
   return (
     <View style={styles.root}>
@@ -158,36 +219,23 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
             />
           ) : (
             <>
-              <SectionHeader title="Sessions" meta={running > 0 ? `${running} running` : String(sessions.length)} />
-              <Group>
-                {sessions.map((session, index) => {
-                  const live = session.status === "streaming";
-                  return (
-                    <Row
-                      key={session.id}
-                      title={session.title}
-                      detail={
-                        <Text style={styles.detail} numberOfLines={1}>
-                          {basename(session.cwd)} · {session.model ?? "default model"}
-                        </Text>
-                      }
-                      trailing={
-                        <View style={styles.trailing}>
-                          {live ? <GradientDot size={7} /> : null}
-                          <Text style={live ? styles.timeLive : styles.time} numberOfLines={1}>
-                            {live ? "running" : ago(session.updatedAt)}
-                          </Text>
-                        </View>
-                      }
-                      last={index === sessions.length - 1}
-                      onPress={() => onOpen(machine, session)}
-                      onLongPress={() => confirmDelete(session)}
-                      accessibilityLabel={`${session.title}, ${live ? "running" : ago(session.updatedAt)}`}
-                    />
-                  );
-                })}
-              </Group>
-              <Text style={styles.footnote}>Long-press a session to delete it.</Text>
+              {mine.length > 0 ? (
+                <>
+                  <SectionHeader title="Sessions" meta={running > 0 ? `${running} running` : String(mine.length)} />
+                  <Group>{rows(mine)}</Group>
+                  <Text style={styles.footnote}>Long-press a session to delete it.</Text>
+                </>
+              ) : null}
+              {terminal.length > 0 ? (
+                <>
+                  <SectionHeader title="From the terminal" meta={String(terminal.length)} />
+                  <Group>{rows(terminal)}</Group>
+                  <Text style={styles.footnote}>
+                    OMP sessions started on the computer. Opening one continues it here; one still open in a terminal
+                    stays there until it exits.
+                  </Text>
+                </>
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -216,6 +264,7 @@ function createStyles(c: Palette) {
     trailing: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
     time,
     timeLive: { ...time, color: c.accent },
+    timeElsewhere: { ...time, color: c.warn },
     footnote: { fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
     hint: { fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },

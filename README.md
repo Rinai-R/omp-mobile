@@ -86,6 +86,13 @@ refuses to start unless `--no-whois` is given.
 - Sessions this daemon created are registered in
   `~/.omp-mobile/sessions.json` and resumed with `omp --resume` the first time
   the app opens one again after a daemon restart.
+- Terminal sessions: the 50 most recently written OMP sessions under
+  `~/.omp/agent/sessions` (`--omp-home` for another OMP home) are listed under
+  **From the terminal** and continue on the phone when opened. A session
+  another omp process still holds (its owner lock in
+  `~/.omp/run/session-owners`, read with `lsof`) is marked "in a terminal" and
+  refused with `409` until that process exits; a second omp on the same file
+  would fork it instead.
 
 OMP runs in `--mode rpc-ui`, so its own tool approvals (the Approve / Deny
 prompt your OMP approval policy asks for) reach the phone as a native sheet;
@@ -119,7 +126,6 @@ is a no-op there.
 ## Not yet aligned with Kivotos
 
 - Tailscale peer discovery (pairing is by QR code, link, or address + token).
-- Sessions created outside this daemon; only sessions it created are listed.
 - Federation across machines with a switcher and relay fallback.
 - Caching of transcripts/assets for instant reopen.
 
@@ -135,6 +141,7 @@ for any of them.
   Host + same-user listener admission.
 - `daemon/src/attention.mjs` — folds session broadcasts into attention frames
   and serves `GET /events`.
+- `daemon/src/omp-sessions.mjs` — OMP's on-disk sessions and their owner locks.
 - `app/src/api.ts` — daemon REST + session socket.
 - `app/src/messages.ts` — OMP event → native transcript reducer.
 - `app/src/screens/` — Machines, Sessions, Chat, Settings.

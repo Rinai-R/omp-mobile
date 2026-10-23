@@ -18,15 +18,24 @@ import { renderQr } from "./qr.mjs";
 import { RpcSession } from "./rpc-session.mjs";
 import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
+import { listOmpSessions, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 
 const VERSION = "0.1.0";
 const PROTOCOL = 1;
 const DEFAULT_PORT = 7390;
 const DEFAULT_TOKEN_FILE = join(homedir(), ".omp-mobile", "token");
 const DEFAULT_REGISTRY_FILE = join(homedir(), ".omp-mobile", "sessions.json");
+const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
+/** Terminal sessions listed next to the daemon's own, newest first. */
+const OMP_SESSION_LIMIT = 50;
 
-/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string}} SessionSummary */
+/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean}} SessionSummary */
+
+/** An error with the HTTP status it answers. */
+function httpError(status, message) {
+  return Object.assign(new Error(message), { status });
+}
 
 function parseArgs(argv) {
   const options = {
@@ -38,6 +47,7 @@ function parseArgs(argv) {
     registryFile: DEFAULT_REGISTRY_FILE,
     token: "",
     sessionDir: "",
+    ompHome: DEFAULT_OMP_HOME,
     autoApprove: false,
     approvalMode: "",
     tailscale: "tailscale",
@@ -78,6 +88,10 @@ function parseArgs(argv) {
         break;
       case "--session-dir":
         options.sessionDir = resolve(value);
+        i += 1;
+        break;
+      case "--omp-home":
+        options.ompHome = resolve(value);
         i += 1;
         break;
       case "--tailscale":
@@ -121,6 +135,7 @@ Usage: node src/server.mjs [options]
   --cwd <dir>            Default working directory for new sessions
   --omp <path>           omp executable (default "omp")
   --session-dir <dir>    OMP session directory for sessions this daemon creates
+  --omp-home <dir>       OMP home whose terminal sessions are listed (default ~/.omp)
   --token <token>        Fixed bearer token (otherwise generated and stored)
   --token-file <path>    Token file (default ~/.omp-mobile/token)
   --registry-file <path> Session registry (default ~/.omp-mobile/sessions.json)
@@ -177,6 +192,7 @@ function storedSummary(stored) {
     createdAt: stored.createdAt,
     updatedAt: stored.updatedAt,
     sessionFile: stored.sessionFile,
+    origin: "daemon",
   };
 }
 
@@ -231,28 +247,13 @@ function readBody(req) {
   });
 }
 
-function textOfContent(content) {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && typeof part.text === "string") return part.text;
-        return "";
-      })
-      .join("");
-  }
-  return "";
-}
-
 function titleOf(messages, state, cwd) {
   if (typeof state?.sessionName === "string" && state.sessionName.trim() !== "") {
     return state.sessionName.trim();
   }
   if (Array.isArray(messages)) {
-    const user = messages.find((message) => message?.role === "user");
-    const text = textOfContent(user?.content).trim().replace(/\s+/g, " ");
-    if (text !== "") return text.slice(0, 80);
+    const title = promptTitle(messages.find((message) => message?.role === "user")?.content);
+    if (title !== "") return title;
   }
   return cwd.split("/").filter(Boolean).at(-1) ?? "session";
 }
@@ -309,6 +310,7 @@ class SessionEntry {
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,
       sessionFile: this.state?.sessionFile,
+      origin: "daemon",
     };
   }
 
@@ -402,6 +404,10 @@ class Daemon {
     this.attention = new AttentionTracker({ machine: hostname() });
     /** @type {Set<() => void>} open `/events` streams, ended on close */
     this.streams = new Set();
+    /** OMP's own sessions as last listed, for resuming one the app picked. @type {Map<string, import("./omp-sessions.mjs").OmpSession>} */
+    this.ompSessions = new Map();
+    /** Resumes in flight, so two opens of one session start one process. @type {Map<string, Promise<SessionEntry>>} */
+    this.starting = new Map();
     this.server = createServer((req, res) => void this.admitHttp(req, res));
     this.wsServer = new WebSocketServer({ noServer: true });
     this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
@@ -479,12 +485,7 @@ class Daemon {
     }
     try {
       if (url.pathname === "/sessions" && req.method === "GET") {
-        const live = [...this.sessions.values()].map((entry) => entry.summary());
-        const liveIds = new Set(live.map((session) => session.id));
-        const dormant = [...this.registry.values()]
-          .filter((stored) => !liveIds.has(stored.id))
-          .map((stored) => storedSummary(stored));
-        sendJson(res, 200, { sessions: [...live, ...dormant] });
+        sendJson(res, 200, { sessions: await this.listSessions() });
         return;
       }
       if (url.pathname === "/sessions" && req.method === "POST") {
@@ -522,8 +523,41 @@ class Daemon {
       }
       sendJson(res, 404, { error: "not found" });
     } catch (error) {
-      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      sendJson(res, typeof error?.status === "number" ? error.status : 500, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
+  }
+
+  /**
+   * Live sessions, then the ones this daemon created earlier, then OMP's other
+   * sessions (terminal ones), newest first. A dormant session another omp
+   * process holds open is marked `openElsewhere`; opening it is refused.
+   */
+  async listSessions() {
+    const live = [...this.sessions.values()].map((entry) => entry.summary());
+    const known = new Set(live.map((session) => session.id));
+    const dormant = [...this.registry.values()]
+      .filter((stored) => !known.has(stored.id))
+      .map((stored) => storedSummary(stored));
+    for (const session of dormant) known.add(session.id);
+    const [found, owners] = await Promise.all([
+      listOmpSessions(join(this.options.ompHome, "agent", "sessions"), { limit: OMP_SESSION_LIMIT }),
+      this.owners(),
+    ]);
+    this.ompSessions = new Map(found.map((session) => [session.id, session]));
+    const others = found
+      .filter((session) => !known.has(session.id))
+      .map((session) => ({ ...session, status: "idle", origin: "omp" }));
+    const marked = [...dormant, ...others].map((session) =>
+      owners?.has(session.id) === true ? { ...session, openElsewhere: true } : session,
+    );
+    return [...live, ...marked];
+  }
+
+  /** Which sessions some omp process holds open (`undefined`: cannot tell). */
+  owners() {
+    return sessionOwners(join(this.options.ompHome, "run", "session-owners"));
   }
 
   remember(entry) {
@@ -539,17 +573,34 @@ class Daemon {
     saveRegistry(this.options.registryFile, this.registry);
   }
 
-  /** Resume a session this daemon created earlier, once, on demand. */
-  async ensureLive(id) {
+  /**
+   * The live session for `id`, resuming it on demand: one this daemon created
+   * earlier, or any other OMP session it listed. Concurrent opens share one start.
+   */
+  ensureLive(id) {
     const live = this.sessions.get(id);
-    if (live !== undefined) return live;
-    const stored = this.registry.get(id);
-    if (stored === undefined || typeof stored.sessionFile !== "string") throw new Error("unknown session");
-    if (!existsSync(stored.sessionFile)) throw new Error("session file is gone");
+    if (live !== undefined) return Promise.resolve(live);
+    let starting = this.starting.get(id);
+    if (starting === undefined) {
+      starting = this.resume(id).finally(() => this.starting.delete(id));
+      this.starting.set(id, starting);
+    }
+    return starting;
+  }
+
+  async resume(id) {
+    const stored = this.registry.get(id) ?? this.ompSessions.get(id);
+    if (stored === undefined || typeof stored.sessionFile !== "string") throw httpError(404, "unknown session");
+    if (!existsSync(stored.sessionFile)) throw httpError(410, "session file is gone");
+    // A second omp on the same file would fork it into a new one; the session
+    // stays with the process that has it (a terminal) until that one exits.
+    const owner = (await this.owners())?.get(id);
+    if (owner !== undefined) {
+      throw httpError(409, `This session is open in another omp process (pid ${owner}). Close it there to continue here.`);
+    }
     const rpc = new RpcSession({
       cwd: stored.cwd,
       ompBin: this.options.omp,
-      sessionDir: this.options.sessionDir || undefined,
       resume: stored.sessionFile,
       autoApprove: this.options.autoApprove,
       extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
@@ -615,7 +666,8 @@ class Daemon {
         });
       })
       .catch((error) => {
-        socket.write(`HTTP/1.1 404 Not Found\r\n\r\n`);
+        const status = typeof error?.status === "number" ? error.status : 404;
+        socket.write(`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? "Error"}\r\n\r\n`);
         socket.destroy();
         this.log?.(error);
       });

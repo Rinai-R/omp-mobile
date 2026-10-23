@@ -13,9 +13,20 @@ async function request<T>(machine: Machine, path: string, init: RequestInit = {}
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(text || `HTTP ${response.status}`);
+    throw new Error(errorText(text) || `HTTP ${response.status}`);
   }
   return (await response.json()) as T;
+}
+
+/** The daemon answers errors as `{"error": "..."}`; anything else is shown as sent. */
+function errorText(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    if (typeof parsed.error === "string") return parsed.error;
+  } catch {
+    // Not JSON.
+  }
+  return body;
 }
 
 export async function hello(url: string, token: string): Promise<Hello> {
