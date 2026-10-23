@@ -8,7 +8,7 @@
  * to be exposed to the public internet.
  */
 import { STATUS_CODES, createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -25,6 +25,7 @@ const PROTOCOL = 1;
 const DEFAULT_PORT = 7390;
 const DEFAULT_TOKEN_FILE = join(homedir(), ".omp-mobile", "token");
 const DEFAULT_REGISTRY_FILE = join(homedir(), ".omp-mobile", "sessions.json");
+const DEFAULT_STATE_FILE = join(homedir(), ".omp-mobile", "daemon.json");
 const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
 /** Terminal sessions listed next to the daemon's own, newest first. */
@@ -45,6 +46,7 @@ function parseArgs(argv) {
     omp: "omp",
     tokenFile: DEFAULT_TOKEN_FILE,
     registryFile: DEFAULT_REGISTRY_FILE,
+    stateFile: DEFAULT_STATE_FILE,
     token: "",
     sessionDir: "",
     ompHome: DEFAULT_OMP_HOME,
@@ -84,6 +86,10 @@ function parseArgs(argv) {
         break;
       case "--registry-file":
         options.registryFile = resolve(value);
+        i += 1;
+        break;
+      case "--state-file":
+        options.stateFile = resolve(value);
         i += 1;
         break;
       case "--session-dir":
@@ -130,8 +136,7 @@ function printHelp() {
 
 Usage: omp-mobile [options]
 
-  --host <address>       Bind address (default 127.0.0.1; use the Tailscale IP for a phone)
-  --port <port>          Port (default ${DEFAULT_PORT})
+  --host <address>       Bind address (default 127.0.0.1). \`tailscale\`: this computer's Tailscale IPv4
   --cwd <dir>            Default working directory for new sessions
   --omp <path>           omp executable (default "omp")
   --session-dir <dir>    OMP session directory for sessions this daemon creates
@@ -139,6 +144,7 @@ Usage: omp-mobile [options]
   --token <token>        Fixed bearer token (otherwise generated and stored)
   --token-file <path>    Token file (default ~/.omp-mobile/token)
   --registry-file <path> Session registry (default ~/.omp-mobile/sessions.json)
+  --state-file <path>    Where the running daemon records its pid and pairing link (default ~/.omp-mobile/daemon.json)
   --auto-approve         Pass --auto-approve to omp (no tool approvals reach the phone)
   --approval-mode <m>    Pass --approval-mode to omp (always-ask, always-ask-cached, write, yolo)
   --tailscale <path>     tailscale CLI used for admission (default "tailscale")
@@ -397,6 +403,10 @@ class Daemon {
     this.token = token;
     this.admission = identity.admission;
     this.user = identity.user ?? "";
+    this.startedAt = Date.now();
+    /** The last authenticated request from a client (not `/mobile`'s own probe), for `/mobile` to see a phone connect. */
+    /** @type {{address: string, at: number} | null} */
+    this.lastPhone = null;
     /** @type {Map<string, SessionEntry>} */
     this.sessions = new Map();
     /** @type {Map<string, object>} */
@@ -475,6 +485,19 @@ class Daemon {
     }
     if (!tokenMatches(authOf(req, url), this.token)) {
       sendJson(res, 401, { error: "unauthorized" });
+      return;
+    }
+    this.noteClient(req);
+    if (url.pathname === "/status" && req.method === "GET") {
+      sendJson(res, 200, {
+        pid: process.pid,
+        version: VERSION,
+        startedAt: this.startedAt,
+        url: this.baseUrl(),
+        liveSessions: this.sessions.size,
+        eventStreams: this.streams.size,
+        lastPhone: this.lastPhone,
+      });
       return;
     }
     if (url.pathname === "/events" && req.method === "GET") {
@@ -653,6 +676,7 @@ class Daemon {
       socket.destroy();
       return;
     }
+    this.noteClient(req);
     void this.ensureLive(decodeURIComponent(match[1]))
       .then((entry) => {
         this.wsServer.handleUpgrade(req, socket, head, (ws) => {
@@ -712,6 +736,17 @@ class Daemon {
     } catch (error) {
       ws.send(JSON.stringify({ type: "error", error: error instanceof Error ? error.message : String(error) }));
     }
+  }
+
+  /**
+   * Remember an authenticated client request. `/mobile` marks its own status
+   * polls with `x-omp-mobile-probe`; anything else is the app. An address cannot
+   * tell them apart: an emulator's requests leave from this computer's own address.
+   */
+  noteClient(req) {
+    if (req.headers["x-omp-mobile-probe"] !== undefined) return;
+    const address = String(req.socket?.remoteAddress ?? "").replace(/^::ffff:/i, "");
+    this.lastPhone = { address, at: Date.now() };
   }
 
   listen() {
@@ -774,14 +809,44 @@ function isTailnetAddress(host) {
   return /\.ts\.net$/i.test(host);
 }
 
+/** This computer's Tailscale IPv4 address, for `--host tailscale`. */
+async function tailscaleHost(options) {
+  let self;
+  try {
+    self = await new Tailscale({ binary: options.tailscale }).status();
+  } catch (error) {
+    throw startupError(`--host tailscale: cannot read tailscale status (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const ipv4 = self.ips.find((ip) => isTailnetAddress(ip));
+  if (ipv4 === undefined) throw startupError("--host tailscale: this computer has no Tailscale IPv4 address");
+  return ipv4;
+}
+
+/** Record the running daemon for `/mobile` (owner-only: the pairing link carries the token). */
+function writeState(path, state) {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+}
+
+/** Remove the state file if it still describes this process. */
+function clearState(path) {
+  try {
+    if (JSON.parse(readFileSync(path, "utf8")).pid === process.pid) unlinkSync(path);
+  } catch {
+    // Already gone or replaced by another daemon.
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.host === "tailscale") options.host = await tailscaleHost(options);
   const token = loadToken(options);
   const identity = await resolveIdentity(options);
   const daemon = new Daemon(options, token, identity);
   await daemon.listen();
   const url = daemon.baseUrl();
   const pair = `omp-mobile://pair?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
+  writeState(options.stateFile, { pid: process.pid, version: VERSION, url, pair, startedAt: daemon.startedAt });
   console.log(`omp-mobile daemon ${VERSION}`);
   console.log(`  listening  ${url}`);
   console.log(`  cwd        ${options.cwd}`);
@@ -799,11 +864,14 @@ async function main() {
     }
   }
   const shutdown = async () => {
+    clearState(options.stateFile);
     await daemon.close();
     process.exit(0);
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+  // A daemon started by /mobile has no terminal; a closed one must not stop it.
+  process.on("SIGHUP", () => undefined);
 }
 
 // npm runs the `omp-mobile` bin through a symlink; compare real paths.

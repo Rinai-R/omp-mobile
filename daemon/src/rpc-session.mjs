@@ -11,6 +11,15 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 
 const START_TIMEOUT_MS = 45_000;
+
+/**
+ * The environment without `BUN_BE_BUN`: /mobile starts the daemon under omp's
+ * embedded Bun with it set, and a child omp that inherits it would run as Bun.
+ */
+function withoutBunFlag(env) {
+  const { BUN_BE_BUN: _ignored, ...rest } = env;
+  return rest;
+}
 const REQUEST_TIMEOUT_MS = 60_000;
 
 /** Events that carry no useful state to the phone. */
@@ -61,7 +70,7 @@ export class RpcSession extends EventEmitter {
     if (this.sessionDir) args.push("--session-dir", this.sessionDir);
     const child = spawn(this.ompBin, args, {
       cwd: this.cwd,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: { ...withoutBunFlag(process.env), NO_COLOR: "1" },
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;

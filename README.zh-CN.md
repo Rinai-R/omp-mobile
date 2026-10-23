@@ -19,29 +19,31 @@ OMP Mobile 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的原生
 - **通知：** App 在后台时，审批、提问和任务完成会发安卓通知。
 - **所有机器：** 扫码配对每台电脑，在会话列表里切换。重新打开的对话立即显示，离线也能看。
 - **只走 Tailscale：** daemon 只监听电脑的 Tailscale 地址，只放行你自己的设备。没有自己的中继或云服务。
+- **OMP 插件：** 在 OMP 里输入 `/mobile`，就会在后台启动 daemon 并显示配对二维码。终端关掉后 daemon 继续运行。
 
 ## 开始使用
 
 ### 前置条件
 
-- 每台电脑：Node.js 22.19 或更新版本，`PATH` 里有 OMP 18.x
+- 每台电脑：OMP 18.x
 - 电脑和手机都登录同一个 [Tailscale](https://tailscale.com) 账号
 - 一台安卓手机
 
 ### 电脑
 
-在每台电脑上安装 daemon，并绑定到这台电脑的 Tailscale IPv4 地址（`tailscale ip -4`）运行：
+在每台电脑上把插件装进 OMP：
 
 ```bash
-npm install -g omp-mobile
-omp-mobile --host 100.x.y.z --cwd ~/project
+omp plugin install omp-mobile
 ```
 
-它会打印地址、token 和配对链接，并把同一个链接显示成二维码。新会话在 `--cwd` 目录下启动。
+然后在 OMP 里运行 `/mobile`。它会在后台启动 daemon，绑定到这台电脑的 Tailscale 地址，并在输入框上方显示配对二维码，直到手机连上。daemon 运行在 OMP 自带的 Bun 上，终端和 OMP 退出后它仍在运行；`/mobile status` 查看状态，`/mobile stop` 停止。手机上新建的会话，默认在第一次运行 `/mobile` 的目录下启动。
+
+不装插件也可以：从 npm 安装同一个 daemon（需要 Node.js 22.19 或更新版本），在前台运行：`npm install -g omp-mobile`，然后 `omp-mobile --host tailscale --cwd ~/project`。它会打印同样的二维码。
 
 ### 手机
 
-从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描 daemon 打印的二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
+从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
 
 需要通知时，在 App 里打开 **Settings → Notifications**。
 
