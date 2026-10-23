@@ -19,29 +19,31 @@ OMP Mobile is a native phone app for [oh-my-pi](https://github.com/can1357/oh-my
 - **Notifications:** Android notifications for approvals, questions, and finished turns while the app is in the background.
 - **All your machines:** Pair each computer by QR code, switch between them from the session list. A reopened chat shows at once, also offline.
 - **Tailscale only:** The daemon listens on the computer's Tailscale address and admits only your own devices. No relay or cloud service of its own.
+- **An OMP plugin:** `/mobile` in OMP starts the daemon in the background and shows the pairing code. The daemon keeps running after the terminal closes.
 
 ## Getting started
 
 ### Prerequisites
 
-- On every computer: Node.js 22.19 or newer, and OMP 18.x on `PATH`
+- On every computer: OMP 18.x
 - [Tailscale](https://tailscale.com) signed in to the same account on the computer and the phone
 - An Android phone
 
 ### Computer
 
-Install the daemon on every computer and run it bound to the computer's Tailscale IPv4 address (`tailscale ip -4`):
+Install the plugin into OMP on every computer:
 
 ```bash
-npm install -g omp-mobile
-omp-mobile --host 100.x.y.z --cwd ~/project
+omp plugin install omp-mobile
 ```
 
-It prints its address, a token, and a pairing link with the same link as a QR code. New sessions start in `--cwd`.
+Then in OMP, run `/mobile`. It starts the daemon in the background, bound to the computer's Tailscale address, and shows a pairing code above the composer until the phone connects. The daemon runs on the Bun inside OMP and outlives the terminal and OMP; `/mobile status` shows it and `/mobile stop` ends it. Phone sessions start in the directory where you ran `/mobile` the first time.
+
+Without the plugin, the same daemon runs from npm (Node.js 22.19 or newer) in the foreground: `npm install -g omp-mobile`, then `omp-mobile --host tailscale --cwd ~/project`. It prints the same code.
 
 ### Phone
 
-Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Scan to pair** and scan the code the daemon printed. **Enter address** takes the address and token by hand, or a pasted pairing link.
+Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Scan to pair** and scan the code. **Enter address** takes the address and token by hand, or a pasted pairing link.
 
 For notifications, open **Settings → Notifications** in the app.
 

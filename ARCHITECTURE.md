@@ -8,13 +8,23 @@ phone app ── Tailscale HTTP / WebSocket / SSE ──> daemon ── JSON lin
 
 OMP is a terminal agent without a web server. Its RPC mode speaks JSON lines on stdin and stdout and emits the full session event stream; the daemon owns those processes so the phone does not need OMP's RPC details, and so a session keeps running while the phone is away.
 
+## `/mobile`
+
+The npm package is also an OMP plugin (`package.json` `omp.extensions` → `daemon/src/omp-extension.mjs`). Its `/mobile` command, in the interactive OMP:
+
+1. Reads `~/.omp-mobile/daemon.json`, which a running daemon writes (pid, URL, pairing link; mode 0600) and removes on a clean stop, and asks that daemon's `/status`.
+2. If none answers, starts one: `omp daemon/src/server.mjs --host tailscale --cwd <OMP's cwd> --omp <omp on PATH> --no-qr` with `BUN_BE_BUN=1`, so it runs on the Bun inside OMP and needs no Node.js. It is detached into its own session with stdin closed and output appended to `~/.omp-mobile/daemon.log`, and it ignores `SIGHUP`, so closing the terminal or exiting OMP leaves it running. OMP sessions it starts do not inherit `BUN_BE_BUN`.
+3. Shows the pairing QR code above the composer, and polls `/status` every 1.5 s. The code closes when a phone makes an authenticated request after it appeared ("phone connected from …"), after five minutes, or on `/mobile hide`. The extension's own polls send `x-omp-mobile-probe` so they do not count as a phone.
+
+`/mobile status` reports the running daemon, `/mobile stop` sends it `SIGTERM` (then `SIGKILL` after 5 s). Outside the interactive TUI, `/mobile` reports the pairing link as a notice instead of drawing the code.
+
 ## Daemon options
 
 `omp-mobile [options]` (from a checkout: `node daemon/src/server.mjs [options]`)
 
 | Option | Default | Usage |
 | --- | --- | --- |
-| `--host <address>` | `127.0.0.1` | Bind address. Use the computer's Tailscale IP for a phone; a loopback address turns admission off. |
+| `--host <address>` | `127.0.0.1` | Bind address. Use the computer's Tailscale IP for a phone; `tailscale` picks this computer's Tailscale IPv4 address; a loopback address turns admission off. |
 | `--port <port>` | `7390` | Listen port. |
 | `--cwd <dir>` | the current directory | Working directory for a new session that names none. |
 | `--omp <path>` | `omp` | OMP executable. |
@@ -23,6 +33,7 @@ OMP is a terminal agent without a web server. Its RPC mode speaks JSON lines on 
 | `--token <token>` | | Fixed bearer token. Otherwise `OMP_MOBILE_TOKEN`, else the token file, else a new 48-hex-digit token written there. |
 | `--token-file <path>` | `~/.omp-mobile/token` | Where the token is kept (mode 0600). |
 | `--registry-file <path>` | `~/.omp-mobile/sessions.json` | The sessions this daemon created, for resuming them after a restart. |
+| `--state-file <path>` | `~/.omp-mobile/daemon.json` | Where the running daemon records its pid, URL and pairing link for `/mobile`. |
 | `--auto-approve` | off | Passes `--auto-approve` to OMP; no tool approval reaches the phone. |
 | `--approval-mode <mode>` | OMP's setting | Passes `--approval-mode` to OMP: `always-ask`, `always-ask-cached`, `write`, or `yolo`. |
 | `--tailscale <path>` | `tailscale` | Tailscale CLI used for admission. On macOS the app bundle binary `/Applications/Tailscale.app/Contents/MacOS/Tailscale` is tried when `tailscale` is not on `PATH`. |
@@ -52,6 +63,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 | `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process. |
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it; the OMP session file stays. |
 | `GET /events` | The attention stream (Server-Sent Events), see below. |
+| `GET /status` | `{pid, version, startedAt, url, liveSessions, eventStreams, lastPhone}`; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
 | `GET /sessions/:id/ws` | WebSocket upgrade, see below. |
 
 ### Session socket
@@ -118,6 +130,7 @@ On Android, **Settings → Notifications** asks for the notification permission 
 | `daemon/src/attention.mjs` | Attention frames from session broadcasts, `GET /events` |
 | `daemon/src/omp-sessions.mjs` | OMP's sessions on disk and their owner locks |
 | `daemon/src/qr.mjs` | Terminal QR code |
+| `daemon/src/omp-extension.mjs` | The OMP plugin: `/mobile`, starting and stopping the background daemon, the pairing widget |
 | `app/App.tsx` | Routes, machines, probing, notification wiring |
 | `app/src/api.ts` | Daemon REST and the session socket |
 | `app/src/messages.ts` | OMP events and stored messages to native transcript items |

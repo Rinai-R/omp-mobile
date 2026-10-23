@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "description": "The computer side of OMP Mobile: runs oh-my-pi sessions and serves them to the phone app over Tailscale.",
   "keywords": [
+    "mobile",
     "oh-my-pi",
     "omp",
-    "mobile",
+    "omp-plugin",
     "remote",
     "tailscale"
   ],
@@ -26,6 +27,11 @@
   "type": "module",
   "bin": {
     "omp-mobile": "src/server.mjs"
+  },
+  "omp": {
+    "extensions": [
+      "./src/omp-extension.mjs"
+    ]
   },
   "files": [
     "src",
