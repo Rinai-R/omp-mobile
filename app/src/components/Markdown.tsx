@@ -1,134 +1,9 @@
 import { memo, useMemo, type ReactNode } from "react";
 import { Linking, ScrollView, StyleSheet, Text, View, type FontVariant } from "react-native";
+import { parseBlocks, parseInline, type Block, type Inline } from "../markdown";
 import { MONO, radius, useStyles, type Palette } from "../theme";
 
-/**
- * A small Markdown renderer for assistant text: paragraphs, headings (# to ###),
- * bullet and numbered lists, block quotes, rules, fenced code blocks, and inline
- * `code`, **bold**, *italic* and [links](url). Anything else stays plain text.
- */
-
-export type Block =
-  | { kind: "paragraph"; text: string }
-  | { kind: "heading"; level: 1 | 2 | 3; text: string }
-  | { kind: "list"; ordered: boolean; items: { text: string; depth: number; marker: string }[] }
-  | { kind: "quote"; text: string }
-  | { kind: "code"; lang: string; text: string }
-  | { kind: "rule" };
-
-export type Inline =
-  | { kind: "text"; text: string }
-  | { kind: "code"; text: string }
-  | { kind: "bold"; children: Inline[] }
-  | { kind: "italic"; children: Inline[] }
-  | { kind: "link"; url: string; children: Inline[] };
-
-const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+#.-]*)/;
-const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
-const BULLET = /^(\s*)([-*+])\s+(.*)$/;
-const NUMBERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
-const QUOTE = /^\s{0,3}>\s?(.*)$/;
-const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
-
-export function parseBlocks(source: string): Block[] {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-  const blocks: Block[] = [];
-  let paragraph: string[] = [];
-  const flush = (): void => {
-    if (paragraph.length > 0) blocks.push({ kind: "paragraph", text: paragraph.join("\n") });
-    paragraph = [];
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const fence = FENCE.exec(line);
-    if (fence !== null) {
-      flush();
-      const marker = fence[1] ?? "```";
-      const body: string[] = [];
-      index += 1;
-      while (index < lines.length && !(lines[index] ?? "").trim().startsWith(marker)) {
-        body.push(lines[index] ?? "");
-        index += 1;
-      }
-      // An unclosed fence (still streaming) runs to the end of the text.
-      blocks.push({ kind: "code", lang: fence[2] ?? "", text: body.join("\n") });
-      continue;
-    }
-    if (line.trim() === "") {
-      flush();
-      continue;
-    }
-    if (RULE.test(line)) {
-      flush();
-      blocks.push({ kind: "rule" });
-      continue;
-    }
-    const heading = HEADING.exec(line);
-    if (heading !== null) {
-      flush();
-      const level = Math.min(3, (heading[1] ?? "#").length) as 1 | 2 | 3;
-      blocks.push({ kind: "heading", level, text: heading[2] ?? "" });
-      continue;
-    }
-    const bullet = BULLET.exec(line);
-    const numbered = bullet === null ? NUMBERED.exec(line) : null;
-    const item = bullet ?? numbered;
-    if (item !== null) {
-      flush();
-      const ordered = numbered !== null;
-      const depth = Math.min(4, Math.floor((item[1] ?? "").replace(/\t/g, "  ").length / 2));
-      const entry = { text: item[3] ?? "", depth, marker: ordered ? `${item[2] ?? "1"}.` : "•" };
-      const previous = blocks.at(-1);
-      if (previous?.kind === "list" && (previous.ordered === ordered || depth > 0)) previous.items.push(entry);
-      else blocks.push({ kind: "list", ordered, items: [entry] });
-      continue;
-    }
-    const quote = QUOTE.exec(line);
-    if (quote !== null) {
-      flush();
-      const previous = blocks.at(-1);
-      if (previous?.kind === "quote") previous.text += `\n${quote[1] ?? ""}`;
-      else blocks.push({ kind: "quote", text: quote[1] ?? "" });
-      continue;
-    }
-    // A lazy continuation line of the previous list item.
-    const previous = blocks.at(-1);
-    if (paragraph.length === 0 && previous?.kind === "list" && /^\s+\S/.test(line)) {
-      const last = previous.items.at(-1);
-      if (last !== undefined) {
-        last.text += ` ${line.trim()}`;
-        continue;
-      }
-    }
-    paragraph.push(line);
-  }
-  flush();
-  return blocks;
-}
-
-const INLINE =
-  /(`+)([\s\S]*?[^`])\1(?!`)|\*\*(?=\S)([\s\S]+?)\*\*|__(?=\S)([\s\S]+?)__|\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\*(?=[^\s*])([\s\S]*?[^\s*])\*|\b_(?=[^\s_])([\s\S]*?[^\s_])_\b/;
-
-export function parseInline(source: string): Inline[] {
-  const out: Inline[] = [];
-  let rest = source;
-  while (rest.length > 0) {
-    const match = INLINE.exec(rest);
-    if (match === null) {
-      out.push({ kind: "text", text: rest });
-      break;
-    }
-    if (match.index > 0) out.push({ kind: "text", text: rest.slice(0, match.index) });
-    if (match[2] !== undefined) out.push({ kind: "code", text: match[2].trim() === "" ? match[2] : match[2].trim() });
-    else if (match[3] !== undefined || match[4] !== undefined)
-      out.push({ kind: "bold", children: parseInline(match[3] ?? match[4] ?? "") });
-    else if (match[5] !== undefined) out.push({ kind: "link", url: match[6] ?? "", children: parseInline(match[5]) });
-    else out.push({ kind: "italic", children: parseInline(match[7] ?? match[8] ?? "") });
-    rest = rest.slice(match.index + match[0].length);
-  }
-  return out;
-}
+/** Renders the blocks `parseBlocks` produces for assistant text. */
 
 type Styles = ReturnType<typeof createStyles>;
 
@@ -185,6 +60,36 @@ function CodeBlock({ lang, text, styles }: { lang: string; text: string; styles:
   );
 }
 
+/** A pipe table: header row, hairline grid, horizontal scroll for wide columns. */
+function TableBlock({ block, styles }: { block: Extract<Block, { kind: "table" }>; styles: Styles }): ReactNode {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableScroll}>
+      <View style={styles.table}>
+        <View style={[styles.tableRow, styles.tableHead]}>
+          {block.header.map((cell, index) => (
+            <Text
+              key={index}
+              style={[styles.tableCell, styles.tableHeadCell, { textAlign: block.aligns[index] ?? "left" }]}
+              selectable
+            >
+              {renderInline(parseInline(cell), styles)}
+            </Text>
+          ))}
+        </View>
+        {block.rows.map((row, rowIndex) => (
+          <View key={rowIndex} style={styles.tableRow}>
+            {row.map((cell, index) => (
+              <Text key={index} style={[styles.tableCell, { textAlign: block.aligns[index] ?? "left" }]} selectable>
+                {renderInline(parseInline(cell), styles)}
+              </Text>
+            ))}
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
 function MarkdownImpl({ text, caret }: { text: string; caret?: ReactNode }): ReactNode {
   const styles = useStyles(createStyles);
   const blocks = useMemo(() => parseBlocks(text), [text]);
@@ -224,6 +129,8 @@ function MarkdownImpl({ text, caret }: { text: string; caret?: ReactNode }): Rea
             return <View key={index} style={styles.rule} />;
           case "code":
             return <CodeBlock key={index} lang={block.lang} text={block.text} styles={styles} />;
+          case "table":
+            return <TableBlock key={index} block={block} styles={styles} />;
           case "list":
             return (
               <View key={index} style={styles.list}>
@@ -301,5 +208,23 @@ function createStyles(c: Palette) {
     },
     codeScroll: { paddingHorizontal: 12, paddingVertical: 10 },
     codeText: { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.fg },
+    tableScroll: { marginVertical: 2 },
+    table: {
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      borderRadius: radius.md,
+      overflow: "hidden",
+    },
+    tableRow: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
+    tableHead: { backgroundColor: c.raised, borderTopWidth: 0 },
+    tableCell: {
+      width: 150,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+      fontSize: 13,
+      lineHeight: 19,
+      color: c.fg,
+    },
+    tableHeadCell: { fontFamily: MONO, fontSize: 11, lineHeight: 16, color: c.fgMuted },
   } as const;
 }

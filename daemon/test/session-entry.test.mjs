@@ -19,3 +19,37 @@ test("a session created untitled is named by its first prompt, and the registry 
   assert.equal(entry.title, "Fix the flaky login test");
   assert.deepEqual(changed, ["Fix the flaky login test"]);
 });
+
+test("model, thinking, todo and queue events refresh the state the phone holds", async () => {
+  let reads = 0;
+  const rpc = Object.assign(new EventEmitter(), {
+    getState: async () => {
+      reads += 1;
+      return { sessionId: "s1", isStreaming: false, model: { provider: "fake", id: `m${reads}` } };
+    },
+    getMessages: async () => ({ messages: [] }),
+  });
+  const entry = new SessionEntry("/tmp/work", rpc);
+  await entry.hydrate();
+  const frames = [];
+  entry.clients.add({ readyState: 1, send: (text) => frames.push(JSON.parse(text)) });
+  entry.bind();
+
+  rpc.emit("event", { type: "model_changed" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(entry.state.model.id, "m2");
+  assert.equal(frames.at(-1).type, "state");
+
+  rpc.emit("event", { type: "todo_reminder" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(entry.state.model.id, "m3");
+
+  const before = reads;
+  rpc.emit("event", { type: "tool_execution_end", toolCallId: "c1", toolName: "bash" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(reads, before, "an ordinary tool event does not re-read the state");
+
+  rpc.emit("event", { type: "tool_execution_end", toolCallId: "c2", toolName: "todo" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(reads, before + 1, "a todo tool call does");
+});

@@ -1,8 +1,10 @@
-import { memo, useCallback, useState, type ReactNode } from "react";
-import { Animated, Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { Animated, Image, Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
+import { imageUri } from "../media";
+import { diffLines, editInput, editSides, type DiffLine } from "../diff";
 import { resultText, toolSummary } from "../messages";
 import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
-import type { ChatItem as Item, MessageItem, ToolItem } from "../types";
+import type { ChatItem as Item, ImagePart, Machine, MessageItem, ToolItem } from "../types";
 import { Spinner, StreamPulse, useEnter, usePulse } from "./brand";
 import { Markdown } from "./Markdown";
 import { Disclosure } from "./ui";
@@ -12,20 +14,46 @@ import { Disclosure } from "./ui";
  * the user's turn as a raised block, the reply as full-width prose, tool calls
  * as compact rows that open onto inset output, and notices as faint mono lines.
  */
-function ChatItemImpl({ item }: { item: Item }): ReactNode {
+function ChatItemImpl({ item, machine }: { item: Item; machine: Machine }): ReactNode {
   const enter = useEnter(320);
   const style = {
     opacity: enter,
     transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
   };
   let body: ReactNode;
-  if (item.kind === "tool") body = <ToolCard tool={item} />;
+  if (item.kind === "tool") body = <ToolCard tool={item} machine={machine} />;
   else if (item.kind === "notice") body = <Notice level={item.level} text={item.text} />;
-  else body = <Message item={item} />;
+  else body = <Message item={item} machine={machine} />;
   return <Animated.View style={style}>{body}</Animated.View>;
 }
 
 export const ChatItem = memo(ChatItemImpl);
+
+/** Images OMP attached to a message or a tool result; a broken blob simply does not render. */
+function Images({ parts, machine }: { parts: ImagePart[] | undefined; machine: Machine }): ReactNode {
+  const styles = useStyles(createStyles);
+  const uris = useMemo(
+    () =>
+      (parts ?? [])
+        .map((part) => imageUri(machine, part))
+        .filter((uri): uri is string => uri !== undefined),
+    [machine, parts],
+  );
+  if (uris.length === 0) return null;
+  return (
+    <View style={styles.images}>
+      {uris.map((uri, index) => (
+        <Image
+          key={`${index}-${uri.slice(0, 32)}`}
+          source={{ uri, headers: { authorization: `Bearer ${machine.token}` } }}
+          style={styles.image}
+          resizeMode="contain"
+          accessibilityLabel="Image"
+        />
+      ))}
+    </View>
+  );
+}
 
 function Notice({ level, text }: { level: "info" | "warning" | "error"; text: string }): ReactNode {
   const styles = useStyles(createStyles);
@@ -47,7 +75,7 @@ function Caret(): ReactNode {
   return <Text style={styles.caret}> ▍</Text>;
 }
 
-function Message({ item }: { item: MessageItem }): ReactNode {
+function Message({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
   const styles = useStyles(createStyles);
   const streaming = item.streaming === true;
   const thinking = item.thinking !== undefined && item.thinking !== "" ? item.thinking : null;
@@ -57,9 +85,12 @@ function Message({ item }: { item: MessageItem }): ReactNode {
       <View style={styles.turn}>
         <Text style={styles.gutterUser}>you</Text>
         <View style={styles.userBlock}>
-          <Text style={styles.userText} selectable>
-            {item.text}
-          </Text>
+          <Images parts={item.images} machine={machine} />
+          {item.text.trim() !== "" ? (
+            <Text style={styles.userText} selectable>
+              {item.text}
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -126,24 +157,68 @@ function pretty(value: unknown): string {
 function argSummary(args: unknown): string {
   if (typeof args === "string") return args;
   if (args === null || typeof args !== "object") return "";
-  const record = args as Record<string, unknown>;
+  const entries = new Map(Object.entries(args));
   for (const key of ["command", "cmd", "path", "file_path", "file", "pattern", "query", "url", "description"]) {
-    const value = record[key];
+    const value = entries.get(key);
     if (typeof value === "string" && value.trim() !== "") return value;
   }
-  const first = Object.values(record).find((value) => typeof value === "string");
-  return typeof first === "string" ? first : "";
+  for (const value of entries.values()) if (typeof value === "string") return value;
+  return "";
+}
+
+/** Arguments without OMP's `i` intent line, which the card already shows on its head. */
+function withoutIntent(args: unknown): unknown {
+  if (args === null || typeof args !== "object" || Array.isArray(args) || !("i" in args)) return args;
+  const rest: Record<string, unknown> = { ...args };
+  delete rest.i;
+  return Object.keys(rest).length === 0 ? undefined : rest;
 }
 
 /** A shell command in the arguments, shown as a `$` line; the other arguments stay as JSON. */
 function splitCommand(args: unknown): { command: string | null; rest: unknown } {
   if (args === null || typeof args !== "object" || Array.isArray(args)) return { command: null, rest: args };
-  const { command, ...rest } = args as Record<string, unknown>;
-  if (typeof command !== "string") return { command: null, rest: args };
-  return { command, rest: Object.keys(rest).length > 0 ? rest : undefined };
+  if (!("command" in args) || typeof args.command !== "string") return { command: null, rest: withoutIntent(args) };
+  const rest: Record<string, unknown> = { ...args };
+  delete rest.command;
+  delete rest.i;
+  return { command: args.command, rest: Object.keys(rest).length > 0 ? rest : undefined };
 }
 
-function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
+/** An edit's lines: two sides diffed, or the preformatted `input` block an edit tool may carry instead. */
+function editDiff(args: unknown): DiffLine[] | undefined {
+  const sides = editSides(args);
+  if (sides !== undefined) return diffLines(sides.before, sides.after);
+  const input = editInput(args);
+  if (input === undefined) return undefined;
+  return input.split("\n").map((line): DiffLine => {
+    if (line.startsWith("+")) return { kind: "add", text: line.slice(1) };
+    if (line.startsWith("-")) return { kind: "remove", text: line.slice(1) };
+    return { kind: "same", text: line };
+  });
+}
+
+/** The lines of an edit call in a mono block, additions and removals colored. */
+function Diff({ lines }: { lines: DiffLine[] }): ReactNode {
+  const styles = useStyles(createStyles);
+  return (
+    <View style={styles.pre}>
+      {lines.map((line, index) => (
+        <Text
+          key={`${index}-${line.text}`}
+          style={
+            line.kind === "add" ? styles.diffAdd : line.kind === "remove" ? styles.diffRemove : styles.diffSame
+          }
+          selectable
+        >
+          {line.kind === "add" ? "+" : line.kind === "remove" ? "-" : " "}
+          {line.text}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+function ToolCard({ tool, machine }: { tool: ToolItem; machine: Machine }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
@@ -153,9 +228,12 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
     [styles],
   );
   const failed = tool.status === "error";
-  const summary = (argSummary(tool.args) || toolSummary(tool)).replace(/\s+/g, " ").slice(0, 200);
+  const summary = ([tool.intent, argSummary(tool.args), toolSummary(tool)].find(
+    (value) => value !== undefined && value.trim() !== "",
+  ) ?? "").replace(/\s+/g, " ").slice(0, 200);
   const output = tool.result ?? tool.partial;
   const { command, rest } = splitCommand(tool.args);
+  const diff = tool.name === "edit" ? editDiff(tool.args) : undefined;
   return (
     <View style={failed ? styles.toolFailed : styles.tool}>
       <Pressable
@@ -180,25 +258,32 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
         </Text>
         <Disclosure open={open} size={12} />
       </Pressable>
+      <Images parts={tool.images} machine={machine} />
       {open ? (
         <View style={styles.toolBody}>
           <View>
             <Text style={styles.outTitle}>Input</Text>
-            {command !== null ? (
-              <View style={styles.pre}>
-                <Text style={styles.monoText} selectable>
-                  <Text style={styles.prompt}>$ </Text>
-                  {command}
-                </Text>
-              </View>
-            ) : null}
-            {rest !== undefined ? (
-              <View style={command !== null ? styles.preNext : styles.pre}>
-                <Text style={styles.monoText} selectable>
-                  {pretty(rest)}
-                </Text>
-              </View>
-            ) : null}
+            {diff !== undefined ? (
+              <Diff lines={diff} />
+            ) : (
+              <>
+                {command !== null ? (
+                  <View style={styles.pre}>
+                    <Text style={styles.monoText} selectable>
+                      <Text style={styles.prompt}>$ </Text>
+                      {command}
+                    </Text>
+                  </View>
+                ) : null}
+                {rest !== undefined ? (
+                  <View style={command !== null ? styles.preNext : styles.pre}>
+                    <Text style={styles.monoText} selectable>
+                      {pretty(rest)}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
+            )}
           </View>
           {output !== undefined ? (
             <View>
@@ -332,5 +417,10 @@ function createStyles(c: Palette) {
     prompt: { color: c.accent },
     monoText: mono,
     monoError: { ...mono, color: c.err },
+    images: { gap: 6, marginVertical: 4 },
+    image: { width: "100%", height: 200, borderRadius: radius.sm, backgroundColor: c.inset },
+    diffSame: { ...mono, color: c.fgMuted },
+    diffAdd: { ...mono, color: c.ok },
+    diffRemove: { ...mono, color: c.err },
   } as const;
 }

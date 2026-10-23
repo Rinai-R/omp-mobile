@@ -79,3 +79,97 @@ test("a failed result marks its call failed; a result whose call is missing keep
     ["bash:error", "grep:done"],
   );
 });
+
+const image = { type: "image", data: "blob:sha256:" + "a".repeat(64), mimeType: "image/webp" };
+
+test("images on a user message and on a tool result reach their items", () => {
+  const userWithImage = { role: "user", content: [{ type: "text", text: "look" }, image] };
+  const toolCall = {
+    role: "assistant",
+    content: [{ type: "toolCall", id: "c1", name: "read", intent: "Reading shot.png", arguments: { path: "shot.png" } }],
+  };
+  const toolResult = {
+    role: "toolResult",
+    toolCallId: "c1",
+    toolName: "read",
+    content: [{ type: "text", text: "shot.png" }, image],
+  };
+  const items = snapshotItems([userWithImage, toolCall, toolResult]);
+  assert.equal(items[0].kind, "message");
+  assert.equal(items[0].images.length, 1);
+  assert.equal(items[0].images[0].mimeType, "image/webp");
+  assert.equal(items[1].intent, "Reading shot.png");
+  assert.equal(items[1].images.length, 1);
+});
+
+test("a live tool card takes its intent and its result images from the events", () => {
+  let items = applyEvent([], {
+    type: "tool_execution_start",
+    toolCallId: "c1",
+    toolName: "read",
+    args: { path: "shot.png" },
+    intent: "Reading shot.png",
+  });
+  items = applyEvent(items, {
+    type: "tool_execution_end",
+    toolCallId: "c1",
+    toolName: "read",
+    isError: false,
+    result: { content: [{ type: "text", text: "opened" }, image] },
+  });
+  assert.equal(items[0].intent, "Reading shot.png");
+  assert.equal(items[0].images.length, 1);
+  assert.equal(items[0].status, "done");
+});
+
+test("an image-only message survives message_end", () => {
+  const items = applyEvent([], { type: "message_start", message: { role: "user", content: [image] } });
+  const ended = applyEvent(items, { type: "message_end", message: { role: "user", content: [image] } });
+  assert.equal(ended.length, 1);
+  assert.equal(ended[0].text, "");
+  assert.equal(ended[0].images.length, 1);
+});
+
+test("compaction and retry events explain themselves in the transcript", () => {
+  let items = applyEvent([], { type: "auto_retry_start", attempt: 2, maxAttempts: 4, errorMessage: "rate limited" });
+  items = applyEvent(items, { type: "auto_retry_end", success: false, finalError: "rate limited" });
+  items = applyEvent(items, { type: "auto_compaction_start" });
+  items = applyEvent(items, { type: "auto_compaction_end", errorMessage: "too large" });
+  assert.deepEqual(
+    items.map((item) => `${item.level}:${item.text}`),
+    ["warning:Retrying (attempt 2/4): rate limited", "error:Retry stopped: rate limited", "info:Compacting the conversation…", "warning:Compaction failed: too large"],
+  );
+});
+
+test("a read result that names a stored media path shows that image", () => {
+  const hash = "c".repeat(64);
+  const details = { mediaPath: `/Users/x/.omp/agent/blobs/${hash}.png`, fileSize: 1 };
+  const toolResult = {
+    role: "toolResult",
+    toolCallId: "c1",
+    toolName: "read",
+    content: [{ type: "text", text: "Image metadata" }],
+    details,
+  };
+  const items = snapshotItems([toolResult]);
+  assert.equal(items[0].images.length, 1);
+  assert.equal(items[0].images[0].data, `blob:sha256:${hash}`);
+
+  const started = applyEvent([], { type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: {} });
+  const live = applyEvent(started, {
+    type: "tool_execution_end",
+    toolCallId: "c1",
+    toolName: "read",
+    result: { content: [{ type: "text", text: "Image metadata" }], details },
+  });
+  assert.equal(live[0].images[0].data, `blob:sha256:${hash}`);
+
+  const otherStart = applyEvent([], { type: "tool_execution_start", toolCallId: "c2", toolName: "read", args: {} });
+  const outside = applyEvent(otherStart, {
+    type: "tool_execution_end",
+    toolCallId: "c2",
+    toolName: "read",
+    result: { content: [], details: { mediaPath: "/tmp/shot.png" } },
+  });
+  assert.equal(outside[0].images, undefined);
+});

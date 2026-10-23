@@ -1,4 +1,4 @@
-import type { AgentMessage, ChatItem, MessageItem, NoticeItem, ToolItem } from "./types";
+import type { AgentMessage, ChatItem, ImagePart, MessageItem, NoticeItem, ToolItem } from "./types";
 
 let counter = 0;
 const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(counter += 1)}`;
@@ -28,6 +28,40 @@ function thinkingOf(content: unknown): string | undefined {
   return text === "" ? undefined : text;
 }
 
+/**
+ * Image parts of a content array. OMP keeps them as `{type:"image", data, mimeType}`,
+ * where `data` is base64 or a `blob:sha256:` reference into the computer's store.
+ */
+function imagesOf(content: unknown): ImagePart[] | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const images: ImagePart[] = [];
+  for (const part of content) {
+    if (part === null || typeof part !== "object") continue;
+    if (!("type" in part) || part.type !== "image") continue;
+    if (!("data" in part) || typeof part.data !== "string" || part.data === "") continue;
+    const mimeType = "mimeType" in part && typeof part.mimeType === "string" ? part.mimeType : undefined;
+    images.push({ data: part.data, mimeType });
+  }
+  return images.length === 0 ? undefined : images;
+}
+
+/** A result's details.mediaPath, when it names a file in OMP's blob store, as an image part. */
+function mediaImages(result: unknown): ImagePart[] | undefined {
+  if (result === null || typeof result !== "object") return undefined;
+  if (!("details" in result) || result.details === null || typeof result.details !== "object") return undefined;
+  const details = result.details;
+  if (!("mediaPath" in details) || typeof details.mediaPath !== "string") return undefined;
+  const name = details.mediaPath.split("/").pop() ?? "";
+  const hash = name.replace(/\.[a-z0-9]+$/i, "");
+  return /^[0-9a-f]{64}$/.test(hash) ? [{ data: `blob:sha256:${hash}` }] : undefined;
+}
+
+/** Images a tool result carries: inline parts, else a stored media path. */
+function resultImages(result: unknown): ImagePart[] | undefined {
+  if (result === null || typeof result !== "object") return undefined;
+  return imagesOf("content" in result ? result.content : undefined) ?? mediaImages(result);
+}
+
 export function roleOf(message: AgentMessage): MessageItem["role"] | undefined {
   if (message.role === "user" || message.role === "assistant" || message.role === "system") {
     return message.role;
@@ -39,15 +73,28 @@ function messageToItem(message: AgentMessage, index: number): ChatItem | undefin
   const role = roleOf(message);
   if (role === undefined) return undefined;
   const text = textOf(message.content);
-  if (text.trim() === "" && (role !== "assistant" || thinkingOf(message.content) === undefined)) return undefined;
+  const thinking = thinkingOf(message.content);
+  const images = imagesOf(message.content);
+  const empty = text.trim() === "";
+  if (empty && images === undefined && (role !== "assistant" || thinking === undefined)) return undefined;
   return {
     kind: "message",
     id: message.id ?? `m-${index}`,
     role,
     text,
-    thinking: thinkingOf(message.content),
+    thinking,
+    images,
     createdAt: typeof message.timestamp === "number" ? message.timestamp : undefined,
   };
+}
+
+/** The one-line intent OMP attaches to a tool call, from the part or its `i` argument. */
+function intentOf(part: object): string | undefined {
+  if ("intent" in part && typeof part.intent === "string" && part.intent.trim() !== "") return part.intent;
+  if (!("arguments" in part) || part.arguments === null || typeof part.arguments !== "object") return undefined;
+  const args = part.arguments;
+  if (!("i" in args) || typeof args.i !== "string" || args.i.trim() === "") return undefined;
+  return args.i;
 }
 
 /** The `toolCall` parts of an assistant message, as the cards live `tool_execution_start` events produce. */
@@ -56,13 +103,14 @@ function toolCallsOf(message: AgentMessage): ToolItem[] {
   const tools: ToolItem[] = [];
   for (const part of message.content) {
     if (part === null || typeof part !== "object") continue;
-    const call = part as { type?: unknown; id?: unknown; name?: unknown; arguments?: unknown };
-    if (call.type !== "toolCall" || typeof call.id !== "string") continue;
+    if (!("type" in part) || part.type !== "toolCall") continue;
+    if (!("id" in part) || typeof part.id !== "string") continue;
     tools.push({
       kind: "tool",
-      id: call.id,
-      name: typeof call.name === "string" ? call.name : "tool",
-      args: call.arguments,
+      id: part.id,
+      name: "name" in part && typeof part.name === "string" ? part.name : "tool",
+      intent: intentOf(part),
+      args: "arguments" in part ? part.arguments : undefined,
       status: "running",
     });
   }
@@ -81,14 +129,16 @@ export function snapshotItems(messages: AgentMessage[]): ChatItem[] {
     if (message.role === "toolResult" || message.role === "tool") {
       const id = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
       const tool = id === undefined ? undefined : tools.get(id);
+      const images = resultImages(message);
       if (tool !== undefined) {
         tool.result = { content: message.content };
         tool.isError = message.isError === true;
         tool.status = tool.isError ? "error" : "done";
+        tool.images = images;
         return;
       }
       const text = textOf(message.content).trim();
-      if (text === "") return;
+      if (text === "" && images === undefined) return;
       items.push({
         kind: "tool",
         id: id ?? message.id ?? nextId("tool"),
@@ -97,6 +147,7 @@ export function snapshotItems(messages: AgentMessage[]): ChatItem[] {
         result: text,
         isError: message.isError === true,
         status: message.isError === true ? "error" : "done",
+        images,
       });
       return;
     }
@@ -172,6 +223,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       role: roleOf(message) ?? "assistant",
       text,
       thinking: thinkingOf(message.content),
+      images: imagesOf(message.content),
       streaming: true,
       open: true,
     };
@@ -206,10 +258,11 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       role,
       text: textOf(message.content),
       thinking: thinkingOf(message.content),
+      images: imagesOf(message.content),
       streaming: false,
       open: false,
     };
-    const keep = !blank(final) && !(role !== "assistant" && final.text.trim() === "");
+    const keep = !blank(final) && !(role !== "assistant" && final.text.trim() === "" && final.images === undefined);
     if (at === -1) return keep ? [...items, final] : items;
     if (!keep) return items.filter((_, index) => index !== at);
     return items.map((entry, index) => (index === at ? final : entry));
@@ -220,6 +273,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       kind: "tool",
       id,
       name: typeof event.toolName === "string" ? event.toolName : "tool",
+      intent: typeof event.intent === "string" && event.intent.trim() !== "" ? event.intent : undefined,
       args: event.args,
       status: "running",
     };
@@ -237,12 +291,38 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     const id = typeof event.toolCallId === "string" ? event.toolCallId : "";
     if (id === "") return items;
     const isError = event.isError === true;
+    const result = event.result;
+    const images = resultImages(result);
     return updateItem(items, id, (item) => {
       if (item.kind !== "tool") return;
-      item.result = event.result;
+      item.result = result;
       item.isError = isError;
       item.status = isError ? "error" : "done";
+      item.partial = undefined;
+      item.images = images;
     });
+  }
+  if (type === "auto_compaction_start" || type === "auto_retry_start" || type === "auto_retry_end") {
+    const level: NoticeItem["level"] =
+      type === "auto_retry_end" && event.success !== true ? "error" : type === "auto_retry_start" ? "warning" : "info";
+    const text =
+      type === "auto_compaction_start"
+        ? "Compacting the conversation…"
+        : type === "auto_retry_end"
+          ? event.success === true
+            ? "Retry succeeded."
+            : `Retry stopped: ${String(event.finalError ?? "unknown error")}`
+          : `Retrying (attempt ${String(event.attempt ?? "?")}/${String(event.maxAttempts ?? "?")}): ${String(event.errorMessage ?? "")}`;
+    return [...items, { kind: "notice", id: nextId("notice"), level, text }];
+  }
+  if (type === "auto_compaction_end") {
+    const failed = event.errorMessage !== undefined && event.errorMessage !== null;
+    const text = failed
+      ? `Compaction failed: ${String(event.errorMessage)}`
+      : event.aborted === true
+        ? "Compaction stopped."
+        : "Context compacted.";
+    return [...items, { kind: "notice", id: nextId("notice"), level: failed ? "warning" : "info", text }];
   }
   if (type === "notice") {
     const level = event.level === "warning" || event.level === "error" ? event.level : "info";

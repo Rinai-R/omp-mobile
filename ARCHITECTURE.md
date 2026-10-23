@@ -63,6 +63,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 | `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process. |
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it; the OMP session file stays. |
 | `GET /events` | The attention stream (Server-Sent Events), see below. |
+| `GET /blobs/<sha256>` | One image from OMP's content-addressed store (`<omp home>/agent/blobs`), typed from its bytes. |
 | `GET /status` | `{pid, version, startedAt, url, liveSessions, eventStreams, lastPhone}`; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
 | `GET /sessions/:id/ws` | WebSocket upgrade, see below. |
 
@@ -73,7 +74,7 @@ On connect the daemon sends `{type: "snapshot", session, state, messages}`, then
 | From the daemon | Meaning |
 | --- | --- |
 | `event` | One OMP session event, unchanged. |
-| `state` | OMP's session state after a turn. |
+| `state` | OMP's session state after a turn, and after model, thinking-level, todo or queue changes. |
 | `approval` | An OMP UI request (`select`, `confirm`, `input`, `editor`) waiting for an answer. |
 | `approval_resolved` | `{id, reason}`: that request was answered by any client, cancelled by OMP, or closed with the process. |
 | `notice` | `{level, message}` from OMP. |
@@ -86,6 +87,16 @@ On connect the daemon sends `{type: "snapshot", session, state, messages}`, then
 | `{type: "abort"}` | Stops the running turn. |
 | `{type: "approval", id, value?, confirmed?, cancelled?}` | Answers an open request. |
 | `{type: "refresh"}` | Asks for a fresh `state`. |
+| `{type: "models"}` | Answers `{type: "models", models}`: the catalog as `provider`, `id`, `name`, `reasoning`, `input`, `contextWindow`, `cost`, `efforts`. OMP waits out model discovery, so the first answer can take a few seconds. |
+| `{type: "set_model", provider, modelId}` | Switches the session's model, then broadcasts the new `state`; `set_model` also updates the registry's summary. |
+| `{type: "thinking_levels"}` | Answers `{type: "thinking_levels", levels, current}` for the active model. |
+| `{type: "set_thinking_level", level}` | Sets the session's thinking level and broadcasts the new `state`. |
+
+## Rendering
+
+The app folds the same OMP events into the transcript both live and from a saved one: a message per `message_start` / `message_end`, a card per `tool_execution_*` call keyed by `toolCallId`, and notices for compaction, retries and OMP's own `notice` frames. Tool cards show OMP's `intent` line; `edit` calls show a line diff (from `old_string`/`new_string`) or their preformatted `input` block.
+
+Images arrive as `{type: "image", data, mimeType}`. Inline base64 becomes a data URI; `blob:sha256:<hash>` becomes the daemon's `/blobs/<hash>` route, which serves the store under `<omp home>/agent/blobs` to an authenticated client. The todo panel reads `state.todoPhases`, the context chip reads `state.contextUsage`, and queued messages come from `state.queuedMessages`.
 
 ## Sessions
 

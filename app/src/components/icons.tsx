@@ -136,3 +136,11 @@ export function KeyboardGlyph({ size = 18, color }: GlyphProps): ReactNode {
     </Svg>
   );
 }
+
+export function CheckGlyph({ size = 16, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path d="M3 8.5l3.5 3.5L13 4.5" stroke={color} {...STROKE} strokeWidth={1.8} />
+    </Svg>
+  );
+}

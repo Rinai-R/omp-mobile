@@ -14,6 +14,8 @@
 OMP Mobile is a native phone app for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP), with a small daemon on each computer. Start, follow and steer OMP sessions from the phone: transcript, tool calls, approvals, and the sessions you started in a terminal.
 
 - **Native app:** The app draws the transcript, tool cards, thinking, Markdown and composer itself. No WebView, no web page.
+- **The whole transcript:** images the user sent and images tools produce (screenshots, opened files), edit diffs with their intent, tool results, Markdown tables, OMP's todo list, context usage and queued messages.
+- **Model switching:** tap the model in the composer to pick from OMP's catalog — grouped by provider and searchable — and set its thinking level. The model chip follows the session when it changes.
 - **Approvals on the phone:** OMP's own tool approvals and questions arrive as a sheet, and the turn waits for your answer.
 - **Terminal sessions:** Sessions you started in a terminal on the computer are listed too and continue on the phone. One still open in a terminal waits until that terminal exits.
 - **Notifications:** Android notifications for approvals, questions, and finished turns while the app is in the background.
