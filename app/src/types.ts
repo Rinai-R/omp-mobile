@@ -10,6 +10,8 @@ export interface Machine {
   version: string;
   /** Working directory the daemon starts sessions in. */
   cwd: string;
+  /** When a probe last reached the daemon (epoch ms); absent until one has. */
+  lastSeen?: number;
 }
 
 export interface SessionSummary {

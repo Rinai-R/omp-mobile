@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HEADER_HEIGHT, HIT, radius, useColors, useStyles, type Palette } from "../theme";
+import type { Dot } from "../probe";
 import { BackGlyph, ChevronGlyph, CloseGlyph } from "./icons";
 
 export function Button({
@@ -102,6 +103,20 @@ export function Field({
 
 export function StatusDot({ color, size = 8 }: { color: string; size?: number }): ReactNode {
   return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />;
+}
+
+/**
+ * A machine's or a link's state dot (8 px) in a 12 px slot, as Kivotos draws
+ * it. `used` rings it: the link the phone goes through.
+ */
+export function StateDot({ dot, used = false }: { dot: Dot; used?: boolean }): ReactNode {
+  const styles = useStyles(createStyles);
+  return (
+    <View style={styles.dotSlot}>
+      {used ? <View style={styles[`halo.${dot}`]} /> : null}
+      <View style={styles[`dot.${dot}`]} />
+    </View>
+  );
 }
 
 /** A 44 px round touch target around an icon. */
@@ -276,12 +291,25 @@ export function EmptyState({
   );
 }
 
-/** A tappable error strip under a header. */
-export function Banner({ text, onPress }: { text: string; onPress?: () => void }): ReactNode {
+/** A tappable error strip under a header, with an optional action on its right. */
+export function Banner({
+  text,
+  onPress,
+  action,
+}: {
+  text: string;
+  onPress?: () => void;
+  action?: { label: string; onPress: () => void };
+}): ReactNode {
   const styles = useStyles(createStyles);
   return (
     <Pressable onPress={onPress} style={styles.banner} accessibilityRole="alert">
       <Text style={styles.bannerText}>{text}</Text>
+      {action !== undefined ? (
+        <Pressable onPress={action.onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={action.label}>
+          <Text style={styles.bannerAction}>{action.label}</Text>
+        </Pressable>
+      ) : null}
     </Pressable>
   );
 }
@@ -351,6 +379,8 @@ function createStyles(c: Palette) {
     borderBottomColor: c.separator,
     backgroundColor: c.bg,
   } as const;
+  const dot = { width: 8, height: 8, borderRadius: 4 } as const;
+  const halo = { ...StyleSheet.absoluteFill, borderRadius: 6, opacity: 0.3 } as const;
   const rowTitle = { fontSize: 16, lineHeight: 22, fontWeight: "500", color: c.text } as const;
   return {
     primary: { ...button, backgroundColor: c.primary },
@@ -451,8 +481,29 @@ function createStyles(c: Palette) {
     emptyBody: { fontSize: 15, lineHeight: 22, color: c.textSecondary, marginTop: 6, textAlign: "center" },
     emptyAction: { marginTop: 22, minWidth: 200 },
 
-    banner: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: c.dangerSoft },
-    bannerText: { fontSize: 13, lineHeight: 18, color: c.danger },
+    banner: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      backgroundColor: c.dangerSoft,
+    },
+    bannerText: { flex: 1, fontSize: 13, lineHeight: 18, color: c.danger },
+    bannerAction: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: c.danger },
+
+    dotSlot: { width: 12, height: 12, alignItems: "center", justifyContent: "center" },
+    "dot.online": { ...dot, backgroundColor: c.success },
+    "dot.down": { ...dot, backgroundColor: c.danger },
+    "dot.checking": {
+      ...dot,
+      borderWidth: 1.5,
+      borderColor: c.textTertiary,
+      borderRightColor: "transparent",
+    },
+    "halo.online": { ...halo, backgroundColor: c.success },
+    "halo.down": { ...halo, backgroundColor: c.danger },
+    "halo.checking": { ...halo, backgroundColor: c.textTertiary },
 
     sheetRoot: { flex: 1, justifyContent: "flex-end" },
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.scrim },

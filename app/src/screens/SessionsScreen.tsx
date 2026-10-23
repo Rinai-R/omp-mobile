@@ -14,11 +14,16 @@ import {
   SectionHeader,
   Sheet,
 } from "../components/ui";
+import { reasonText, type Probe } from "../probe";
 import { useColors, useStyles, type Palette } from "../theme";
 import type { Machine, SessionSummary } from "../types";
 
 interface Props {
   machine: Machine;
+  /** The machine's last probe from the machines screen, if any. */
+  probe: Probe | undefined;
+  /** Probe the machine again (Retry on the unreachable banner). */
+  onRetry: (machine: Machine) => void;
   onBack: () => void;
   onOpen: (machine: Machine, session: SessionSummary) => void;
 }
@@ -35,7 +40,7 @@ function ago(timestamp: number): string {
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
+export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -45,12 +50,15 @@ export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
   const [creating, setCreating] = useState(false);
   const [cwd, setCwd] = useState(machine.cwd);
   const [busy, setBusy] = useState(false);
+  /** The session list loaded here, so a stale unreachable probe no longer applies. */
+  const [reached, setReached] = useState(false);
 
   const load = useCallback(async (fresh: boolean) => {
     if (fresh) setRefreshing(true);
     setError(null);
     try {
       setSessions(await listSessions(machine));
+      setReached(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -97,6 +105,12 @@ export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
   );
 
   const openCreate = useCallback(() => setCreating(true), []);
+  const retry = useCallback(() => {
+    onRetry(machine);
+    void load(true);
+  }, [load, machine, onRetry]);
+  const unreachable =
+    probe?.state === "unreachable" && !reached ? `Unreachable: ${reasonText(probe.reason)}` : null;
   const running = sessions.filter((session) => session.status === "streaming").length;
 
   return (
@@ -111,7 +125,11 @@ export function SessionsScreen({ machine, onBack, onOpen }: Props): ReactNode {
           </IconButton>
         }
       />
-      {error !== null && !creating ? <Banner text={error} onPress={() => setError(null)} /> : null}
+      {unreachable !== null ? (
+        <Banner text={unreachable} action={{ label: "Retry", onPress: retry }} />
+      ) : error !== null && !creating ? (
+        <Banner text={error} onPress={() => setError(null)} />
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>

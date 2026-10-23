@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { hello, normalizeUrl, parsePairing } from "../api";
 import { ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
+import { MachineSheet } from "../components/MachineSheet";
 import {
   Button,
   EmptyState,
@@ -12,13 +13,16 @@ import {
   Row,
   SectionHeader,
   Sheet,
-  StatusDot,
+  StateDot,
 } from "../components/ui";
+import { summaryOf, type Probe } from "../probe";
 import { useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 
 interface Props {
   machines: Machine[];
+  /** The latest probe of each machine by id; missing until its first probe finished. */
+  probes: ReadonlyMap<string, Probe>;
   onAdd: (machine: Machine) => void;
   onOpen: (machine: Machine) => void;
   onRemove: (machine: Machine) => void;
@@ -29,6 +33,7 @@ interface Props {
 
 export function MachinesScreen({
   machines,
+  probes,
   onAdd,
   onOpen,
   onRemove,
@@ -43,6 +48,9 @@ export function MachinesScreen({
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** The machine whose sheet is open. */
+  const [sheet, setSheet] = useState<Machine | null>(null);
+  const closeSheet = useCallback(() => setSheet(null), []);
 
   const close = useCallback(() => {
     setAdding(false);
@@ -67,6 +75,7 @@ export function MachinesScreen({
         os: info.os,
         version: info.version,
         cwd: info.cwd,
+        lastSeen: Date.now(),
       });
       setUrl("");
       setToken("");
@@ -80,7 +89,7 @@ export function MachinesScreen({
 
   const confirmRemove = useCallback(
     (machine: Machine) => {
-      Alert.alert(`Remove ${machine.name}?`, "The daemon and its running sessions stay on the computer.", [
+      Alert.alert(`Remove ${machine.name} from this phone?`, "The daemon and its running sessions stay on the computer.", [
         { text: "Cancel", style: "cancel" },
         { text: "Remove", style: "destructive", onPress: () => onRemove(machine) },
       ]);
@@ -89,6 +98,8 @@ export function MachinesScreen({
   );
 
   const openAdd = useCallback(() => setAdding(true), []);
+  // "seen 5 min ago" is recomputed on each render; each probe round re-renders the list.
+  const now = Date.now();
 
   return (
     <View style={styles.root}>
@@ -127,28 +138,43 @@ export function MachinesScreen({
           <>
             <SectionHeader title="Computers" />
             <Group>
-              {machines.map((machine, index) => (
-                <Row
-                  key={machine.id}
-                  title={machine.name}
-                  detail={
-                    <Text style={styles.detail} numberOfLines={1}>
-                      {machine.os} · OMP {machine.version} · {machine.url.replace(/^https?:\/\//, "")}
-                    </Text>
-                  }
-                  leading={<ComputerGlyph color={colors.textSecondary} />}
-                  trailing={<StatusDot color={colors.success} />}
-                  last={index === machines.length - 1}
-                  onPress={() => onOpen(machine)}
-                  onLongPress={() => confirmRemove(machine)}
-                  accessibilityLabel={`${machine.name}, ${machine.os}`}
-                />
-              ))}
+              {machines.map((machine, index) => {
+                const probe = probes.get(machine.id);
+                const summary = summaryOf(probe, machine.lastSeen, now);
+                return (
+                  <Row
+                    key={machine.id}
+                    title={machine.name}
+                    dim={summary.dot === "down"}
+                    detail={
+                      <View style={styles.state}>
+                        <StateDot dot={summary.dot} />
+                        <Text style={styles.detail} numberOfLines={1}>
+                          {summary.text}
+                        </Text>
+                      </View>
+                    }
+                    leading={<ComputerGlyph color={colors.textSecondary} />}
+                    last={index === machines.length - 1}
+                    onPress={() => onOpen(machine)}
+                    onLongPress={() => setSheet(machine)}
+                    accessibilityLabel={`${machine.name}, ${summary.text}`}
+                  />
+                );
+              })}
             </Group>
-            <Text style={styles.footnote}>Long-press a computer to remove it.</Text>
+            <Text style={styles.footnote}>Long-press a computer for its details.</Text>
           </>
         )}
       </ScrollView>
+
+      <MachineSheet
+        machine={sheet}
+        probe={sheet === null ? undefined : probes.get(sheet.id)}
+        onOpen={onOpen}
+        onRemove={confirmRemove}
+        onClose={closeSheet}
+      />
 
       <Sheet visible={adding} title="Add a machine" onClose={close}>
         <Text style={styles.hint}>
@@ -179,7 +205,8 @@ function createStyles(c: Palette) {
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
     emptyContent: { flexGrow: 1 },
-    detail: { fontSize: 13, lineHeight: 18, color: c.textSecondary },
+    detail: { flexShrink: 1, fontSize: 13, lineHeight: 18, color: c.textSecondary },
+    state: { flexDirection: "row", alignItems: "center", gap: 4 },
     footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
     hint: { fontSize: 13, lineHeight: 18, color: c.textSecondary, marginHorizontal: 4 },
     error: { fontSize: 13, lineHeight: 18, color: c.danger, marginHorizontal: 4 },
