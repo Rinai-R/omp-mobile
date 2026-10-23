@@ -87,10 +87,10 @@ refuses to start unless `--no-whois` is given.
   `~/.omp-mobile/sessions.json` and resumed with `omp --resume` the first time
   the app opens one again after a daemon restart.
 
-The daemon starts OMP with `--auto-approve` by default, so **built-in tool
-approval is not asked**; extension UI dialogs are. Use
-`--no-auto-approve` to leave the default policy in place and accept that a
-session may block on a terminal prompt.
+OMP runs in `--mode rpc-ui`, so its own tool approvals (the Approve / Deny
+prompt your OMP approval policy asks for) reach the phone as a native sheet;
+the turn waits until you answer. `--auto-approve` passes OMP's auto-approve
+through instead, and nothing is asked.
 
 ## Not yet aligned with Kivotos
 
