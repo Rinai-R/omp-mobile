@@ -1,15 +1,28 @@
 import { memo, useCallback, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
+import { Animated, Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
 import { toolSummary } from "../messages";
 import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ChatItem as Item, MessageItem, ToolItem } from "../types";
-import { ChevronDownGlyph, ChevronGlyph, ToolGlyph } from "./icons";
+import { Spinner, StreamPulse, useEnter, usePulse } from "./brand";
 import { Markdown } from "./Markdown";
+import { Disclosure } from "./ui";
 
+/**
+ * One transcript row in the my.omp.sh style: a mono role label over each turn,
+ * the user's turn as a raised block, the reply as full-width prose, tool calls
+ * as compact rows that open onto inset output, and notices as faint mono lines.
+ */
 function ChatItemImpl({ item }: { item: Item }): ReactNode {
-  if (item.kind === "tool") return <ToolCard tool={item} />;
-  if (item.kind === "notice") return <Notice level={item.level} text={item.text} />;
-  return <Message item={item} />;
+  const enter = useEnter(320);
+  const style = {
+    opacity: enter,
+    transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
+  };
+  let body: ReactNode;
+  if (item.kind === "tool") body = <ToolCard tool={item} />;
+  else if (item.kind === "notice") body = <Notice level={item.level} text={item.text} />;
+  else body = <Message item={item} />;
+  return <Animated.View style={style}>{body}</Animated.View>;
 }
 
 export const ChatItem = memo(ChatItemImpl);
@@ -17,12 +30,15 @@ export const ChatItem = memo(ChatItemImpl);
 function Notice({ level, text }: { level: "info" | "warning" | "error"; text: string }): ReactNode {
   const styles = useStyles(createStyles);
   return (
-    <Text
-      style={level === "error" ? styles.noticeError : level === "warning" ? styles.noticeWarn : styles.notice}
-      selectable
-    >
-      {text}
-    </Text>
+    <View style={styles.noticeRow}>
+      <View style={level === "error" ? styles.noticeDotError : level === "warning" ? styles.noticeDotWarn : styles.noticeDot} />
+      <Text
+        style={level === "error" ? styles.noticeError : level === "warning" ? styles.noticeWarn : styles.notice}
+        selectable
+      >
+        {text}
+      </Text>
+    </View>
   );
 }
 
@@ -38,8 +54,9 @@ function Message({ item }: { item: MessageItem }): ReactNode {
 
   if (item.role === "user") {
     return (
-      <View style={styles.userRow}>
-        <View style={styles.userBubble}>
+      <View style={styles.turn}>
+        <Text style={styles.gutterUser}>you</Text>
+        <View style={styles.userBlock}>
           <Text style={styles.userText} selectable>
             {item.text}
           </Text>
@@ -49,30 +66,32 @@ function Message({ item }: { item: MessageItem }): ReactNode {
   }
   if (item.role === "system") {
     return (
-      <Text style={styles.system} selectable>
-        {item.text}
-      </Text>
+      <View style={styles.noticeRow}>
+        <View style={styles.noticeDot} />
+        <Text style={styles.notice} selectable>
+          {item.text}
+        </Text>
+      </View>
     );
   }
   return (
-    <View style={styles.assistant}>
-      {thinking !== null ? <Thinking text={thinking} active={streaming && item.text === ""} /> : null}
-      {item.text !== "" ? (
-        <Markdown text={item.text} caret={streaming ? <Caret /> : undefined} />
-      ) : streaming && thinking === null ? (
-        <Text style={styles.waiting}>
-          <Caret />
-        </Text>
-      ) : null}
+    <View style={styles.turn}>
+      <Text style={styles.gutter}>omp</Text>
+      <View style={styles.assistant}>
+        {thinking !== null ? <Thinking text={thinking} active={streaming && item.text === ""} /> : null}
+        {item.text !== "" ? <Markdown text={item.text} caret={streaming ? <Caret /> : undefined} /> : null}
+        {streaming ? <StreamPulse /> : null}
+      </View>
     </View>
   );
 }
 
 function Thinking({ text, active }: { text: string; active: boolean }): ReactNode {
   const styles = useStyles(createStyles);
-  const colors = useColors();
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((value) => !value), []);
+  const pulse = usePulse(active, 1400);
+  const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.45] });
   return (
     <View style={styles.thinking}>
       <Pressable
@@ -82,12 +101,8 @@ function Thinking({ text, active }: { text: string; active: boolean }): ReactNod
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
       >
-        <Text style={styles.thinkingLabel}>{active ? "Thinking…" : "Thought"}</Text>
-        {open ? (
-          <ChevronDownGlyph size={14} color={colors.textTertiary} />
-        ) : (
-          <ChevronGlyph size={14} color={colors.textTertiary} />
-        )}
+        <Animated.Text style={[styles.thinkingLabel, { opacity }]}>{active ? "Thinking…" : "Thought"}</Animated.Text>
+        <Disclosure open={open} size={12} />
       </Pressable>
       {open ? (
         <Text style={styles.thinkingText} selectable>
@@ -120,6 +135,14 @@ function argSummary(args: unknown): string {
   return typeof first === "string" ? first : "";
 }
 
+/** A shell command in the arguments, shown as a `$` line; the other arguments stay as JSON. */
+function splitCommand(args: unknown): { command: string | null; rest: unknown } {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return { command: null, rest: args };
+  const { command, ...rest } = args as Record<string, unknown>;
+  if (typeof command !== "string") return { command: null, rest: args };
+  return { command, rest: Object.keys(rest).length > 0 ? rest : undefined };
+}
+
 function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -129,11 +152,12 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
     ({ pressed }: PressableStateCallbackType) => [styles.toolHead, pressed && styles.pressed],
     [styles],
   );
-  const dot = tool.status === "error" ? styles.dotError : tool.status === "running" ? styles.dotRunning : styles.dotDone;
+  const failed = tool.status === "error";
   const summary = (argSummary(tool.args) || toolSummary(tool)).replace(/\s+/g, " ").slice(0, 200);
   const output = tool.result ?? tool.partial;
+  const { command, rest } = splitCommand(tool.args);
   return (
-    <View style={styles.tool}>
+    <View style={failed ? styles.toolFailed : styles.tool}>
       <Pressable
         onPress={toggle}
         style={style}
@@ -141,33 +165,52 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
         accessibilityState={{ expanded: open }}
         accessibilityLabel={`${tool.name}, ${tool.status}`}
       >
-        <ToolGlyph size={15} color={colors.textSecondary} />
+        <View style={styles.statusSlot}>
+          {tool.status === "running" ? (
+            <Spinner size={9} color={colors.accent} />
+          ) : (
+            <View style={failed ? styles.dotError : styles.dotDone} />
+          )}
+        </View>
         <Text style={styles.toolName} numberOfLines={1}>
           {tool.name}
         </Text>
         <Text style={styles.toolSummary} numberOfLines={1}>
           {summary}
         </Text>
-        <View style={dot} />
-        {open ? (
-          <ChevronDownGlyph size={14} color={colors.textTertiary} />
-        ) : (
-          <ChevronGlyph size={14} color={colors.textTertiary} />
-        )}
+        <Disclosure open={open} size={12} />
       </Pressable>
       {open ? (
         <View style={styles.toolBody}>
-          <Text style={styles.toolLabel}>Arguments</Text>
-          <Text style={styles.mono} selectable>
-            {pretty(tool.args)}
-          </Text>
+          <View>
+            <Text style={styles.outTitle}>Input</Text>
+            {command !== null ? (
+              <View style={styles.pre}>
+                <Text style={styles.monoText} selectable>
+                  <Text style={styles.prompt}>$ </Text>
+                  {command}
+                </Text>
+              </View>
+            ) : null}
+            {rest !== undefined ? (
+              <View style={command !== null ? styles.preNext : styles.pre}>
+                <Text style={styles.monoText} selectable>
+                  {pretty(rest)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
           {output !== undefined ? (
-            <>
-              <Text style={styles.toolLabel}>{tool.isError === true ? "Error" : "Result"}</Text>
-              <Text style={tool.isError === true ? styles.monoError : styles.mono} selectable numberOfLines={60}>
-                {pretty(output)}
+            <View>
+              <Text style={tool.isError === true ? styles.outTitleError : styles.outTitle}>
+                {tool.isError === true ? "Error" : "Output"}
               </Text>
-            </>
+              <View style={styles.pre}>
+                <Text style={tool.isError === true ? styles.monoError : styles.monoText} selectable numberOfLines={60}>
+                  {pretty(output)}
+                </Text>
+              </View>
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -176,73 +219,118 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
 }
 
 function createStyles(c: Palette) {
-  const notice = { paddingHorizontal: 24, paddingVertical: 6, textAlign: "center", fontSize: 13, lineHeight: 18 } as const;
+  const notice = { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17 } as const;
+  const noticeDot = { width: 5, height: 5, borderRadius: 3, marginTop: 6 } as const;
   const dot = { width: 7, height: 7, borderRadius: 4 } as const;
-  const mono = { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.textSecondary } as const;
+  const mono = { fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fg } as const;
+  const gutter = {
+    fontFamily: MONO,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "500",
+    color: c.fgFaint,
+    marginBottom: 4,
+  } as const;
+  const tool = {
+    marginHorizontal: 16,
+    marginVertical: 3,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.border,
+    backgroundColor: c.raised,
+    overflow: "hidden",
+  } as const;
+  const outTitle = {
+    fontFamily: MONO,
+    fontSize: 10,
+    lineHeight: 14,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: c.fgFaint,
+    paddingBottom: 4,
+    paddingHorizontal: 1,
+  } as const;
+  const pre = { borderRadius: 4, backgroundColor: c.inset, paddingHorizontal: 9, paddingVertical: 7 } as const;
   return {
-    notice: { ...notice, color: c.textTertiary },
+    noticeRow: { flexDirection: "row", gap: 8, paddingHorizontal: 18, paddingVertical: 5 },
+    noticeDot: { ...noticeDot, backgroundColor: c.fgFaint },
+    noticeDotWarn: { ...noticeDot, backgroundColor: c.warn },
+    noticeDotError: { ...noticeDot, backgroundColor: c.err },
+    notice: { ...notice, color: c.fgFaint },
     noticeWarn: { ...notice, color: c.warn },
-    noticeError: { ...notice, color: c.danger },
-    caret: { color: c.link },
-    userRow: { paddingHorizontal: 16, marginVertical: 6, alignItems: "flex-end" },
-    userBubble: {
-      maxWidth: "85%",
-      borderRadius: radius.xl,
-      borderBottomRightRadius: radius.sm,
+    noticeError: { ...notice, color: c.err },
+    caret: { color: c.accent },
+
+    turn: { paddingHorizontal: 16, marginTop: 10, marginBottom: 4 },
+    gutter,
+    gutterUser: { ...gutter, color: c.fgMuted },
+    userBlock: {
+      alignSelf: "flex-start",
+      maxWidth: "100%",
+      borderRadius: radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      borderTopColor: c.edgeTop,
+      backgroundColor: c.raised,
       paddingHorizontal: 14,
       paddingVertical: 9,
-      backgroundColor: c.userBubble,
     },
-    userText: { fontSize: 15, lineHeight: 22, color: c.text },
-    system: { ...notice, color: c.textTertiary },
-    assistant: { paddingHorizontal: 18, marginVertical: 6, gap: 6 },
-    waiting: { fontSize: 15, lineHeight: 22 },
-    thinking: { gap: 6 },
+    userText: { fontSize: 15, lineHeight: 22, color: c.fg },
+    assistant: { gap: 8 },
+
+    thinking: { gap: 4 },
     thinkingHead: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" },
-    thinkingLabel: { fontSize: 13, lineHeight: 18, color: c.textTertiary, fontWeight: "500" },
+    thinkingLabel: { fontSize: 12.5, lineHeight: 18, color: c.fgFaint, fontStyle: "italic" },
     thinkingText: {
-      fontSize: 13,
+      fontSize: 12.5,
       lineHeight: 19,
-      color: c.textTertiary,
+      color: c.fgMuted,
       fontStyle: "italic",
       borderLeftWidth: 2,
       borderLeftColor: c.border,
       paddingLeft: 10,
+      marginVertical: 2,
     },
-    tool: {
-      marginHorizontal: 16,
-      marginVertical: 3,
-      borderRadius: radius.md,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-      overflow: "hidden",
-    },
+
+    tool,
+    toolFailed: { ...tool, borderColor: c.errBorder },
     toolHead: {
       flexDirection: "row",
       alignItems: "center",
       gap: 8,
-      minHeight: 40,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      minHeight: 36,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
     },
-    pressed: { backgroundColor: c.pressed },
-    toolName: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: c.text, flexShrink: 0, maxWidth: "45%" },
-    toolSummary: { ...mono, flex: 1, color: c.textTertiary },
-    dotRunning: { ...dot, backgroundColor: c.warn },
-    dotDone: { ...dot, backgroundColor: c.success },
-    dotError: { ...dot, backgroundColor: c.danger },
+    pressed: { backgroundColor: c.hover },
+    statusSlot: { width: 10, alignItems: "center", justifyContent: "center" },
+    toolName: {
+      fontFamily: MONO,
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: "600",
+      letterSpacing: 0.2,
+      color: c.fgMuted,
+      flexShrink: 0,
+      maxWidth: "45%",
+    },
+    toolSummary: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
+    dotDone: { ...dot, backgroundColor: c.ok },
+    dotError: { ...dot, backgroundColor: c.err },
     toolBody: {
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingBottom: 12,
+      gap: 8,
+      paddingHorizontal: 10,
+      paddingBottom: 10,
       paddingTop: 8,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.border,
-      backgroundColor: c.code,
     },
-    toolLabel: { fontSize: 11, lineHeight: 14, color: c.textTertiary, textTransform: "uppercase", letterSpacing: 0.6 },
-    mono,
-    monoError: { ...mono, color: c.danger },
+    outTitle,
+    outTitleError: { ...outTitle, color: c.err },
+    pre,
+    preNext: { ...pre, marginTop: 4 },
+    prompt: { color: c.accent },
+    monoText: mono,
+    monoError: { ...mono, color: c.err },
   } as const;
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { createSession, deleteSession, listSessions } from "../api";
+import { GradientDot, Spinner } from "../components/brand";
 import { ChatGlyph, PlusGlyph } from "../components/icons";
 import {
   Banner,
@@ -15,7 +16,7 @@ import {
   Sheet,
 } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
-import { useColors, useStyles, type Palette } from "../theme";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 import type { Machine, SessionSummary } from "../types";
 
 interface Props {
@@ -121,7 +122,7 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
         onBack={onBack}
         right={
           <IconButton onPress={openCreate} label="New session">
-            <PlusGlyph color={colors.text} />
+            <PlusGlyph size={20} color={colors.fgMuted} />
           </IconButton>
         }
       />
@@ -133,31 +134,31 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.textSecondary} />
+          <Spinner size={14} />
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={sessions.length === 0 ? styles.emptyContent : styles.content}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.textSecondary} />
+            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.fgMuted} colors={[colors.accent]} progressBackgroundColor={colors.overlay} />
           }
         >
           {sessions.length === 0 ? (
             <EmptyState
-              icon={<ChatGlyph size={26} color={colors.textSecondary} />}
+              icon={<ChatGlyph size={24} color={colors.fg} />}
               title="No sessions yet"
               body={`Start one in ${basename(machine.cwd) || "the default directory"}.`}
               action={
                 <Button
                   label="New session"
                   onPress={openCreate}
-                  icon={<PlusGlyph size={18} color={colors.onPrimary} />}
+                  icon={<PlusGlyph size={18} color={colors.accentFg} />}
                 />
               }
             />
           ) : (
             <>
-              <SectionHeader title={running > 0 ? `Sessions · ${running} running` : "Sessions"} />
+              <SectionHeader title="Sessions" meta={running > 0 ? `${running} running` : String(sessions.length)} />
               <Group>
                 {sessions.map((session, index) => {
                   const live = session.status === "streaming";
@@ -172,7 +173,7 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
                       }
                       trailing={
                         <View style={styles.trailing}>
-                          {live ? <View style={styles.liveDot} /> : null}
+                          {live ? <GradientDot size={7} /> : null}
                           <Text style={live ? styles.timeLive : styles.time} numberOfLines={1}>
                             {live ? "running" : ago(session.updatedAt)}
                           </Text>
@@ -205,19 +206,18 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
 }
 
 function createStyles(c: Palette) {
-  const time = { fontSize: 12, lineHeight: 16, color: c.textTertiary } as const;
+  const time = { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
     center: { flex: 1, alignItems: "center", justifyContent: "center" },
-    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16, paddingBottom: 32 },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
     emptyContent: { flexGrow: 1 },
-    detail: { fontSize: 13, lineHeight: 18, color: c.textSecondary },
-    trailing: { flexDirection: "row", alignItems: "center", gap: 5, flexShrink: 0 },
-    liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: c.warn },
+    detail: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
+    trailing: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
     time,
-    timeLive: { ...time, color: c.warn, fontWeight: "600" },
-    footnote: { fontSize: 13, lineHeight: 18, paddingTop: 8, paddingHorizontal: 4, color: c.textTertiary },
-    hint: { fontSize: 13, lineHeight: 18, color: c.textSecondary, marginHorizontal: 4 },
-    error: { fontSize: 13, lineHeight: 18, color: c.danger, marginHorizontal: 4 },
+    timeLive: { ...time, color: c.accent },
+    footnote: { fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
+    hint: { fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
+    error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }

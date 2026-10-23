@@ -1,6 +1,6 @@
 /**
  * Whether the phone reaches a machine over its one link, Tailscale, and the
- * one-line words its row and sheet say about it (Kivotos `summaryOf`).
+ * one-line words its row and sheet say about it (`summaryOf`).
  *
  * Only type imports here: node:test loads this file directly.
  */
@@ -135,7 +135,7 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
-/** How long ago, Kivotos style: "just now", "5 min ago", "3 h ago", "2 d ago". */
+/** How long ago, in words: "just now", "5 min ago", "3 h ago", "2 d ago". */
 export function agoText(time: number, now: number): string {
   const elapsed = Math.max(0, now - time);
   if (elapsed < MINUTE_MS) return "just now";

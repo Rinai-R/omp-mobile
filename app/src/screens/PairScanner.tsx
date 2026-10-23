@@ -2,6 +2,7 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "ex
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Animated,
   AppState,
   Linking,
   Pressable,
@@ -11,10 +12,11 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { pairMachine } from "../api";
 import { CloseGlyph, KeyboardGlyph } from "../components/icons";
 import { pairingMessage, readPairing } from "../pairing";
-import { palette, radius } from "../theme";
+import { EASE_OUT, GRADIENT, MONO, palette, radius } from "../theme";
 import type { Machine } from "../types";
 
 interface Props {
@@ -188,15 +190,14 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
       ) : null}
       <View style={styles.center} pointerEvents="none">
         <View style={layout.frame}>
-          <View style={styles.cornerTL} />
-          <View style={styles.cornerTR} />
-          <View style={styles.cornerBL} />
-          <View style={styles.cornerBR} />
+          <FrameCorners size={frame} />
           {pairing.busy || camera.access === "pending" ? (
             <View style={styles.busy}>
-              <ActivityIndicator color="#FFFFFF" />
-              {pairing.busy ? <Text style={styles.busyText}>Connecting…</Text> : null}
+              <ActivityIndicator color={DARK.fg} />
+              {pairing.busy ? <Text style={styles.busyText}>connecting…</Text> : null}
             </View>
+          ) : camera.access === "live" && !mountFailed && panel === null ? (
+            <ScanLine size={frame} />
           ) : null}
         </View>
       </View>
@@ -208,9 +209,12 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
           accessibilityRole="button"
           accessibilityLabel="Close"
         >
-          <CloseGlyph color="#FFFFFF" />
+          <CloseGlyph size={16} color={DARK.fg} />
         </Pressable>
-        <Text style={styles.title}>Scan to pair</Text>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>Scan to pair</Text>
+          <Text style={styles.subtitle}>omp-mobile daemon</Text>
+        </View>
         <View style={styles.iconSpacer} />
       </View>
       <View style={layout.bottom}>
@@ -223,7 +227,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
             ) : null}
             <Text style={styles.hint}>Point the camera at the QR code the omp-mobile daemon prints in its terminal.</Text>
             <Pressable onPress={onManual} style={styles.ghost} accessibilityRole="button">
-              <KeyboardGlyph color="#FFFFFF" />
+              <KeyboardGlyph color={DARK.fgMuted} />
               <Text style={styles.ghostText}>Enter address</Text>
             </Pressable>
           </>
@@ -260,38 +264,75 @@ function Problem({
   );
 }
 
-const CORNER = 28;
+const CORNER = 26;
 const STROKE = 3;
-const corner = {
-  position: "absolute",
-  width: CORNER,
-  height: CORNER,
-  borderColor: "#FFFFFF",
-} as const;
+
+/** The four corners of the scan frame, drawn in the brand gradient. */
+function FrameCorners({ size }: { size: number }): ReactNode {
+  const r = radius.lg;
+  const h = STROKE / 2;
+  const far = size - h;
+  const d = [
+    `M${h} ${CORNER}V${r + h}Q${h} ${h} ${r + h} ${h}H${CORNER}`,
+    `M${size - CORNER} ${h}H${far - r}Q${far} ${h} ${far} ${r + h}V${CORNER}`,
+    `M${h} ${size - CORNER}V${far - r}Q${h} ${far} ${r + h} ${far}H${CORNER}`,
+    `M${size - CORNER} ${far}H${far - r}Q${far} ${far} ${far} ${far - r}V${size - CORNER}`,
+  ].join("");
+  return (
+    <Svg width={size} height={size} style={StyleSheet.absoluteFill}>
+      <Defs>
+        <LinearGradient id="frame" {...GRADIENT}>
+          <Stop offset="0" stopColor={DARK.accentA} />
+          <Stop offset="1" stopColor={DARK.accentB} />
+        </LinearGradient>
+      </Defs>
+      <Path d={d} stroke="url(#frame)" strokeWidth={STROKE} strokeLinecap="round" fill="none" />
+    </Svg>
+  );
+}
+
+/** A faint gradient line that sweeps down the frame while the camera looks. */
+function ScanLine({ size }: { size: number }): ReactNode {
+  const value = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(value, { toValue: 1, duration: 2200, easing: EASE_OUT, useNativeDriver: true }),
+        Animated.timing(value, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [value]);
+  const inset = 14;
+  const translateY = value.interpolate({ inputRange: [0, 1], outputRange: [inset, size - inset] });
+  const opacity = value.interpolate({ inputRange: [0, 0.1, 0.8, 1], outputRange: [0, 0.9, 0.9, 0] });
+  return (
+    <Animated.View style={[styles.scanLine, { left: inset, right: inset, opacity, transform: [{ translateY }] }]}>
+      <Svg width="100%" height={2} preserveAspectRatio="none" viewBox="0 0 100 2">
+        <Defs>
+          <LinearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor={DARK.accentA} stopOpacity={0} />
+            <Stop offset="0.3" stopColor={DARK.accentA} />
+            <Stop offset="0.7" stopColor={DARK.accentB} />
+            <Stop offset="1" stopColor={DARK.accentB} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Path d="M0 1H100" stroke="url(#line)" strokeWidth={2} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+/** Translucent chrome over the camera, like my.omp.sh's glass bars. */
+const GLASS = "#0e0e10c7";
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#000000" },
+  root: { flex: 1, backgroundColor: DARK.bg },
   center: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
-  cornerTL: { ...corner, top: 0, left: 0, borderTopWidth: STROKE, borderLeftWidth: STROKE, borderTopLeftRadius: radius.md },
-  cornerTR: { ...corner, top: 0, right: 0, borderTopWidth: STROKE, borderRightWidth: STROKE, borderTopRightRadius: radius.md },
-  cornerBL: {
-    ...corner,
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: STROKE,
-    borderLeftWidth: STROKE,
-    borderBottomLeftRadius: radius.md,
-  },
-  cornerBR: {
-    ...corner,
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: STROKE,
-    borderRightWidth: STROKE,
-    borderBottomRightRadius: radius.md,
-  },
   busy: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  busyText: { color: "#FFFFFF", fontSize: 15 },
+  busyText: { color: DARK.fgMuted, fontFamily: MONO, fontSize: 12 },
+  scanLine: { position: "absolute", top: 0, height: 2 },
   top: {
     position: "absolute",
     left: 0,
@@ -300,64 +341,78 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingHorizontal: 12,
+    paddingBottom: 10,
+    backgroundColor: GLASS,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: DARK.border,
   },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.14)",
+    backgroundColor: DARK.overlay,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DARK.borderStrong,
   },
-  iconSpacer: { width: 40 },
-  title: { color: "#FFFFFF", fontSize: 17, fontWeight: "600" },
+  iconSpacer: { width: 36 },
+  titleBlock: { alignItems: "center", gap: 1 },
+  title: { color: DARK.fg, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15 },
+  subtitle: { color: DARK.fgFaint, fontFamily: MONO, fontSize: 11, lineHeight: 15 },
   bottom: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     alignItems: "center",
-    gap: 16,
+    gap: 14,
     paddingHorizontal: 20,
-    paddingTop: 20,
-    backgroundColor: "rgba(0,0,0,0.35)",
+    paddingTop: 18,
+    backgroundColor: GLASS,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: DARK.edgeTop,
   },
-  hint: { color: "#FFFFFF", fontSize: 15, lineHeight: 22, textAlign: "center" },
+  hint: { color: DARK.fgMuted, fontSize: 14, lineHeight: 21, textAlign: "center", maxWidth: 340 },
   error: {
     alignSelf: "stretch",
-    color: "#FFFFFF",
-    fontSize: 14,
-    lineHeight: 20,
+    color: DARK.err,
+    fontFamily: MONO,
+    fontSize: 12,
+    lineHeight: 18,
     textAlign: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
     borderRadius: radius.md,
-    backgroundColor: "rgba(242,90,90,0.35)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DARK.errBorder,
+    backgroundColor: DARK.errSoft,
     overflow: "hidden",
   },
   ghost: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    height: 44,
-    paddingHorizontal: 18,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.14)",
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: radius.md,
+    backgroundColor: DARK.overlay,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DARK.borderStrong,
   },
-  ghostText: { color: "#FFFFFF", fontSize: 15, fontWeight: "500" },
+  ghostText: { color: DARK.fg, fontSize: 14, fontWeight: "500" },
   sheet: {
     alignSelf: "stretch",
-    padding: 18,
-    gap: 16,
-    borderRadius: radius.lg,
-    backgroundColor: DARK.surface,
+    padding: 16,
+    gap: 14,
+    borderRadius: radius.xl,
+    backgroundColor: DARK.overlay,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: DARK.border,
+    borderColor: DARK.borderStrong,
+    borderTopColor: DARK.edgeTop,
   },
-  sheetText: { color: DARK.text, fontSize: 15, lineHeight: 22 },
+  sheetText: { color: DARK.fg, fontSize: 14, lineHeight: 21 },
   sheetActions: { flexDirection: "row", gap: 10 },
   sheetSecondary: {
     flex: 1,
@@ -365,16 +420,18 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: DARK.pressed,
+    backgroundColor: DARK.raised,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DARK.borderStrong,
   },
-  sheetSecondaryText: { color: DARK.text, fontSize: 15, fontWeight: "500" },
+  sheetSecondaryText: { color: DARK.fg, fontSize: 15, fontWeight: "500" },
   sheetPrimary: {
     flex: 1,
     height: 44,
     borderRadius: radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: DARK.primary,
+    backgroundColor: DARK.accent,
   },
-  sheetPrimaryText: { color: DARK.onPrimary, fontSize: 15, fontWeight: "600" },
+  sheetPrimaryText: { color: DARK.accentFg, fontSize: 15, fontWeight: "600" },
 });

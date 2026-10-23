@@ -175,7 +175,7 @@ export default function App(): ReactNode {
   if (!restored) {
     content = (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={palette(scheme).textSecondary} />
+        <ActivityIndicator color={palette(scheme).fgMuted} />
       </View>
     );
   } else if (route.kind === "chat") {
@@ -232,7 +232,7 @@ export default function App(): ReactNode {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={route.kind === "scan" || scheme === "dark" ? "light" : "dark"} />
+      <StatusBar style={route.kind === "scan" || palette(scheme).dark ? "light" : "dark"} />
       {route.kind === "scan" ? (
         // The camera runs edge to edge; the scanner pads its own bars by the safe area.
         content

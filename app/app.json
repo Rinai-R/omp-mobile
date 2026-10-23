@@ -18,9 +18,9 @@
       ],
       "softwareKeyboardLayoutMode": "resize",
       "splash": {
-        "backgroundColor": "#FFFFFF",
+        "backgroundColor": "#f2f2f3",
         "dark": {
-          "backgroundColor": "#151517"
+          "backgroundColor": "#000000"
         }
       }
     },
@@ -51,9 +51,9 @@
       ]
     ],
     "splash": {
-      "backgroundColor": "#FFFFFF",
+      "backgroundColor": "#f2f2f3",
       "dark": {
-        "backgroundColor": "#151517"
+        "backgroundColor": "#000000"
       }
     }
   }
