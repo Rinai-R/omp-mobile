@@ -225,6 +225,8 @@ export default function App(): ReactNode {
     () => Promise.all(machinesRef.current.map((machine) => probeOne(machine))).then(() => undefined),
     [probeOne],
   );
+  const probeAllNow = useCallback(() => void probeAll(), [probeAll]);
+  const switchMachine = useCallback((machine: Machine) => setRoute({ kind: "sessions", machine }), []);
 
   // Probe while the machines screen is shown: now, every 15 s, and on return to the foreground.
   // Keyed by the machine ids, so a new machine is probed at once but saving lastSeen does not re-probe.
@@ -315,11 +317,17 @@ export default function App(): ReactNode {
   } else if (route.kind === "sessions") {
     content = (
       <SessionsScreen
+        // A switch is a different machine's screen: its list and probe state start fresh.
+        key={route.machine.id}
         machine={route.machine}
         probe={probes.get(route.machine.id)}
         onRetry={(machine) => void probeOne(machine)}
         onBack={() => setRoute({ kind: "machines" })}
         onOpen={(machine, session) => setRoute({ kind: "chat", machine, session })}
+        machines={machines}
+        probes={probes}
+        onProbeAll={probeAllNow}
+        onSwitch={switchMachine}
       />
     );
   } else if (route.kind === "scan") {

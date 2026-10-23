@@ -3,6 +3,7 @@ import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
 import { createSession, deleteSession, listSessions, openSession } from "../api";
 import { GradientDot, Spinner } from "../components/brand";
 import { ChatGlyph, PlusGlyph } from "../components/icons";
+import { MachineSwitcher } from "../components/MachineSwitcher";
 import {
   Banner,
   Button,
@@ -28,6 +29,11 @@ interface Props {
   onRetry: (machine: Machine) => void;
   onBack: () => void;
   onOpen: (machine: Machine, session: SessionSummary) => void;
+  /** Every paired machine and their last probes, for the switcher in the title. */
+  machines: readonly Machine[];
+  probes: ReadonlyMap<string, Probe>;
+  onProbeAll: () => void;
+  onSwitch: (machine: Machine) => void;
 }
 
 function basename(path: string): string {
@@ -42,7 +48,17 @@ function ago(timestamp: number): string {
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
-export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Props): ReactNode {
+export function SessionsScreen({
+  machine,
+  probe,
+  onRetry,
+  onBack,
+  onOpen,
+  machines,
+  probes,
+  onProbeAll,
+  onSwitch,
+}: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -52,6 +68,7 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
   const [creating, setCreating] = useState(false);
   const [cwd, setCwd] = useState(machine.cwd);
   const [busy, setBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   /** The session list loaded here, so a stale unreachable probe no longer applies. */
   const [reached, setReached] = useState(false);
   /** The daemon has answered this screen's list; a saved list arriving later must not replace it. */
@@ -196,6 +213,8 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
         title={machine.name}
         subtitle={`${machine.os} · OMP ${machine.version}`}
         onBack={onBack}
+        onTitlePress={machines.length > 1 ? () => setSwitching(true) : undefined}
+        titleLabel={`${machine.name}, switch machine`}
         right={
           <IconButton onPress={openCreate} label="New session">
             <PlusGlyph size={20} color={colors.fgMuted} />
@@ -264,6 +283,16 @@ export function SessionsScreen({ machine, probe, onRetry, onBack, onOpen }: Prop
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
         <Button label="Start session" onPress={() => void create()} busy={busy} />
       </Sheet>
+
+      <MachineSwitcher
+        visible={switching}
+        machines={machines}
+        current={machine}
+        probes={probes}
+        onProbe={onProbeAll}
+        onPick={onSwitch}
+        onClose={() => setSwitching(false)}
+      />
     </View>
   );
 }
