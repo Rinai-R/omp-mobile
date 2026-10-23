@@ -407,6 +407,8 @@ class SessionEntry {
         }
       }
       if (STATE_EVENTS.has(event.type)) void this.refreshState();
+      // A `todo` tool call rewrites the list before any reminder fires.
+      if (event.type === "tool_execution_end" && event.toolName === "todo") void this.refreshState();
       if (event.type === "turn_end" || event.type === "agent_end") void this.refreshState();
       this.broadcast({ type: "event", event });
     });

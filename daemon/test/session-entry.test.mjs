@@ -48,4 +48,8 @@ test("model, thinking, todo and queue events refresh the state the phone holds",
   rpc.emit("event", { type: "tool_execution_end", toolCallId: "c1", toolName: "bash" });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(reads, before, "an ordinary tool event does not re-read the state");
+
+  rpc.emit("event", { type: "tool_execution_end", toolCallId: "c2", toolName: "todo" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(reads, before + 1, "a todo tool call does");
 });
