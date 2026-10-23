@@ -137,14 +137,14 @@ describe("summaryOf", () => {
     assert.deepEqual(summaryOf(down, NOW - 5 * 60_000, NOW), { dot: "down", text: "No reply · seen 5 min ago" });
     assert.equal(summaryOf(down, NOW - 10_000, NOW).text, "No reply · seen just now");
     assert.equal(summaryOf(down, NOW - 3 * 60 * 60_000, NOW).text, "No reply · seen 3 h ago");
-    assert.equal(summaryOf({ state: "unreachable", reason: "network" }, undefined, NOW).text, "Off tailnet");
+    assert.equal(summaryOf({ state: "unreachable", reason: "network" }, undefined, NOW).text, "Can't connect");
   });
 
   it("has a word for every reason", () => {
     assert.equal(reasonText("timeout"), "No reply");
     assert.equal(reasonText("unauthorized"), "Token rejected");
     assert.equal(reasonText("not-omp"), "Not omp-mobile");
-    assert.equal(reasonText("network"), "Off tailnet");
+    assert.equal(reasonText("network"), "Can't connect");
   });
 
   it("gives the sheet's link line", () => {

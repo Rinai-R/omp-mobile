@@ -127,7 +127,7 @@ export function reasonText(reason: Reason): string {
     case "not-omp":
       return "Not omp-mobile";
     case "network":
-      return "Off tailnet";
+      return "Can't connect";
   }
 }
 
