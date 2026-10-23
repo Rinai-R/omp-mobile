@@ -5,10 +5,12 @@ const MACHINES_KEY = "omp.machines.v1";
 const SETTINGS_KEY = "omp.settings.v1";
 
 export interface Settings {
+  /** Background notifications (Android): the user turned them on and the system allowed it at the time. */
   notifications: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { notifications: true };
+/** Off until the user turns them on: that is when Android asks for the notification permission. */
+export const DEFAULT_SETTINGS: Settings = { notifications: false };
 
 export async function loadMachines(): Promise<Machine[]> {
   try {

@@ -115,6 +115,8 @@ export type ServerMessage =
   | ServerEvent
   | { type: "state"; state: SessionState }
   | { type: "approval"; request: ApprovalRequest }
+  /** A dialog was answered (by any client) or closed by OMP itself. */
+  | { type: "approval_resolved"; id: string; reason: "answered" | "cancelled" | "closed" }
   | { type: "notice"; level: "info" | "warning" | "error"; message: string }
   | { type: "closed"; reason: string; stderr?: string }
   | { type: "accepted"; command: string }
