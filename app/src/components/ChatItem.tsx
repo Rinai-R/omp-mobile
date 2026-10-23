@@ -1,6 +1,6 @@
 import { memo, useCallback, useState, type ReactNode } from "react";
 import { Animated, Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
-import { toolSummary } from "../messages";
+import { resultText, toolSummary } from "../messages";
 import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ChatItem as Item, MessageItem, ToolItem } from "../types";
 import { Spinner, StreamPulse, useEnter, usePulse } from "./brand";
@@ -207,7 +207,7 @@ function ToolCard({ tool }: { tool: ToolItem }): ReactNode {
               </Text>
               <View style={styles.pre}>
                 <Text style={tool.isError === true ? styles.monoError : styles.monoText} selectable numberOfLines={60}>
-                  {pretty(output)}
+                  {resultText(output) ?? pretty(output)}
                 </Text>
               </View>
             </View>
