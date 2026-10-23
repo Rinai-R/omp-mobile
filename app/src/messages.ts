@@ -267,7 +267,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
 }
 
 /** Text a tool result carries: OMP results are `{content: [{type: "text", text}], details}`. */
-function resultText(value: unknown): string | undefined {
+export function resultText(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (value === null || typeof value !== "object") return undefined;
   const content = (value as { content?: unknown }).content;
