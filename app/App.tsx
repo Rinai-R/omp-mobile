@@ -1,13 +1,24 @@
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, AppState, BackHandler, Linking, Platform, useColorScheme, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  BackHandler,
+  Linking,
+  PermissionsAndroid,
+  Platform,
+  useColorScheme,
+  View,
+} from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import * as Attention from "./modules/omp-attention/src";
+import { AttentionBanner } from "./src/components/AttentionBanner";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
 import { PairScanner } from "./src/screens/PairScanner";
 import { isPairingLink } from "./src/pairing";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
-import { SettingsScreen } from "./src/screens/SettingsScreen";
+import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
@@ -24,6 +35,29 @@ const EDGES = ["top", "left", "right"] as const;
 
 /** How often the machines screen probes every machine while it is shown. */
 const PROBE_INTERVAL_MS = 15_000;
+
+/** Ask for POST_NOTIFICATIONS where Android has it (13+); true when the app may post. */
+async function requestNotificationPermission(): Promise<boolean> {
+  if (Platform.OS !== "android") return false;
+  if (typeof Platform.Version === "number" && Platform.Version >= 33) {
+    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
+    if (result !== PermissionsAndroid.RESULTS.GRANTED) return false;
+  }
+  // The permission is not the whole answer: the user may have switched the app's notifications off.
+  return Attention.notificationsAllowed();
+}
+
+/** What the Notifications switch shows for the stored setting and what the system allows now. */
+function notificationState(enabled: boolean): NotificationState {
+  if (!Attention.isSupported()) return "unsupported";
+  if (!enabled) return "off";
+  return Attention.notificationsAllowed() ? "on" : "denied";
+}
+
+/** A session known only by id (a notification tap): the chat's snapshot fills in the rest. */
+function placeholderSession(machine: Machine, sessionId: string, title: string): SessionSummary {
+  return { id: sessionId, title: title || "Session", cwd: machine.cwd, status: "idle", createdAt: 0, updatedAt: 0 };
+}
 
 export default function App(): ReactNode {
   const scheme = useColorScheme();
@@ -42,14 +76,47 @@ export default function App(): ReactNode {
   const [addRequest, setAddRequest] = useState<AddRequest | null>(null);
   /** A pairing link that arrived before the stored machines were restored. */
   const [pendingLink, setPendingLink] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<NotificationState>("off");
+  const [batteryRestricted, setBatteryRestricted] = useState(false);
+  /** A frame for a session not on screen, while the app is open. */
+  const [banner, setBanner] = useState<Attention.Attention | null>(null);
+  /** A notification tap that arrived before the stored machines were restored. */
+  const [pendingOpen, setPendingOpen] = useState<Attention.OpenSession | null>(null);
 
   useEffect(() => {
     void Promise.all([loadMachines(), loadSettings()]).then(([stored, storedSettings]) => {
       machinesRef.current = stored;
       setMachines(stored);
       setSettings(storedSettings);
+      // The service follows these machines while the setting is on; it persists both for the boot receiver.
+      Attention.setMachines(stored);
+      const state = notificationState(storedSettings.notifications);
+      Attention.setEnabled(state === "on");
+      setNotifications(state);
+      setBatteryRestricted(Attention.isBatteryRestricted());
       setRestored(true);
+      // A tap that launched the app before any listener existed.
+      setPendingOpen(Attention.takePendingOpen());
     });
+  }, []);
+
+  // Notification taps while the app runs, and in-app banners for sessions not on screen.
+  useEffect(() => {
+    const offOpen = Attention.onOpenSession((open) => setPendingOpen(open));
+    const offAttention = Attention.onAttention((attention) => {
+      setBanner((visible) => {
+        if (attention.kind === "resolved") {
+          return visible !== null && visible.key === attention.key && visible.sessionId === attention.sessionId
+            ? null
+            : visible;
+        }
+        return attention;
+      });
+    });
+    return () => {
+      offOpen();
+      offAttention();
+    };
   }, []);
 
   // `omp-mobile://pair?...` links, whether they launched the app or arrived while it ran.
@@ -71,6 +138,31 @@ export default function App(): ReactNode {
     setAddRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, link: pendingLink }));
     setRoute({ kind: "machines" });
   }, [pendingLink, restored]);
+
+  // Once restored, a tap opens that session's chat.
+  useEffect(() => {
+    if (!restored || pendingOpen === null) return;
+    setPendingOpen(null);
+    const machine = machinesRef.current.find((item) => item.id === pendingOpen.machineId);
+    if (machine === undefined) return;
+    setBanner(null);
+    setRoute((current) =>
+      current.kind === "chat" && current.machine.id === machine.id && current.session.id === pendingOpen.sessionId
+        ? current
+        : { kind: "chat", machine, session: placeholderSession(machine, pendingOpen.sessionId, "") },
+    );
+  }, [pendingOpen, restored]);
+
+  // Back in the foreground: the user may have changed the permission or battery setting meanwhile.
+  useEffect(() => {
+    if (!restored) return undefined;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      setNotifications(notificationState(settings.notifications));
+      setBatteryRestricted(Attention.isBatteryRestricted());
+    });
+    return () => subscription.remove();
+  }, [restored, settings.notifications]);
 
   const clearAddRequest = useCallback(() => setAddRequest(null), []);
   const openScanner = useCallback(() => setRoute({ kind: "scan" }), []);
@@ -98,9 +190,13 @@ export default function App(): ReactNode {
   }, [back, route.kind]);
 
   const persist = useCallback((next: Machine[]) => {
+    const before = machinesRef.current;
     machinesRef.current = next;
     setMachines(next);
     void saveMachines(next);
+    // Only what the service reads: a probe's lastSeen does not restart the streams.
+    const followed = (list: Machine[]) => list.map((item) => `${item.id}\n${item.url}\n${item.token}\n${item.name}`).join("\n\n");
+    if (followed(before) !== followed(next)) Attention.setMachines(next);
   }, []);
 
   const probeOne = useCallback(
@@ -171,6 +267,33 @@ export default function App(): ReactNode {
     void saveSettings(next);
   }, []);
 
+  const toggleNotifications = useCallback(
+    (on: boolean) => {
+      if (!on) {
+        Attention.setEnabled(false);
+        setNotifications("off");
+        updateSettings({ ...settings, notifications: false });
+        return;
+      }
+      void requestNotificationPermission().then((allowed) => {
+        updateSettings({ ...settings, notifications: allowed });
+        Attention.setEnabled(allowed);
+        setNotifications(allowed ? "on" : "denied");
+        setBatteryRestricted(Attention.isBatteryRestricted());
+      });
+    },
+    [settings, updateSettings],
+  );
+
+  const fixBattery = useCallback(() => Attention.requestBatteryExemption(), []);
+  const dismissBanner = useCallback(() => setBanner(null), []);
+  const openBanner = useCallback((attention: Attention.Attention) => {
+    setBanner(null);
+    const machine = machinesRef.current.find((item) => item.id === attention.machineId);
+    if (machine === undefined) return;
+    setRoute({ kind: "chat", machine, session: placeholderSession(machine, attention.sessionId, attention.sessionTitle) });
+  }, []);
+
   let content: ReactNode;
   if (!restored) {
     content = (
@@ -181,6 +304,7 @@ export default function App(): ReactNode {
   } else if (route.kind === "chat") {
     content = (
       <ChatScreen
+        key={`${route.machine.id}\n${route.session.id}`}
         machine={route.machine}
         session={route.session}
         onBack={() => setRoute({ kind: "sessions", machine: route.machine })}
@@ -203,8 +327,11 @@ export default function App(): ReactNode {
   } else if (route.kind === "settings") {
     content = (
       <SettingsScreen
-        settings={settings}
-        onChange={updateSettings}
+        notifications={notifications}
+        batteryRestricted={batteryRestricted}
+        onToggleNotifications={toggleNotifications}
+        onOpenNotificationSettings={Attention.openNotificationSettings}
+        onFixBattery={fixBattery}
         onBack={() => setRoute({ kind: "machines" })}
         version="0.1.0"
       />
@@ -241,6 +368,9 @@ export default function App(): ReactNode {
           {content}
         </SafeAreaView>
       )}
+      {banner !== null && route.kind !== "scan" ? (
+        <AttentionBanner attention={banner} onOpen={openBanner} onDismiss={dismissBanner} />
+      ) : null}
     </SafeAreaProvider>
   );
 }

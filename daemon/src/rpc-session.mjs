@@ -14,7 +14,7 @@ const START_TIMEOUT_MS = 45_000;
 const REQUEST_TIMEOUT_MS = 60_000;
 
 /** Events that carry no useful state to the phone. */
-const IGNORED_UI = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text", "cancel"]);
+const IGNORED_UI = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text"]);
 
 /**
  * @typedef {object} RpcSessionOptions
@@ -68,6 +68,8 @@ export class RpcSession extends EventEmitter {
     child.on("error", (error) => this.#fail(error));
     child.on("exit", (code, signal) => {
       this.closed = true;
+      // Nothing can answer the dialogs of a process that is gone.
+      for (const id of [...this.extensionRequests.keys()]) this.#settle(id, "closed");
       const reason = signal ? `signal ${signal}` : `exit ${code}`;
       this.emit("closed", { reason, stderr: this.stderr });
       this.#fail(new Error(`omp exited: ${reason}`));
@@ -123,6 +125,11 @@ export class RpcSession extends EventEmitter {
     }
     if (message.type === "extension_ui_request") {
       if (IGNORED_UI.has(message.method)) return;
+      if (message.method === "cancel") {
+        // OMP closed a dialog itself (timeout, abort); a later answer to it is ignored.
+        if (typeof message.targetId === "string") this.#settle(message.targetId, "cancelled");
+        return;
+      }
       if (message.method === "notify") {
         this.emit("notice", { level: message.notifyType ?? "info", message: message.message });
         return;
@@ -145,6 +152,16 @@ export class RpcSession extends EventEmitter {
       return;
     }
     this.emit("event", message);
+  }
+
+  /**
+   * Forget an open extension request and say how it ended.
+   * @param {string} id
+   * @param {"answered" | "cancelled" | "closed"} reason
+   */
+  #settle(id, reason) {
+    if (!this.extensionRequests.delete(id)) return;
+    this.emit("approval-resolved", { id, reason });
   }
 
   /** @param {Error} error */
@@ -219,9 +236,9 @@ export class RpcSession extends EventEmitter {
   respondExtension(id, answer) {
     if (this.closed || this.child === undefined) throw new Error("omp session is closed");
     if (!this.extensionRequests.has(id)) throw new Error("unknown extension request");
-    this.extensionRequests.delete(id);
     const response = { type: "extension_ui_response", id, ...answer };
     this.child.stdin.write(`${JSON.stringify(response)}\n`);
+    this.#settle(id, answer.cancelled === true ? "cancelled" : "answered");
   }
 
   close() {

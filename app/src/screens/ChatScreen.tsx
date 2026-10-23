@@ -13,6 +13,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Attention from "../../modules/omp-attention/src";
 import { SessionSocket } from "../api";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { ChatItem } from "../components/ChatItem";
@@ -77,6 +78,9 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
             Keyboard.dismiss();
             setApproval(message.request);
             break;
+          case "approval_resolved":
+            setApproval((current) => (current?.id === message.id ? null : current));
+            break;
           case "notice":
             setItems((current) => [
               ...current,
@@ -110,6 +114,12 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       socketRef.current = null;
     };
   }, [initialSession.id, machine]);
+
+  // This session is on screen: its background notifications are cleared and not posted.
+  useEffect(() => {
+    Attention.setOnScreen(machine.id, initialSession.id);
+    return () => Attention.setOnScreen("", "");
+  }, [initialSession.id, machine.id]);
 
   const send = useCallback(() => {
     const text = draft.trim();

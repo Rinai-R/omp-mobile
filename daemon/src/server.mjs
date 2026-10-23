@@ -17,6 +17,7 @@ import { WebSocketServer } from "ws";
 import { renderQr } from "./qr.mjs";
 import { RpcSession } from "./rpc-session.mjs";
 import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
+import { AttentionTracker, serveEvents } from "./attention.mjs";
 
 const VERSION = "0.1.0";
 const PROTOCOL = 1;
@@ -280,6 +281,11 @@ class SessionEntry {
     this.clients = new Set();
     /** @type {((entry: SessionEntry) => void) | undefined} */
     this.onChange = undefined;
+    /**
+     * Hears every payload broadcast, whether or not a client is connected (the attention stream).
+     * @type {((entry: SessionEntry, payload: object) => void) | undefined}
+     */
+    this.onBroadcast = undefined;
     this.closed = false;
   }
 
@@ -315,6 +321,7 @@ class SessionEntry {
   }
 
   broadcast(payload) {
+    this.onBroadcast?.(this, payload);
     const text = JSON.stringify(payload);
     for (const client of this.clients) {
       if (client.readyState === 1) client.send(text);
@@ -350,6 +357,10 @@ class SessionEntry {
     this.rpc.on("approval", (request) => {
       this.broadcast({ type: "approval", request });
     });
+    // Answered by any client, or closed by OMP itself: every client drops its dialog.
+    this.rpc.on("approval-resolved", ({ id, reason }) => {
+      this.broadcast({ type: "approval_resolved", id, reason });
+    });
     this.rpc.on("notice", (notice) => {
       this.broadcast({ type: "notice", ...notice });
     });
@@ -358,6 +369,11 @@ class SessionEntry {
       this.broadcast({ type: "closed", reason, stderr: stderr.slice(-2_000) });
     });
     this.rpc.on("protocol-error", (payload) => this.broadcast({ type: "protocol-error", ...payload }));
+  }
+
+  /** Extension requests still waiting for an answer, oldest first. */
+  openRequests() {
+    return this.rpc.extensionRequests instanceof Map ? [...this.rpc.extensionRequests.values()] : [];
   }
 
   close() {
@@ -383,6 +399,9 @@ class Daemon {
     this.sessions = new Map();
     /** @type {Map<string, object>} */
     this.registry = loadRegistry(options.registryFile);
+    this.attention = new AttentionTracker({ machine: hostname() });
+    /** @type {Set<() => void>} open `/events` streams, ended on close */
+    this.streams = new Set();
     this.server = createServer((req, res) => void this.admitHttp(req, res));
     this.wsServer = new WebSocketServer({ noServer: true });
     this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
@@ -452,6 +471,12 @@ class Daemon {
       sendJson(res, 401, { error: "unauthorized" });
       return;
     }
+    if (url.pathname === "/events" && req.method === "GET") {
+      const end = serveEvents(this.attention, req, res);
+      this.streams.add(end);
+      res.on("close", () => this.streams.delete(end));
+      return;
+    }
     try {
       if (url.pathname === "/sessions" && req.method === "GET") {
         const live = [...this.sessions.values()].map((entry) => entry.summary());
@@ -485,7 +510,9 @@ class Daemon {
           return;
         }
         if (req.method === "DELETE") {
-          this.sessions.get(id)?.close();
+          const live = this.sessions.get(id);
+          if (live !== undefined) this.attention.forget(live);
+          live?.close();
           this.sessions.delete(id);
           this.registry.delete(id);
           saveRegistry(this.options.registryFile, this.registry);
@@ -532,6 +559,7 @@ class Daemon {
     await entry.hydrate();
     entry.id = id;
     entry.onChange = (changed) => this.remember(changed);
+    entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
     entry.bind();
     this.sessions.set(id, entry);
     this.remember(entry);
@@ -554,6 +582,7 @@ class Daemon {
       throw new Error("omp returned no session id");
     }
     entry.onChange = (changed) => this.remember(changed);
+    entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
     entry.bind();
     this.sessions.set(entry.id, entry);
     this.remember(entry);
@@ -578,6 +607,8 @@ class Daemon {
         this.wsServer.handleUpgrade(req, socket, head, (ws) => {
           entry.clients.add(ws);
           ws.send(JSON.stringify({ type: "snapshot", ...entry.snapshot() }));
+          // A dialog opened before this client connected (it may have come from a notification tap).
+          for (const request of entry.openRequests()) ws.send(JSON.stringify({ type: "approval", request }));
           ws.on("message", (data) => void this.handleClientMessage(entry, ws, data.toString()));
           ws.on("close", () => entry.clients.delete(ws));
           ws.on("error", () => entry.clients.delete(ws));
@@ -638,6 +669,8 @@ class Daemon {
   }
 
   async close() {
+    for (const end of this.streams) end();
+    this.streams.clear();
     for (const entry of this.sessions.values()) entry.close();
     this.sessions.clear();
     this.wsServer.close();

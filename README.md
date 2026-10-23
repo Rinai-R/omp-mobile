@@ -92,12 +92,34 @@ prompt your OMP approval policy asks for) reach the phone as a native sheet;
 the turn waits until you answer. `--auto-approve` passes OMP's auto-approve
 through instead, and nothing is asked.
 
+## Background notifications (Android)
+
+Settings → **Notifications** asks for the notification permission (Android 13+)
+and starts a foreground service ("Watching N machines", a low-importance
+notification) that holds one Server-Sent Events stream per paired computer:
+
+```text
+GET /events?token=<token>      (or Authorization: Bearer; admission applies)
+data: {"kind":"approval","key":"<request id>","sessionId":"…","sessionTitle":"…","machine":"<hostname>","text":"bash · Command: echo hi","time":…}
+```
+
+`approval` is OMP's tool approval (a `select` titled `Allow tool:`),
+`question` any other `select`/`confirm`/`input`/`editor`, `resolved` (same
+`key`) when it is answered by any client or cancelled, `done`/`failed` when
+an agent run ends (`agent_end`; failed on an `error`/`aborted` stop or an error
+notice). A new connection first gets the open approvals and questions, then
+`event: live`; a `: ping` comment follows every 25 s. Approvals and questions
+pop up heads-up on the "Approvals & questions" channel, finished turns on
+"Finished turns"; `resolved` withdraws the notification; nothing is posted
+for the session on screen; a tap opens that chat. The service restarts after a
+reboot when notifications were on. While the app is open, a frame for another
+session shows as a banner instead. iOS has no background service: the module
+is a no-op there.
+
 ## Not yet aligned with Kivotos
 
-- Background notifications and an Android foreground service.
 - Tailscale peer discovery (pairing is by QR code, link, or address + token).
 - Sessions created outside this daemon; only sessions it created are listed.
-- Background notifications and an Android foreground service.
 - Federation across machines with a switcher and relay fallback.
 - Caching of transcripts/assets for instant reopen.
 
@@ -111,6 +133,10 @@ for any of them.
 - `daemon/src/server.mjs` — HTTP/WS API, session manager, auth.
 - `daemon/src/admission.mjs` — `tailscale status`/`whois` wrapper and the
   Host + same-user listener admission.
+- `daemon/src/attention.mjs` — folds session broadcasts into attention frames
+  and serves `GET /events`.
 - `app/src/api.ts` — daemon REST + session socket.
 - `app/src/messages.ts` — OMP event → native transcript reducer.
 - `app/src/screens/` — Machines, Sessions, Chat, Settings.
+- `app/modules/omp-attention/` — Expo local module (Kotlin): the foreground
+  service, notifications, boot receiver; `src/index.ts` is its JS API.
