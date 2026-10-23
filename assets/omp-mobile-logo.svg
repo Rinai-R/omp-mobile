@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">OMP Mobile</title>
+  <desc id="desc">A phone in OMP's cyan-to-pink gradient whose dark screen shows a terminal prompt: a white chevron and a gradient cursor, on a transparent background.</desc>
+  <defs>
+    <linearGradient id="body" x1="136" y1="216" x2="376" y2="296" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1FA9BB"/>
+      <stop offset="1" stop-color="#D42EA3"/>
+    </linearGradient>
+    <linearGradient id="cursor" x1="268" y1="0" x2="324" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5AD8E6"/>
+      <stop offset="1" stop-color="#ED4ABF"/>
+    </linearGradient>
+  </defs>
+  <rect x="136" y="48" width="240" height="416" rx="60" fill="url(#body)"/>
+  <rect x="160" y="72" width="192" height="368" rx="38" fill="#0A0A0B"/>
+  <path d="M200 208L248 256L200 304" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M272 304H320" stroke="url(#cursor)" stroke-width="28" stroke-linecap="round"/>
+</svg>
