@@ -42,6 +42,37 @@ const STATE_EVENTS = new Set([
   "todo_auto_clear",
   "goal_updated",
 ]);
+/** Image types a phone may attach to a prompt: what the camera and the photo picker produce. */
+const PROMPT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+/** At most this many images per prompt, each at most this many decoded bytes. */
+const MAX_PROMPT_IMAGES = 8;
+const MAX_PROMPT_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * The images of a `prompt` frame as OMP's `ImageContent`, checked: base64 that
+ * round-trips, a known image type, bounded count and size. Anything else is
+ * refused whole rather than sent half.
+ * @param {unknown} value
+ * @returns {{type: "image", data: string, mimeType: string}[]}
+ */
+export function promptImages(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error("images must be a list");
+  if (value.length > MAX_PROMPT_IMAGES) throw new Error(`at most ${MAX_PROMPT_IMAGES} images per message`);
+  return value.map((image, index) => {
+    const data = image?.data;
+    const mimeType = image?.mimeType;
+    if (typeof mimeType !== "string" || !PROMPT_IMAGE_TYPES.has(mimeType)) throw new Error(`image ${index + 1}: unsupported type`);
+    if (typeof data !== "string" || data === "") throw new Error(`image ${index + 1}: no data`);
+    const bytes = Buffer.from(data, "base64");
+    if (bytes.byteLength === 0 || bytes.toString("base64") !== data) throw new Error(`image ${index + 1}: data is not base64`);
+    if (bytes.byteLength > MAX_PROMPT_IMAGE_BYTES) throw new Error(`image ${index + 1}: larger than ${MAX_PROMPT_IMAGE_BYTES / 1024 / 1024} MB`);
+    return { type: "image", data, mimeType };
+  });
+}
+
+/** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
+const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
@@ -451,6 +482,11 @@ class Daemon {
   constructor(options, token, identity = {}) {
     this.options = options;
     this.token = token;
+    /**
+     * Where failures nothing else reports go: the daemon's output is `~/.omp-mobile/daemon.log`.
+     * @type {(error: unknown) => void}
+     */
+    this.log = options.log ?? ((error) => console.error(`${new Date().toISOString()} ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`));
     this.admission = identity.admission;
     this.user = identity.user ?? "";
     this.startedAt = Date.now();
@@ -601,9 +637,10 @@ class Daemon {
       }
       sendJson(res, 404, { error: "not found" });
     } catch (error) {
-      sendJson(res, typeof error?.status === "number" ? error.status : 500, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const status = typeof error?.status === "number" ? error.status : 500;
+      // A refusal the API defines (404, 409, 410) is an answer; anything else is a failure worth keeping.
+      if (status >= 500) this.log(error);
+      sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -657,7 +694,9 @@ class Daemon {
    */
   ensureLive(id) {
     const live = this.sessions.get(id);
-    if (live !== undefined) return Promise.resolve(live);
+    if (live !== undefined && !live.closed) return Promise.resolve(live);
+    // Its OMP process exited: resume it afresh instead of serving a dead session.
+    if (live !== undefined) this.sessions.delete(id);
     let starting = this.starting.get(id);
     if (starting === undefined) {
       starting = this.resume(id).finally(() => this.starting.delete(id));
@@ -683,16 +722,24 @@ class Daemon {
       autoApprove: this.options.autoApprove,
       extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
     });
-    await rpc.start();
-    const entry = new SessionEntry(stored.cwd, rpc);
-    await entry.hydrate();
-    entry.id = id;
-    entry.onChange = (changed) => this.remember(changed);
-    entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
-    entry.bind();
-    this.sessions.set(id, entry);
-    this.remember(entry);
-    return entry;
+    // Until the session is registered the process is ours alone to close: left
+    // running it would hold the session's owner lock, so every later open would
+    // be refused as "open in another omp process" naming this very child.
+    try {
+      await rpc.start();
+      const entry = new SessionEntry(stored.cwd, rpc);
+      await entry.hydrate();
+      entry.id = id;
+      entry.onChange = (changed) => this.remember(changed);
+      entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
+      entry.bind();
+      this.sessions.set(id, entry);
+      this.remember(entry);
+      return entry;
+    } catch (error) {
+      rpc.close();
+      throw error;
+    }
   }
 
   async createSession(cwd) {
@@ -703,19 +750,21 @@ class Daemon {
       autoApprove: this.options.autoApprove,
       extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
     });
-    await rpc.start();
-    const entry = new SessionEntry(cwd, rpc);
-    await entry.hydrate();
-    if (entry.id === "") {
+    try {
+      await rpc.start();
+      const entry = new SessionEntry(cwd, rpc);
+      await entry.hydrate();
+      if (entry.id === "") throw new Error("omp returned no session id");
+      entry.onChange = (changed) => this.remember(changed);
+      entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
+      entry.bind();
+      this.sessions.set(entry.id, entry);
+      this.remember(entry);
+      return entry;
+    } catch (error) {
       rpc.close();
-      throw new Error("omp returned no session id");
+      throw error;
     }
-    entry.onChange = (changed) => this.remember(changed);
-    entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
-    entry.bind();
-    this.sessions.set(entry.id, entry);
-    this.remember(entry);
-    return entry;
   }
 
   handleUpgrade(req, socket, head) {
@@ -745,10 +794,15 @@ class Daemon {
         });
       })
       .catch((error) => {
-        const status = typeof error?.status === "number" ? error.status : 404;
-        socket.write(`HTTP/1.1 ${status} ${STATUS_CODES[status] ?? "Error"}\r\n\r\n`);
-        socket.destroy();
-        this.log?.(error);
+        const status = typeof error?.status === "number" ? error.status : 500;
+        if (status >= 500) this.log(error);
+        // A browser-style client only sees that the upgrade failed, never why. Finish
+        // the handshake instead, say why the session cannot open, and close: the app
+        // shows the reason and stops retrying what a retry cannot fix.
+        this.wsServer.handleUpgrade(req, socket, head, (ws) => {
+          ws.send(JSON.stringify({ type: "open_failed", status, error: error instanceof Error ? error.message : String(error) }));
+          ws.close(OPEN_FAILED_CLOSE_CODE, "session did not open");
+        });
       });
   }
 
@@ -763,8 +817,10 @@ class Daemon {
     try {
       switch (message.type) {
         case "prompt": {
-          if (typeof message.text !== "string" || message.text.trim() === "") throw new Error("empty prompt");
-          await entry.rpc.prompt(message.text);
+          const images = promptImages(message.images);
+          const text = typeof message.text === "string" ? message.text : "";
+          if (text.trim() === "" && images.length === 0) throw new Error("empty prompt");
+          await entry.rpc.prompt(text, images);
           ws.send(JSON.stringify({ type: "accepted", command: "prompt" }));
           return;
         }

@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
+import { RpcFrameDecoder, supportsProtocolV2 } from "./rpc-frame.mjs";
 
 const START_TIMEOUT_MS = 45_000;
 
@@ -21,6 +22,38 @@ function withoutBunFlag(env) {
   return rest;
 }
 const REQUEST_TIMEOUT_MS = 60_000;
+/** Messages per `get_messages_page` request: OMP's maximum; a page also stays under 768 KiB. */
+const MESSAGE_PAGE_LIMIT = 256;
+/** OMP's `get_messages_page` codes that mean "page later or read it whole", as OMP's own client treats them. */
+const PAGE_FALLBACK_CODES = new Set(["session_busy", "stale_cursor"]);
+const PAGE_FALLBACK_MESSAGES = new Set([
+  "Cannot page messages while the session is changing",
+  "RPC message cursor is stale",
+]);
+
+/**
+ * A failed RPC command: OMP's error text, and its machine-readable `code` when it sent one.
+ */
+export class RpcCommandError extends Error {
+  /**
+   * @param {string} message
+   * @param {string} command
+   * @param {string | undefined} code
+   */
+  constructor(message, command, code) {
+    super(message);
+    this.name = "RpcCommandError";
+    this.command = command;
+    this.code = code;
+  }
+}
+
+/** Whether a paging failure should fall back to one whole `get_messages`. */
+function pageFallback(error) {
+  if (!(error instanceof Error)) return false;
+  if (error instanceof RpcCommandError && error.code !== undefined && PAGE_FALLBACK_CODES.has(error.code)) return true;
+  return PAGE_FALLBACK_MESSAGES.has(error.message);
+}
 
 /** Events that carry no useful state to the phone. */
 const IGNORED_UI = new Set(["setStatus", "setWidget", "setTitle", "set_editor_text"]);
@@ -88,6 +121,9 @@ export class RpcSession extends EventEmitter {
     this.lastState = null;
     this.lastError = null;
     this.stderr = "";
+    /** 1 until OMP accepts `negotiate_protocol` v2; then frames above 1 MiB arrive as chunks. */
+    this.protocolVersion = 1;
+    this.frames = new RpcFrameDecoder();
   }
 
   /** Start the process and resolve once it printed `ready`. */
@@ -132,7 +168,14 @@ export class RpcSession extends EventEmitter {
       });
     });
     lines.on("line", (line) => this.#onLine(line));
-    await ready;
+    const hello = await ready;
+    // v1 caps every frame at 1 MiB: a long session's messages or a large tool
+    // result would come back as a transport-limit error. v2 chunks them instead.
+    if (supportsProtocolV2(hello)) {
+      const response = await this.request("negotiate_protocol", { protocolVersion: 2 });
+      if (response.data?.protocolVersion !== 2) throw new Error("omp RPC protocol v2 negotiation failed");
+      this.protocolVersion = 2;
+    }
     this.started = true;
     return this;
   }
@@ -141,11 +184,13 @@ export class RpcSession extends EventEmitter {
   #onLine(line) {
     let message;
     try {
-      message = JSON.parse(line);
+      message = this.frames.push(JSON.parse(line));
     } catch {
       this.emit("protocol-error", { line: line.slice(0, 500) });
       return;
     }
+    // A chunk of a larger frame: the frame is handled once its last chunk arrives.
+    if (message === undefined) return;
     this.updatedAt = Date.now();
     if (message.type === "ready") {
       this.emit("ready", message);
@@ -155,7 +200,9 @@ export class RpcSession extends EventEmitter {
       const pending = message.id ? this.pending.get(message.id) : undefined;
       if (pending !== undefined && message.id) {
         this.pending.delete(message.id);
-        if (message.success === false) pending.reject(new Error(message.error || `RPC ${message.command} failed`));
+        if (message.success === false) {
+          pending.reject(new RpcCommandError(message.error || `RPC ${message.command} failed`, message.command, message.code));
+        }
         else pending.resolve(message);
         return;
       }
@@ -252,10 +299,48 @@ export class RpcSession extends EventEmitter {
     return data;
   }
 
-  /** @returns {Promise<{messages: object[]}>} */
+  /**
+   * The session's messages. Under protocol v2 they are read in pages, as OMP's
+   * own RPC client does: one `get_messages` answer is a single frame, which a
+   * long uncompacted session outgrows. A page that cannot be read now (the
+   * session is changing, or the cursor went stale) falls back to the whole list
+   * in one response, which v2 may chunk.
+   * @returns {Promise<{messages: object[]}>}
+   */
   async getMessages() {
+    // As OMP's own client: pages only once v2 is negotiated (an OMP that offers v2 pages).
+    if (this.protocolVersion === 2) {
+      try {
+        return { messages: await this.#drainPages() };
+      } catch (error) {
+        if (!pageFallback(error)) throw error;
+      }
+    }
     const response = await this.request("get_messages");
     return response.data ?? { messages: [] };
+  }
+
+  async #drainPages() {
+    const messages = [];
+    const seen = new Set();
+    /** @type {number | undefined} */
+    let total;
+    /** @type {string | undefined} */
+    let cursor;
+    do {
+      const response = await this.request("get_messages_page", cursor === undefined ? { limit: MESSAGE_PAGE_LIMIT } : { cursor, limit: MESSAGE_PAGE_LIMIT });
+      const page = response.data ?? {};
+      if (!Number.isSafeInteger(page.totalMessages) || page.totalMessages < 0 || (total !== undefined && page.totalMessages !== total)) {
+        throw new Error("omp message pages returned an inconsistent total");
+      }
+      total = page.totalMessages;
+      if (Array.isArray(page.messages)) messages.push(...page.messages);
+      cursor = typeof page.nextCursor === "string" && page.nextCursor !== "" ? page.nextCursor : undefined;
+      if (cursor !== undefined && seen.has(cursor)) throw new Error("omp message pages repeated a cursor");
+      if (cursor !== undefined) seen.add(cursor);
+    } while (cursor !== undefined);
+    if (messages.length !== total) throw new Error("omp message pages ended before the advertised total");
+    return messages;
   }
 
   /**
@@ -293,9 +378,12 @@ export class RpcSession extends EventEmitter {
     return this.getState();
   }
 
-  /** @param {string} text */
-  async prompt(text) {
-    return this.request("prompt", { message: text });
+  /**
+   * @param {string} text
+   * @param {{type: "image", data: string, mimeType: string}[]} [images] OMP `ImageContent` parts sent with the text.
+   */
+  async prompt(text, images = []) {
+    return this.request("prompt", images.length > 0 ? { message: text, images } : { message: text });
   }
 
   async abort() {
@@ -327,4 +415,4 @@ export class RpcSession extends EventEmitter {
   }
 }
 
-export { REQUEST_TIMEOUT_MS, START_TIMEOUT_MS };
+export { REQUEST_TIMEOUT_MS, START_TIMEOUT_MS, MESSAGE_PAGE_LIMIT };

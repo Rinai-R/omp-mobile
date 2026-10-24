@@ -8,6 +8,8 @@ phone app ── Tailscale HTTP / WebSocket / SSE ──> daemon ── JSON lin
 
 OMP is a terminal agent without a web server. Its RPC mode speaks JSON lines on stdin and stdout and emits the full session event stream; the daemon owns those processes so the phone does not need OMP's RPC details, and so a session keeps running while the phone is away.
 
+The daemon negotiates OMP's RPC protocol v2 when `ready` offers it. Protocol v1 caps every frame at 1 MiB, so a long uncompacted session's message list or a large tool result would arrive as a transport-limit error; under v2 OMP splits such frames into `rpc_chunk` lines that the daemon reassembles (`daemon/src/rpc-frame.mjs`, up to 64 MiB), and messages are read with `get_messages_page`, as OMP's own RPC client does.
+
 ## `/mobile`
 
 The npm package is also an OMP plugin (`package.json` `omp.extensions` → `daemon/src/omp-extension.mjs`). Its `/mobile` command, in the interactive OMP:
@@ -69,7 +71,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 ### Session socket
 
-On connect the daemon sends `{type: "snapshot", session, state, messages}`, then every OMP question still open as `{type: "approval", request}`. After that:
+On connect the daemon sends `{type: "snapshot", session, state, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
 
 | From the daemon | Meaning |
 | --- | --- |
@@ -83,7 +85,7 @@ On connect the daemon sends `{type: "snapshot", session, state, messages}`, then
 
 | From the app | Effect |
 | --- | --- |
-| `{type: "prompt", text}` | Sends OMP's RPC `prompt`; while a turn runs, OMP decides how it is queued. |
+| `{type: "prompt", text, images?}` | Sends OMP's RPC `prompt`; while a turn runs, OMP decides how it is queued. `images` are `{data, mimeType}` with base64 `data` and a JPEG, PNG, WebP or GIF type, at most 8 of at most 10 MB each; `text` may be empty when images are sent. A malformed image refuses the whole prompt. |
 | `{type: "abort"}` | Stops the running turn. |
 | `{type: "approval", id, value?, confirmed?, cancelled?}` | Answers an open request. |
 | `{type: "refresh"}` | Asks for a fresh `state`. |
@@ -103,7 +105,8 @@ Images arrive as `{type: "image", data, mimeType}`. Inline base64 becomes a data
 - **Created by the daemon:** registered in the registry file and resumed with `omp --resume <file>` the first time one is opened after a daemon restart.
 - **Terminal sessions:** the 50 most recently written OMP sessions under `<omp home>/agent/sessions`, titled by OMP's title slot, else the first prompt, else the directory. Opening one resumes it and it becomes one of the daemon's sessions.
 - **Held elsewhere:** every writing omp process holds `<omp home>/run/session-owners/<id>.lock` open. The daemon reads these with `lsof`, marks such sessions `openElsewhere`, and answers a resume `409`, because a second omp on the same file saves to a new file instead of sharing it. Without `lsof` ownership is unknown and the resume goes ahead.
-- Concurrent opens of one session share one OMP start.
+- Concurrent opens of one session share one OMP start. If the start or the first load fails, the daemon closes the OMP process it started, so no child of its own is left holding the session's lock.
+- A live session whose OMP process exited is started again on the next open instead of being served dead.
 
 ## Approvals
 

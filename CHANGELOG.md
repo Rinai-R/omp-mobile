@@ -4,6 +4,20 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Long sessions open again. The daemon speaks OMP's RPC protocol v2 and reads messages in pages, so a session whose message list or a tool result is larger than 1 MiB no longer fails with "RPC response exceeded the transport limit" (#21).
+- A session that fails to open no longer leaves an OMP process behind. That process kept the session's lock, so every later open was refused as "open in another omp process" naming the daemon's own child, and each retry added another one (#21).
+- A session whose OMP process exited is started again when it is opened, instead of showing a session that cannot answer.
+- When a session cannot open, the session socket now says why (`open_failed`) before it closes, and the daemon logs unexpected failures to `daemon.log`.
+- The daemon accepts images with a prompt (`images` on the session socket's `prompt` frame) and hands them to OMP.
+
+### 中文
+
+- 长会话又能打开了。daemon 改用 OMP 的 RPC v2 协议并分页读取消息，消息列表或工具结果超过 1 MiB 的会话不再报 “RPC response exceeded the transport limit”（#21）。
+- 打开失败的会话不再留下 OMP 进程。这个进程会一直占着会话锁，之后每次打开都被拒绝为 “open in another omp process”，而这个进程其实是 daemon 自己的子进程；每重试一次还会再多一个（#21）。
+- OMP 进程已退出的会话，再次打开时会重新启动，不再显示一个无法回应的会话。
+- 会话打不开时，会话 socket 会先说明原因（`open_failed`）再关闭；意外错误会写进 `daemon.log`。
+- daemon 支持随消息发送图片（会话 socket 的 `prompt` 帧带 `images`），并转交给 OMP。
+
 ## v0.2.0
 
 Model switching and a fuller transcript.
