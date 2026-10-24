@@ -4,6 +4,10 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.3.0
+
+A redesigned app in OMP's own look, photos for the agent, a session switcher across computers, and long sessions that open again.
+
 - Long sessions open again. The daemon speaks OMP's RPC protocol v2 and reads messages in pages, so a session whose message list or a tool result is larger than 1 MiB no longer fails with "RPC response exceeded the transport limit" (#21).
 - A session that fails to open no longer leaves an OMP process behind. That process kept the session's lock, so every later open was refused as "open in another omp process" naming the daemon's own child, and each retry added another one (#21).
 - A session whose OMP process exited is started again when it is opened, instead of showing a session that cannot answer.
@@ -21,6 +25,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - `error` frames on the session socket name the `command` that failed. The app puts a message back into the box only when the computer refused that message, not after an unrelated error, and not after the link dropped (#24).
 
 ### 中文
+
+App 按 OMP 自己的视觉重新设计；可以给 agent 发图片；可以跨电脑切换会话；长会话又能打开了。
 
 - 长会话又能打开了。daemon 改用 OMP 的 RPC v2 协议并分页读取消息，消息列表或工具结果超过 1 MiB 的会话不再报 “RPC response exceeded the transport limit”（#21）。
 - 打开失败的会话不再留下 OMP 进程。这个进程会一直占着会话锁，之后每次打开都被拒绝为 “open in another omp process”，而这个进程其实是 daemon 自己的子进程；每重试一次还会再多一个（#21）。
