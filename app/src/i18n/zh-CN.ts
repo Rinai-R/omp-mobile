@@ -193,7 +193,7 @@ export const zhCN: Record<Key, Message> = {
   "scanner.openSettings": "打开设置",
   "scanner.failed": "相机无法启动。",
   "scanner.connecting": "连接中…",
-  "scanner.hint": "将相机对准 omp-mobile daemon 在终端里打印的二维码。",
+  "scanner.hint": "对准 omp-mobile daemon 在终端打印的二维码。",
   "attachments.unreadable": "无法读取这张图片。",
   "attachments.cameraOff": "OMP 的相机权限已关闭。请在系统设置中开启后再拍照。",
 
