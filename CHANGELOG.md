@@ -18,6 +18,7 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Give a computer its own name on this phone; computers with the same host name are told apart by their address (#23).
 - A session that cannot open says why (from `open_failed`, or over HTTP for older daemons) and stops reconnecting until you try again (#23).
 - Images OMP left as `<N bytes>` placeholders no longer render as empty boxes (#23).
+- `error` frames on the session socket name the `command` that failed. The app puts a message back into the box only when the computer refused that message, not after an unrelated error, and not after the link dropped (#24).
 
 ### 中文
 
@@ -35,6 +36,7 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - 可以在手机上给电脑起名；主机名相同的电脑用地址区分（#23）。
 - 打不开的会话会说明原因（来自 `open_failed`，旧版 daemon 则通过 HTTP 获取），并停止重连，直到你点“重试”（#23）。
 - OMP 留下的 `<N bytes>` 图片占位符不再显示成空白方块（#23）。
+- 会话 socket 的 `error` 帧会注明出错的 `command`。只有电脑拒收了这条消息时，App 才把它放回输入框；无关的错误或连接中断后不再放回（#24）。
 
 ## v0.2.0
 
