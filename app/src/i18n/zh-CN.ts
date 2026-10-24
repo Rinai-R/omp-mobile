@@ -38,7 +38,6 @@ export const zhCN: Record<Key, Message> = {
   "settings.battery.fix": "允许后台运行",
   "settings.language.section": "语言",
   "settings.language.system": "跟随系统",
-  "settings.language.systemDetail": "当前系统语言：{language}",
   "settings.about.section": "关于",
   "settings.about.app": "OMP mobile",
   "settings.about.detail": "通过 Tailscale 在手机上直接操控 OMP 会话。",

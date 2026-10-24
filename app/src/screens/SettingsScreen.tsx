@@ -2,8 +2,7 @@ import type { ReactNode } from "react";
 import { ScrollView, Switch, View } from "react-native";
 import { CheckGlyph } from "../components/icons";
 import { Button, Group, Header, Row, SectionHeader } from "../components/ui";
-import { resolveLanguage, t, type Key, type LanguagePreference } from "../i18n/index.ts";
-import { systemLocale } from "../i18n/native.ts";
+import { t, type Key, type LanguagePreference } from "../i18n/index.ts";
 import { useColors, useStyles, type Palette } from "../theme";
 
 /**
@@ -97,11 +96,6 @@ export function SettingsScreen({
             <Row
               key={choice}
               title={choice === "system" ? t("settings.language.system") : LANGUAGE_NAMES[choice]}
-              detail={
-                choice === "system"
-                  ? t("settings.language.systemDetail", { language: LANGUAGE_NAMES[resolveLanguage("system", systemLocale())] })
-                  : undefined
-              }
               trailing={choice === language ? <CheckGlyph size={16} color={colors.accent} /> : undefined}
               chevron={false}
               selected={choice === language}

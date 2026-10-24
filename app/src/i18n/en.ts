@@ -42,7 +42,6 @@ export const en = {
   "settings.battery.fix": "Allow background use",
   "settings.language.section": "Language",
   "settings.language.system": "System",
-  "settings.language.systemDetail": "Follows the phone: {language}",
   "settings.about.section": "About",
   "settings.about.app": "OMP mobile",
   "settings.about.detail": "Native control for OMP sessions over Tailscale.",
