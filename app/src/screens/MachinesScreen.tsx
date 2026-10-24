@@ -17,7 +17,8 @@ import {
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
 import { summaryOf, type Probe } from "../probe";
-import { MONO, useColors, useStyles, type Palette } from "../theme";
+import { SANS, MONO, useColors, useStyles, type Palette } from "../theme";
+import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 
 /** A request to open the Add machine sheet, optionally pre-filled from a pairing link. */
@@ -40,9 +41,12 @@ interface Props {
   onAddRequestHandled: () => void;
   onOpen: (machine: Machine) => void;
   onRemove: (machine: Machine) => void;
+  onRename: (machine: Machine, label: string | undefined) => void;
   onSettings: () => void;
   refreshing: boolean;
   onRefresh: () => void;
+  /** Back to the home; absent while no computer is paired (this is the first screen then). */
+  onBack?: () => void;
 }
 
 export function MachinesScreen({
@@ -54,9 +58,11 @@ export function MachinesScreen({
   onAddRequestHandled,
   onOpen,
   onRemove,
+  onRename,
   onSettings,
   refreshing,
   onRefresh,
+  onBack,
 }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
@@ -136,7 +142,7 @@ export function MachinesScreen({
 
   const confirmRemove = useCallback(
     (machine: Machine) => {
-      Alert.alert(`Remove ${machine.name} from this phone?`, "The daemon and its running sessions stay on the computer.", [
+      Alert.alert(`Remove ${displayName(machine)} from this phone?`, "The daemon and its running sessions stay on the computer.", [
         { text: "Cancel", style: "cancel" },
         { text: "Remove", style: "destructive", onPress: () => onRemove(machine) },
       ]);
@@ -151,8 +157,9 @@ export function MachinesScreen({
   return (
     <View style={styles.root}>
       <Header
-        large
-        title="machines"
+        large={onBack === undefined}
+        title={onBack === undefined ? "computers" : "Computers"}
+        onBack={onBack}
         right={
           <>
             {machines.length > 0 ? (
@@ -195,7 +202,7 @@ export function MachinesScreen({
                 return (
                   <Row
                     key={machine.id}
-                    title={machine.name}
+                    title={machineLabel(machine, machines)}
                     dim={summary.dot === "down"}
                     detail={
                       <View style={styles.state}>
@@ -209,7 +216,7 @@ export function MachinesScreen({
                     last={index === machines.length - 1}
                     onPress={() => onOpen(machine)}
                     onLongPress={() => setSheet(machine)}
-                    accessibilityLabel={`${machine.name}, ${summary.text}`}
+                    accessibilityLabel={`${displayName(machine)}, ${summary.text}`}
                   />
                 );
               })}
@@ -224,6 +231,10 @@ export function MachinesScreen({
         probe={sheet === null ? undefined : probes.get(sheet.id)}
         onOpen={onOpen}
         onRemove={confirmRemove}
+        onRename={(machine, label) => {
+          onRename(machine, label);
+          setSheet((current) => (current === null || current.id !== machine.id ? current : { ...current, label }));
+        }}
         onClose={closeSheet}
       />
 
@@ -268,8 +279,8 @@ function createStyles(c: Palette) {
     emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
     state: { flexDirection: "row", alignItems: "center", gap: 5 },
-    footnote: { fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
-    hint: { fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
+    footnote: { fontFamily: SANS, fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
+    hint: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }

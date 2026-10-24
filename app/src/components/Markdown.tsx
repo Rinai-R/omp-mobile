@@ -1,7 +1,7 @@
 import { memo, useMemo, type ReactNode } from "react";
 import { Linking, ScrollView, StyleSheet, Text, View, type FontVariant } from "react-native";
 import { parseBlocks, parseInline, type Block, type Inline } from "../markdown";
-import { MONO, radius, useStyles, type Palette } from "../theme";
+import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
 
 /** Renders the blocks `parseBlocks` produces for assistant text. */
 
@@ -157,7 +157,7 @@ function MarkdownImpl({ text, caret }: { text: string; caret?: ReactNode }): Rea
 export const Markdown = memo(MarkdownImpl);
 
 function createStyles(c: Palette) {
-  const body = { fontSize: 15, lineHeight: 23, color: c.fg } as const;
+  const body = { fontFamily: SANS, fontSize: 15, lineHeight: 23, color: c.fg } as const;
   const heading = { fontWeight: "600", letterSpacing: -0.2, color: c.fg, marginTop: 6 } as const;
   return {
     root: { gap: 8 },
@@ -217,7 +217,7 @@ function createStyles(c: Palette) {
     },
     tableRow: { flexDirection: "row", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
     tableHead: { backgroundColor: c.raised, borderTopWidth: 0 },
-    tableCell: {
+    tableCell: { fontFamily: SANS,
       width: 150,
       paddingHorizontal: 10,
       paddingVertical: 7,

@@ -53,3 +53,17 @@ test("model, thinking, todo and queue events refresh the state the phone holds",
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(reads, before + 1, "a todo tool call does");
 });
+
+test("a session waiting on an OMP question says so in its summary", async () => {
+  const rpc = Object.assign(new EventEmitter(), {
+    getState: async () => ({ sessionId: "s1", isStreaming: true }),
+    getMessages: async () => ({ messages: [] }),
+    extensionRequests: new Map(),
+  });
+  const entry = new SessionEntry("/tmp/work", rpc);
+  await entry.hydrate();
+  assert.equal(entry.summary().waiting, 0);
+  rpc.extensionRequests.set("q1", { id: "q1", method: "select", title: "Allow tool: bash" });
+  assert.equal(entry.summary().waiting, 1);
+  assert.equal(entry.summary().status, "streaming");
+});

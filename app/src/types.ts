@@ -12,6 +12,8 @@ export interface Machine {
   cwd: string;
   /** When a probe last reached the daemon (epoch ms); absent until one has. */
   lastSeen?: number;
+  /** The user's own name for this computer on this phone; the host name when absent. */
+  label?: string;
 }
 
 export interface SessionSummary {
@@ -27,6 +29,8 @@ export interface SessionSummary {
   origin: "daemon" | "omp";
   /** Another omp process (a terminal) has it open; the daemon will not open it until that one exits. */
   openElsewhere?: boolean;
+  /** OMP questions and tool approvals waiting for an answer (live sessions, newer daemons). */
+  waiting?: number;
 }
 
 export interface SessionState {
@@ -84,6 +88,9 @@ export interface ToolItem {
   status: "running" | "done" | "error";
   /** Images a result carried, e.g. a screenshot or a picture the read tool opened. */
   images?: ImagePart[];
+  /** When the phone saw the call start and end (epoch ms); absent for calls loaded from a snapshot. */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface MessageItem {
@@ -127,6 +134,8 @@ export interface Hello {
   protocol: number;
   sessionCount: number;
   cwd: string;
+  /** What this daemon supports beyond protocol 1, e.g. `"prompt-images"`; absent on older daemons. */
+  features?: string[];
 }
 
 export interface Snapshot {
@@ -152,6 +161,9 @@ export type ServerMessage =
   | { type: "approval_resolved"; id: string; reason: "answered" | "cancelled" | "closed" }
   | { type: "notice"; level: "info" | "warning" | "error"; message: string }
   | { type: "closed"; reason: string; stderr?: string }
+  /** The session could not open (unknown, file gone, held by another omp, OMP failed to load it); the socket closes next. */
+  | { type: "open_failed"; status: number; error: string }
   | { type: "accepted"; command: string }
-  | { type: "error"; error: string }
+  /** `command`: the frame that failed (daemons before 0.3 leave it out). */
+  | { type: "error"; error: string; command?: string }
   | { type: "protocol-error"; line: string };

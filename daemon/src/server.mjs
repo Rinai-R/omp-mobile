@@ -71,12 +71,17 @@ export function promptImages(value) {
   });
 }
 
+/**
+ * What this daemon supports beyond protocol 1, for an app to offer only what
+ * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`.
+ */
+const FEATURES = ["prompt-images"];
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
 const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
-/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean}} SessionSummary */
+/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, waiting?: number}} SessionSummary */
 
 /** An error with the HTTP status it answers. */
 function httpError(status, message) {
@@ -395,6 +400,8 @@ class SessionEntry {
       updatedAt: this.updatedAt,
       sessionFile: this.state?.sessionFile,
       origin: "daemon",
+      // OMP questions and tool approvals still waiting for an answer: the session needs the user.
+      waiting: this.openRequests().length,
     };
   }
 
@@ -566,6 +573,7 @@ class Daemon {
         sessionCount: this.sessions.size,
         cwd: this.options.cwd,
         user: this.user || null,
+        features: FEATURES,
       });
       return;
     }
@@ -878,7 +886,14 @@ class Daemon {
           throw new Error(`unknown command ${String(message.type)}`);
       }
     } catch (error) {
-      ws.send(JSON.stringify({ type: "error", error: error instanceof Error ? error.message : String(error) }));
+      // `command` names the frame that failed, so the app can tell a refused prompt from any other error.
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          command: typeof message?.type === "string" ? message.type : undefined,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   }
 

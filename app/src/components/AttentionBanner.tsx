@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Attention } from "../../modules/omp-attention/src";
-import { EASE_OUT, MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { SANS, EASE_OUT, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import { GradientDot, LiveDot } from "./brand";
 import { CloseGlyph } from "./icons";
 
@@ -122,8 +122,8 @@ function createStyles(c: Palette) {
     pressed: { backgroundColor: c.raised },
     dot: { paddingTop: 6 },
     body: { flex: 1, minWidth: 0, gap: 2 },
-    headline: { fontSize: 14, lineHeight: 19, fontWeight: "600", letterSpacing: -0.1, color: c.fg },
-    detail: { fontSize: 13, lineHeight: 18, color: c.fgMuted },
+    headline: { fontFamily: SANS, fontSize: 14, lineHeight: 19, fontWeight: "600", letterSpacing: -0.1, color: c.fg },
+    detail: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
     machine: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     close: { padding: 4 },
   } as const;

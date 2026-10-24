@@ -15,10 +15,12 @@ import appConfig from "./app.json";
 import * as Attention from "./modules/omp-attention/src";
 import { AttentionBanner } from "./src/components/AttentionBanner";
 import { ChatScreen } from "./src/screens/ChatScreen";
+import { MachineSwitcher } from "./src/components/MachineSwitcher";
+import { SessionSwitcher } from "./src/components/SessionSwitcher";
+import { HomeScreen } from "./src/screens/HomeScreen";
 import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
 import { PairScanner } from "./src/screens/PairScanner";
 import { isPairingLink } from "./src/pairing";
-import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
@@ -28,9 +30,10 @@ import type { Machine, SessionSummary } from "./src/types";
 
 type Route =
   | { kind: "machines" }
-  | { kind: "sessions"; machine: Machine }
+  /** `create` is a nonce: a new value opens the New session sheet once. */
+  | { kind: "home"; machine: Machine; create?: number }
   | { kind: "chat"; machine: Machine; session: SessionSummary }
-  | { kind: "settings" }
+  | { kind: "settings"; from: Machine | null }
   | { kind: "scan" };
 
 const EDGES = ["top", "left", "right"] as const;
@@ -65,6 +68,8 @@ export default function App(): ReactNode {
   const scheme = useColorScheme();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [route, setRoute] = useState<Route>({ kind: "machines" });
   const [restored, setRestored] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -90,6 +95,9 @@ export default function App(): ReactNode {
       machinesRef.current = stored;
       setMachines(stored);
       setSettings(storedSettings);
+      // The app opens on the computer used last; with none paired, on the computers screen.
+      const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
+      if (last !== undefined) setRoute({ kind: "home", machine: last });
       // The service follows these machines while the setting is on; it persists both for the boot receiver.
       Attention.setMachines(stored);
       const state = notificationState(storedSettings.notifications);
@@ -174,22 +182,24 @@ export default function App(): ReactNode {
     setRoute({ kind: "machines" });
   }, []);
 
-  const back = useCallback(() => {
-    setRoute((current) => {
-      if (current.kind === "chat") return { kind: "sessions", machine: current.machine };
-      return { kind: "machines" };
-    });
+  /** Where back goes from `current`; null leaves the app (the home, or the computers screen with none paired). */
+  const backOf = useCallback((current: Route): Route | null => {
+    switch (current.kind) {
+      case "chat":
+        return { kind: "home", machine: current.machine };
+      case "settings":
+        return current.from !== null ? { kind: "home", machine: current.from } : { kind: "machines" };
+      case "scan":
+        return { kind: "machines" };
+      case "machines": {
+        const list = machinesRef.current;
+        const last = list.find((item) => item.id === settingsRef.current.lastMachineId) ?? list[0];
+        return last === undefined ? null : { kind: "home", machine: last };
+      }
+      default:
+        return null;
+    }
   }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return undefined;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (route.kind === "machines") return false;
-      back();
-      return true;
-    });
-    return () => subscription.remove();
-  }, [back, route.kind]);
 
   const persist = useCallback((next: Machine[]) => {
     const before = machinesRef.current;
@@ -227,11 +237,46 @@ export default function App(): ReactNode {
     [probeOne],
   );
   const probeAllNow = useCallback(() => void probeAll(), [probeAll]);
-  const switchMachine = useCallback((machine: Machine) => setRoute({ kind: "sessions", machine }), []);
+  /** The home of `machine`, remembered as the computer to open on next time. */
+  const goHome = useCallback(
+    (machine: Machine, create?: boolean) => {
+      setRoute({ kind: "home", machine, create: create === true ? Date.now() : undefined });
+      setSettings((current) => {
+        if (current.lastMachineId === machine.id) return current;
+        const next = { ...current, lastMachineId: machine.id };
+        void saveSettings(next);
+        return next;
+      });
+    },
+    [],
+  );
+  useEffect(() => {
+    if (Platform.OS !== "android") return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const next = backOf(route);
+      if (next === null) return false;
+      // Home is remembered as the computer to open on, as the on-screen back buttons do.
+      if (next.kind === "home") goHome(next.machine);
+      else setRoute(next);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [backOf, goHome, route]);
+
+  const [switcher, setSwitcher] = useState<{ machine: Machine; sessionId?: string } | null>(null);
+  const [machinePicker, setMachinePicker] = useState(false);
+  const openChat = useCallback((machine: Machine, session: SessionSummary) => {
+    setSwitcher(null);
+    setRoute((current) =>
+      current.kind === "chat" && current.machine.id === machine.id && current.session.id === session.id
+        ? current
+        : { kind: "chat", machine, session },
+    );
+  }, []);
 
   // Probe while the machines screen is shown: now, every 15 s, and on return to the foreground.
   // Keyed by the machine ids, so a new machine is probed at once but saving lastSeen does not re-probe.
-  const onMachines = restored && route.kind === "machines";
+  const onMachines = restored && (route.kind === "machines" || route.kind === "home");
   const machineIds = machines.map((machine) => machine.id).join("\n");
   useEffect(() => {
     if (!onMachines) return undefined;
@@ -249,9 +294,9 @@ export default function App(): ReactNode {
   const addMachine = useCallback(
     (machine: Machine) => {
       persist([...machinesRef.current.filter((item) => item.url !== machine.url), machine]);
-      setRoute({ kind: "sessions", machine });
+      goHome(machine);
     },
-    [persist],
+    [goHome, persist],
   );
 
   const removeMachine = useCallback(
@@ -267,10 +312,24 @@ export default function App(): ReactNode {
     [persist],
   );
 
+  const renameMachine = useCallback(
+    (machine: Machine, label: string | undefined) => {
+      persist(machinesRef.current.map((item) => (item.id === machine.id ? { ...item, label } : item)));
+    },
+    [persist],
+  );
+
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next);
     void saveSettings(next);
   }, []);
+  // Removing the computer on screen leaves its home: go to another, or to the computers screen.
+  useEffect(() => {
+    if (route.kind !== "home" && route.kind !== "chat") return;
+    if (machines.some((item) => item.id === route.machine.id)) return;
+    const first = machines[0];
+    setRoute(first === undefined ? { kind: "machines" } : { kind: "home", machine: first });
+  }, [machines, route]);
 
   const toggleNotifications = useCallback(
     (on: boolean) => {
@@ -299,6 +358,8 @@ export default function App(): ReactNode {
     setRoute({ kind: "chat", machine, session: placeholderSession(machine, attention.sessionId, attention.sessionTitle) });
   }, []);
 
+  /** The stored machine a route names: routes keep a copy, and a rename or probe updates the stored one. */
+  const liveMachine = (machine: Machine): Machine => machines.find((item) => item.id === machine.id) ?? machine;
   let content: ReactNode;
   if (!restored) {
     content = (
@@ -310,25 +371,24 @@ export default function App(): ReactNode {
     content = (
       <ChatScreen
         key={`${route.machine.id}\n${route.session.id}`}
-        machine={route.machine}
+        machine={liveMachine(route.machine)}
         session={route.session}
-        onBack={() => setRoute({ kind: "sessions", machine: route.machine })}
+        onBack={() => goHome(route.machine)}
+        onSwitch={() => setSwitcher({ machine: route.machine, sessionId: route.session.id })}
       />
     );
-  } else if (route.kind === "sessions") {
+  } else if (route.kind === "home") {
     content = (
-      <SessionsScreen
-        // A switch is a different machine's screen: its list and probe state start fresh.
+      <HomeScreen
+        // Another computer's home starts fresh: its list and probe state.
         key={route.machine.id}
-        machine={route.machine}
+        machine={liveMachine(route.machine)}
         probe={probes.get(route.machine.id)}
+        onOpen={openChat}
+        onPickMachine={() => setMachinePicker(true)}
+        onSettings={() => setRoute({ kind: "settings", from: route.machine })}
         onRetry={(machine) => void probeOne(machine)}
-        onBack={() => setRoute({ kind: "machines" })}
-        onOpen={(machine, session) => setRoute({ kind: "chat", machine, session })}
-        machines={machines}
-        probes={probes}
-        onProbeAll={probeAllNow}
-        onSwitch={switchMachine}
+        newRequest={route.create ?? 0}
       />
     );
   } else if (route.kind === "scan") {
@@ -336,6 +396,7 @@ export default function App(): ReactNode {
       <PairScanner machines={machines} onAdd={addMachine} onClose={closeScanner} onManual={scannerToManual} />
     );
   } else if (route.kind === "settings") {
+    const from = route.from;
     content = (
       <SettingsScreen
         notifications={notifications}
@@ -343,7 +404,7 @@ export default function App(): ReactNode {
         onToggleNotifications={toggleNotifications}
         onOpenNotificationSettings={Attention.openNotificationSettings}
         onFixBattery={fixBattery}
-        onBack={() => setRoute({ kind: "machines" })}
+        onBack={() => setRoute(from !== null ? { kind: "home", machine: from } : { kind: "machines" })}
         version={appConfig.expo.version}
       />
     );
@@ -356,9 +417,11 @@ export default function App(): ReactNode {
         onScan={openScanner}
         addRequest={addRequest}
         onAddRequestHandled={clearAddRequest}
-        onOpen={(machine) => setRoute({ kind: "sessions", machine })}
+        onOpen={(machine) => goHome(machine)}
         onRemove={removeMachine}
-        onSettings={() => setRoute({ kind: "settings" })}
+        onRename={renameMachine}
+        onSettings={() => setRoute({ kind: "settings", from: null })}
+        onBack={machines[0] === undefined ? undefined : () => goHome(machinesRef.current.find((item) => item.id === settings.lastMachineId) ?? machines[0] as Machine)}
         refreshing={refreshing}
         onRefresh={() => {
           setRefreshing(true);
@@ -367,6 +430,8 @@ export default function App(): ReactNode {
       />
     );
   }
+
+  const homeMachine = route.kind === "home" || route.kind === "chat" ? liveMachine(route.machine) : undefined;
 
   return (
     <SafeAreaProvider>
@@ -381,6 +446,31 @@ export default function App(): ReactNode {
       )}
       {banner !== null && route.kind !== "scan" ? (
         <AttentionBanner attention={banner} onOpen={openBanner} onDismiss={dismissBanner} />
+      ) : null}
+      <SessionSwitcher
+        visible={switcher !== null}
+        machines={machines}
+        probes={probes}
+        machine={switcher?.machine}
+        currentSessionId={switcher?.sessionId}
+        onPick={openChat}
+        onNew={(machine) => {
+          setSwitcher(null);
+          goHome(machine, true);
+        }}
+        onClose={() => setSwitcher(null)}
+      />
+      {homeMachine !== undefined ? (
+        <MachineSwitcher
+          visible={machinePicker}
+          machines={machines}
+          current={homeMachine}
+          probes={probes}
+          onProbe={probeAllNow}
+          onPick={(machine) => goHome(machine)}
+          onClose={() => setMachinePicker(false)}
+          onManage={() => setRoute({ kind: "machines" })}
+        />
       ) : null}
     </SafeAreaProvider>
   );

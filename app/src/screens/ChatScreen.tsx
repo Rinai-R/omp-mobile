@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  AppState,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -7,23 +8,28 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
   type ListRenderItem,
-  type PressableStateCallbackType,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
-import { SessionSocket } from "../api";
+import { HttpError, SessionSocket, daemonFeatures, openSession, type OpenFailure } from "../api";
+import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
-import { ChatItem } from "../components/ChatItem";
-import { BrandMark, GradientDot, GradientFill, LiveDot, PulseDot } from "../components/brand";
-import { SendGlyph, StopGlyph } from "../components/icons";
+import { BrandMark, GradientDot, LiveDot, PulseDot } from "../components/brand";
+import { Composer } from "../components/Composer";
+import { ArrowDownGlyph, BackGlyph, ChevronDownGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
-import { Banner, Chip, EmptyState, Header } from "../components/ui";
+import { ToolSheet } from "../components/ToolSheet";
+import { TranscriptRow } from "../components/Transcript";
+import { Banner, IconButton } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
-import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { displayName } from "../machines";
+import { layoutRows, type Row, type Step } from "../rows";
+import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { todoPhases } from "../todos";
 import { loadTranscript, saveTranscript } from "../transcripts";
 import type {
@@ -40,20 +46,51 @@ interface Props {
   machine: Machine;
   session: SessionSummary;
   onBack: () => void;
+  /** Open the session switcher (the title). */
+  onSwitch: () => void;
 }
 
-export function ChatScreen({ machine, session: initialSession, onBack }: Props): ReactNode {
+/** Connection attempts without an open after which the screen asks the daemon over HTTP why. */
+const ASK_AFTER = 3;
+/** How far from the newest message (px) still counts as "at the bottom". */
+const NEAR_BOTTOM = 160;
+
+/** What the failure card says for the status the daemon answered with. */
+function failureText(failure: OpenFailure): { title: string; body: string } {
+  switch (failure.status) {
+    case 404:
+      return { title: "This session is gone", body: "The computer no longer knows this session." };
+    case 409:
+      return {
+        title: "Open in a terminal",
+        body: "Another omp process on the computer has this session open. Exit it there (or /exit), then try again.",
+      };
+    case 410:
+      return { title: "The session file is gone", body: "Its file was deleted on the computer." };
+    default:
+      return {
+        title: "This session didn't open",
+        body: "The computer answered, but OMP could not load the session. Trying again will not help until this is fixed on the computer.",
+      };
+  }
+}
+
+export function ChatScreen({ machine, session: initialSession, onBack, onSwitch }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardVisible();
-  const listRef = useRef<FlatList<Item>>(null);
+  const listRef = useRef<FlatList<Row>>(null);
   const socketRef = useRef<SessionSocket | null>(null);
   const [session, setSession] = useState(initialSession);
   const [state, setState] = useState<SessionState | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [connected, setConnected] = useState(false);
+  const [failure, setFailure] = useState<OpenFailure | null>(null);
+  const failedRef = useRef(false);
+  failedRef.current = failure !== null;
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const [models, setModels] = useState<ModelOption[] | null>(null);
@@ -61,9 +98,17 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
   const [picker, setPicker] = useState(false);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step | null>(null);
+  const [features, setFeatures] = useState<string[]>([]);
   /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
   const live = useRef(false);
   const itemsRef = useRef<Item[]>([]);
+  /** A prompt the daemon has not accepted yet, restored to the box if it refuses it. */
+  const pending = useRef<{ text: string; attachments: Attachment[] } | null>(null);
+  /** Effects follow the computer by how it is reached, not by object: a rename must not reconnect. */
+  const link = `${machine.id}\n${machine.url}\n${machine.token}`;
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
 
   // The saved transcript shows at once, offline too, until the daemon's snapshot arrives.
   useEffect(() => {
@@ -75,6 +120,20 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       cancelled = true;
     };
   }, [initialSession.id, machine.id]);
+
+  // Asked again whenever the link comes up: the computer may not have been reachable when the chat opened.
+  useEffect(() => {
+    if (!connected && features.length > 0) return undefined;
+    let cancelled = false;
+    void daemonFeatures(machineRef.current).then((list) => {
+      if (!cancelled && list.length > 0) setFeatures(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `features` only gates the call; a fetched list must not trigger another one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link, connected]);
 
   // Saved once the chat has been quiet for a moment (not on every streamed delta), and on leaving it.
   useEffect(() => {
@@ -91,6 +150,8 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
   );
 
   useEffect(() => {
+    let asking = false;
+    const machine = machineRef.current;
     const socket = new SessionSocket(
       machine,
       initialSession.id,
@@ -120,7 +181,7 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
             setLevels(message.levels);
             break;
           case "approval":
-            // The composer's keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
+            // The keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
             Keyboard.dismiss();
             setApproval(message.request);
             break;
@@ -133,17 +194,30 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
               { kind: "notice", id: `notice-${Date.now()}`, level: message.level, text: message.message },
             ]);
             break;
+          case "accepted":
+            if (message.command === "prompt") pending.current = null;
+            break;
           case "closed":
             setConnected(false);
-            setError(`OMP closed: ${message.reason}`);
+            setError(`OMP stopped: ${message.reason}`);
             break;
-          case "error":
+          case "error": {
+            const refused = pending.current;
+            // Older daemons do not name the command; then any error while a prompt is unanswered is taken as its refusal.
+            if (refused !== null && (message.command === undefined || message.command === "prompt")) {
+              // The daemon refused the prompt: give the text and photos back instead of losing them.
+              pending.current = null;
+              setDraft((current) => (current === "" ? refused.text : current));
+              setAttachments((current) => (current.length === 0 ? refused.attachments : current));
+              setState((current) => (current === null ? current : { ...current, isStreaming: false }));
+            }
             setError(message.error);
             setPickerError(message.error);
             setPickerLoading(false);
             break;
+          }
           case "protocol-error":
-            setError("The daemon sent an unreadable OMP frame.");
+            setError("The computer sent an unreadable OMP frame.");
             break;
           default:
             break;
@@ -151,17 +225,46 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       },
       () => {
         setConnected(true);
+        setFailure(null);
         setError(null);
       },
-      () => setConnected(false),
+      (attempts) => {
+        setConnected(false);
+        // A prompt unanswered when the link dropped is never answered on the new link: do not restore it later.
+        pending.current = null;
+        // An older daemon only refuses the upgrade; ask over HTTP why, once the retries pile up.
+        if (attempts < ASK_AFTER || asking) return;
+        asking = true;
+        void openSession(machine, initialSession.id)
+          .then(() => socket.reconnect())
+          .catch((cause: unknown) => {
+            if (cause instanceof HttpError && cause.status !== 401 && cause.status !== 403) {
+              socket.fail();
+              setFailure({ status: cause.status, error: cause.message });
+            }
+          })
+          .finally(() => {
+            asking = false;
+          });
+      },
+      (reason) => {
+        setConnected(false);
+        setFailure(reason);
+      },
     );
     socketRef.current = socket;
     socket.connect();
+    // Back in the foreground: reconnect now rather than at the end of a backoff.
+    // A session that could not open stays down until Retry, as the error card says.
+    const subscription = AppState.addEventListener("change", (next) => {
+      if (next === "active" && !failedRef.current) socket.reconnect();
+    });
     return () => {
+      subscription.remove();
       socket.close();
       socketRef.current = null;
     };
-  }, [initialSession.id, machine]);
+  }, [initialSession.id, link]);
 
   // This session is on screen: its background notifications are cleared and not posted.
   useEffect(() => {
@@ -169,16 +272,46 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
     return () => Attention.setOnScreen("", "");
   }, [initialSession.id, machine.id]);
 
+  const streaming = state?.isStreaming === true;
+
   const send = useCallback(() => {
     const text = draft.trim();
-    if (text === "" || socketRef.current === null) return;
-    socketRef.current.send({ type: "prompt", text });
+    if ((text === "" && attachments.length === 0) || socketRef.current === null) return;
+    const message =
+      attachments.length > 0
+        ? { type: "prompt", text, images: attachments.map((item) => ({ data: item.data, mimeType: item.mimeType })) }
+        : { type: "prompt", text };
+    if (!socketRef.current.send(message)) {
+      setError("Not connected to the computer.");
+      return;
+    }
+    pending.current = { text: draft, attachments };
     setDraft("");
+    setAttachments([]);
     setState((current) => (current === null ? current : { ...current, isStreaming: true }));
-  }, [draft]);
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, [attachments, draft]);
 
   const abort = useCallback(() => {
     socketRef.current?.send({ type: "abort" });
+  }, []);
+
+  const attach = useCallback(
+    (source: "library" | "camera") => {
+      if (!features.includes("prompt-images")) {
+        setError("Update omp-mobile on the computer to send photos (omp plugin install omp-mobile).");
+        return;
+      }
+      void pickPhotos(source, MAX_ATTACHMENTS - attachments.length)
+        .then((picked) => {
+          if (picked.length > 0) setAttachments((current) => [...current, ...picked].slice(0, MAX_ATTACHMENTS));
+        })
+        .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
+    },
+    [attachments.length, features],
+  );
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
   }, []);
 
   const answer = useCallback(
@@ -195,6 +328,7 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
       setError("Not connected to the computer.");
       return;
     }
+    Keyboard.dismiss();
     setPickerError(null);
     setPicker(true);
     setPickerLoading(models === null);
@@ -215,156 +349,199 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
     socketRef.current?.send({ type: "set_thinking_level", level });
   }, []);
 
-  const streaming = state?.isStreaming === true;
+  const retry = useCallback(() => {
+    setFailure(null);
+    socketRef.current?.reconnect();
+  }, []);
+
+  // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
+  const rows = useMemo(() => layoutRows(items).reverse(), [items]);
+  /** The open step as it is now: a running tool's output keeps arriving while its sheet is open. */
+  const openStep = useMemo(() => {
+    if (step === null || step.kind !== "tool") return step;
+    for (const row of rows) {
+      if (row.kind !== "activity") continue;
+      const found = row.steps.find((item) => item.kind === "tool" && item.tool.id === step.tool.id);
+      if (found !== undefined) return found;
+    }
+    return step;
+  }, [rows, step]);
+  /** Rows on screen before the first live frame: they appear without an entrance. */
+  /** Whether each row plays its entrance, decided once per id: rows loaded with the transcript do not, rows that arrive later do. */
+  const seen = useRef<Map<string, boolean> | null>(null);
+  if (seen.current === null && rows.length > 0) seen.current = new Map(rows.map((row) => [row.id, false]));
+  const [away, setAway] = useState(false);
+  const [unseen, setUnseen] = useState(0);
+  const newest = rows[0]?.id;
+  const lastNewest = useRef(newest);
+  useEffect(() => {
+    if (newest === lastNewest.current) return;
+    lastNewest.current = newest;
+    if (away) setUnseen((count) => count + 1);
+  }, [away, newest]);
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const isAway = event.nativeEvent.contentOffset.y > NEAR_BOTTOM;
+    setAway(isAway);
+    if (!isAway) setUnseen(0);
+  }, []);
+  const jump = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setUnseen(0);
+  }, []);
+
+  const renderItem = useCallback<ListRenderItem<Row>>(
+    ({ item }) => {
+      const map = seen.current;
+      let animate = map?.get(item.id);
+      if (animate === undefined) {
+        animate = map !== null;
+        map?.set(item.id, animate);
+      }
+      return <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />;
+    },
+    [machine, session.cwd],
+  );
+
   const model = state?.model?.name ?? state?.model?.id ?? initialSession.model ?? "default model";
   const level = state?.thinkingLevel;
   const usage = state?.contextUsage;
-  const context =
-    usage?.tokens !== undefined && usage.contextWindow !== undefined
-      ? `${tokens(usage.tokens)}/${tokens(usage.contextWindow)}`
-      : undefined;
+  const contextPercent =
+    typeof usage?.percent === "number"
+      ? usage.percent
+      : usage?.tokens !== undefined && usage.contextWindow !== undefined && usage.contextWindow > 0
+        ? (usage.tokens / usage.contextWindow) * 100
+        : undefined;
   const queued = (state?.queuedMessages?.steering?.length ?? 0) + (state?.queuedMessages?.followUp?.length ?? 0);
   const todos = todoPhases(state?.todoPhases);
   const folder = session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd;
-  const hasText = draft.trim() !== "";
-  const [focused, setFocused] = useState(false);
-  const focus = useCallback(() => setFocused(true), []);
-  const blur = useCallback(() => setFocused(false), []);
-  // Text in the box sends (a steer while streaming); an empty box while streaming stops the turn.
-  const mode: "send" | "stop" | "idle" = hasText ? "send" : streaming ? "stop" : "idle";
-  const actionDisabled = !connected || mode === "idle";
-  const action = mode === "stop" ? abort : send;
-  const actionStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
-      mode === "stop" ? styles.stop : actionDisabled ? styles.sendOff : styles.send,
-      pressed && styles.actionPressed,
-    ],
-    [actionDisabled, mode, styles],
-  );
-  const renderItem = useCallback<ListRenderItem<Item>>(
-    ({ item }) => <ChatItem item={item} machine={machine} />,
-    [machine],
-  );
-  const scrollToEnd = useCallback(() => listRef.current?.scrollToEnd({ animated: false }), []);
+  // A session started here is named by the daemon after its first prompt; until the
+  // next snapshot brings that name, take it from the transcript the same way.
+  const firstPrompt = items.find((item) => item.kind === "message" && item.role === "user" && item.text.trim() !== "");
+  const title =
+    session.title === folder && firstPrompt?.kind === "message" ? firstPrompt.text.replace(/\s+/g, " ").trim().slice(0, 80) : session.title;
+  const status = failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
+  const failed = failure === null ? null : failureText(failure);
 
   return (
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
-        // Android 15+ draws edge to edge, so the window no longer resizes for
-        // the keyboard; pad on both platforms.
+        // Android 15+ draws edge to edge, so the window no longer resizes for the keyboard; pad on both platforms.
         behavior="padding"
         keyboardVerticalOffset={insets.top}
       >
-        <Header
-          title={session.title}
-          onBack={onBack}
-          subtitle={
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {model} · {folder}
-            </Text>
-          }
-          right={
-            <View
-              style={styles.status}
-              accessible
-              accessibilityLabel={connected ? (streaming ? "Working" : "Connected") : "Reconnecting"}
-            >
-              {connected ? (
-                streaming ? (
-                  <GradientDot size={7} />
-                ) : (
-                  <LiveDot color={colors.ok} size={7} ping />
-                )
+        <View style={styles.header}>
+          <IconButton onPress={onBack} label="Back">
+            <BackGlyph size={22} color={colors.fgMuted} />
+          </IconButton>
+          <Pressable
+            onPress={onSwitch}
+            style={({ pressed }) => [styles.title, pressed && styles.titlePressed]}
+            accessibilityRole="button"
+            accessibilityLabel={`${title}. Switch session`}
+            hitSlop={4}
+          >
+            <View style={styles.titleRow}>
+              <Text style={styles.titleText} numberOfLines={1}>
+                {title}
+              </Text>
+              <ChevronDownGlyph size={14} color={colors.fgGhost} />
+            </View>
+            <View style={styles.subtitleRow} accessible accessibilityLabel={`${displayName(machine)}, ${status}`}>
+              {status === "working" ? (
+                <GradientDot size={7} />
+              ) : status === "live" ? (
+                <LiveDot color={colors.ok} size={7} />
+              ) : status === "failed" ? (
+                <LiveDot color={colors.err} size={7} />
               ) : (
                 <PulseDot color={colors.warn} size={7} />
               )}
-              <Text style={connected ? styles.statusText : styles.statusTextOff}>
-                {connected ? (streaming ? "working" : "live") : "offline"}
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {displayName(machine)} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
               </Text>
             </View>
-          }
-        />
+          </Pressable>
+        </View>
 
         {error !== null ? <Banner text={error} onPress={() => setError(null)} /> : null}
 
-        <FlatList
-          ref={listRef}
-          data={items}
-          keyExtractor={keyOf}
-          renderItem={renderItem}
-          contentContainerStyle={styles.list}
-          onContentSizeChange={scrollToEnd}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          ListEmptyComponent={
-            <EmptyState
-              icon={<BrandMark size={26} />}
-              title="Ask OMP anything"
-              body={`It runs on ${machine.name} in ${folder}. Tool calls and approvals appear here as it works.`}
-            />
-          }
-        />
+        {failed !== null && failure !== null ? (
+          <View style={styles.failure}>
+            <WarningGlyph size={20} color={colors.warn} />
+            <Text style={styles.failureTitle}>{failed.title}</Text>
+            <Text style={styles.failureBody}>{failed.body}</Text>
+            <View style={styles.failureCode}>
+              <Text style={styles.failureCodeText} selectable>
+                {failure.status} · {failure.error}
+              </Text>
+            </View>
+            <Pressable onPress={retry} style={({ pressed }) => [styles.failureButton, pressed && styles.titlePressed]} accessibilityRole="button">
+              <Text style={styles.failureButtonText}>Try again</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={styles.listWrap}>
+          <FlatList
+            ref={listRef}
+            inverted
+            data={rows}
+            keyExtractor={keyOf}
+            renderItem={renderItem}
+            onScroll={onScroll}
+            scrollEventThrottle={64}
+            contentContainerStyle={styles.list}
+            style={failure !== null ? styles.listDim : undefined}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+            // At the bottom the inverted list keeps the newest row pinned while it streams and grows.
+            // Scrolled up, the rows in view stay put while new ones arrive below.
+            maintainVisibleContentPosition={away ? { minIndexForVisible: 0 } : undefined}
+            initialNumToRender={14}
+            windowSize={11}
+          />
+          {rows.length === 0 && failure === null ? (
+            // Outside the list: an inverted list flips its children on both axes on Android.
+            <View style={styles.emptyOverlay} pointerEvents="none">
+              <View style={styles.emptyMark}>
+                <BrandMark size={26} />
+              </View>
+              <Text style={styles.emptyTitle}>{connected ? "Ask OMP anything" : "Connecting…"}</Text>
+              <Text style={styles.emptyBody}>
+                It runs on {displayName(machine)} in {folder}. Tool calls and approvals appear here as it works.
+              </Text>
+            </View>
+          ) : null}
+          {away ? (
+            <Pressable onPress={jump} style={styles.jump} accessibilityRole="button" accessibilityLabel="Jump to the newest message">
+              <ArrowDownGlyph size={13} color={colors.fgMuted} />
+              <Text style={styles.jumpText}>{unseen > 0 ? `${unseen} new` : "Latest"}</Text>
+            </Pressable>
+          ) : null}
+        </View>
 
         <TodoPanel phases={todos} />
 
-        <View style={[styles.composer, { paddingBottom: 10 + (keyboard ? 0 : insets.bottom) }]}>
-          <View style={styles.chips}>
-            <Pressable
-              onPress={openPicker}
-              accessibilityRole="button"
-              accessibilityLabel={`Model ${model}. Change model`}
-              style={styles.chipPress}
-            >
-              <Chip label={model} tone="accent" />
-            </Pressable>
-            <Pressable
-              onPress={openPicker}
-              accessibilityRole="button"
-              accessibilityLabel={`Thinking level ${level ?? "default"}. Change`}
-              style={styles.chipPress}
-            >
-              <Chip label={level === undefined ? "think" : `think ${level}`} />
-            </Pressable>
-            {context !== undefined ? <Chip label={context} /> : null}
-            {queued > 0 ? <Chip label={`${queued} queued`} tone="warn" /> : null}
-            <View style={styles.chipShrink}>
-              <Chip label={session.cwd} />
-            </View>
-          </View>
-          <View style={focused ? styles.haloOn : styles.halo}>
-            <View style={focused ? styles.inputWrapFocused : styles.inputWrap}>
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                onFocus={focus}
-                onBlur={blur}
-                placeholder={streaming ? "Steer the current turn…" : "Message OMP"}
-                placeholderTextColor={colors.fgFaint}
-                selectionColor={colors.ring}
-                multiline
-                style={styles.input}
-              />
-              <Pressable
-                onPress={action}
-                disabled={actionDisabled}
-                accessibilityRole="button"
-                accessibilityLabel={mode === "stop" ? "Stop" : "Send"}
-                hitSlop={6}
-                style={actionStyle}
-              >
-                {mode === "stop" ? (
-                  <StopGlyph size={11} color={colors.err} />
-                ) : (
-                  <>
-                    {actionDisabled ? null : <GradientFill />}
-                    <SendGlyph size={17} color={actionDisabled ? colors.fgFaint : "#FFFFFF"} />
-                  </>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
+        <Composer
+          draft={draft}
+          onChangeDraft={setDraft}
+          attachments={attachments}
+          onRemoveAttachment={removeAttachment}
+          onAttach={attach}
+          canAttach={features.includes("prompt-images")}
+          streaming={streaming}
+          connected={connected}
+          readOnly={failure !== null}
+          onSend={send}
+          onStop={abort}
+          model={model}
+          level={level}
+          contextPercent={contextPercent}
+          queued={queued}
+          onModel={openPicker}
+          bottomInset={keyboard ? 0 : insets.bottom}
+        />
       </KeyboardAvoidingView>
 
       {approval !== null ? <ApprovalSheet request={approval} onAnswer={answer} /> : null}
@@ -380,32 +557,21 @@ export function ChatScreen({ machine, session: initialSession, onBack }: Props):
         onSelectModel={selectModel}
         onSelectLevel={selectLevel}
       />
+      <ToolSheet step={openStep} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
     </View>
   );
 }
 
-/** `12345` → `12k`, `1000000` → `1M`: context usage on one chip. */
-function tokens(count: number): string {
-  if (count >= 1_000_000) return `${Math.round(count / 100_000) / 10}M`;
-  if (count >= 10_000) return `${Math.round(count / 1_000)}k`;
-  if (count >= 1_000) return `${Math.round(count / 100) / 10}k`;
-  return String(count);
-}
-
-function keyOf(item: Item): string {
-  return item.id;
+function keyOf(row: Row): string {
+  return row.id;
 }
 
 /** Whether the software keyboard is up; the composer drops the home-indicator inset meanwhile. */
 function useKeyboardVisible(): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () =>
-      setVisible(true),
-    );
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () =>
-      setVisible(false),
-    );
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setVisible(false));
     return () => {
       show.remove();
       hide.remove();
@@ -414,80 +580,85 @@ function useKeyboardVisible(): boolean {
   return visible;
 }
 
-/** Six lines of 21 px text plus the vertical padding. */
-const INPUT_MAX = 21 * 6 + 20;
-const ACTION = 32;
-
 function createStyles(c: Palette) {
-  const action = {
-    width: ACTION,
-    height: ACTION,
-    borderRadius: radius.md,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 6,
-    marginRight: 6,
-  } as const;
-  const status = {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    height: 24,
-    paddingHorizontal: 9,
-    marginRight: 8,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-    backgroundColor: c.raised,
-  } as const;
-  const statusText = { fontFamily: MONO, fontSize: 11, lineHeight: 14, color: c.fgMuted } as const;
-  const inputWrap = {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    borderRadius: radius.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-    borderTopColor: c.edgeTop,
-    backgroundColor: c.raised,
-  } as const;
-  const halo = { borderRadius: radius.lg + 3, borderWidth: 3, margin: -3, borderColor: "transparent" } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
+    header: {
+      height: 58,
+      flexDirection: "row",
+      alignItems: "center",
+      paddingLeft: 2,
+      paddingRight: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      backgroundColor: c.bg,
+    },
+    title: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 4, borderRadius: radius.md, gap: 2 },
+    titlePressed: { opacity: 0.6 },
+    titleRow: { flexDirection: "row", alignItems: "center", gap: 5, minWidth: 0 },
+    titleText: { flexShrink: 1, fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
+    subtitleRow: { flexDirection: "row", alignItems: "center", gap: 7, minWidth: 0 },
     subtitle: { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
-    status,
-    statusText,
-    statusTextOff: { ...statusText, color: c.warn },
-    list: { paddingTop: 6, paddingBottom: 16, flexGrow: 1 },
-    composer: { paddingHorizontal: 12, paddingTop: 6, gap: 8, backgroundColor: c.bg },
-    chips: { flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: 2 },
-    chipPress: { flexShrink: 1, minWidth: 0 },
-    chipShrink: { flexShrink: 1, minWidth: 0 },
-    halo,
-    haloOn: { ...halo, borderColor: c.ringSoft },
-    inputWrap,
-    inputWrapFocused: { ...inputWrap, borderColor: c.ring, borderTopColor: c.ring },
-    input: {
-      flex: 1,
-      minHeight: 44,
-      maxHeight: INPUT_MAX,
-      paddingLeft: 14,
-      paddingRight: 8,
-      paddingTop: 11,
-      paddingBottom: 11,
-      fontSize: 15,
-      lineHeight: 21,
-      color: c.fg,
-      textAlignVertical: "top",
-    },
-    send: action,
-    sendOff: { ...action, backgroundColor: c.selected },
-    stop: {
-      ...action,
-      backgroundColor: c.errSoft,
+
+    listWrap: { flex: 1 },
+    list: { paddingTop: 12, paddingBottom: 8 },
+    listDim: { opacity: 0.5 },
+    emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
+    emptyMark: {
+      width: 56,
+      height: 56,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.panel,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.errBorder,
+      borderColor: c.border,
     },
-    actionPressed: { opacity: 0.85, transform: [{ scale: 0.96 }] },
+    emptyTitle: { fontFamily: SANS, fontSize: 17, lineHeight: 22, fontWeight: "600", letterSpacing: -0.3, color: c.fg, marginTop: 16 },
+    emptyBody: { fontFamily: SANS, fontSize: 13.5, lineHeight: 20, color: c.fgFaint, marginTop: 6, textAlign: "center" },
+    jump: {
+      position: "absolute",
+      alignSelf: "center",
+      bottom: 10,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 32,
+      paddingHorizontal: 13,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.borderStrong,
+      backgroundColor: c.raised,
+      elevation: 6,
+      shadowColor: "#000",
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    jumpText: { fontFamily: SANS, fontSize: 12.5, lineHeight: 16, fontWeight: "500", color: c.fgMuted },
+
+    failure: {
+      margin: 14,
+      padding: 16,
+      gap: 8,
+      borderRadius: radius.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.dark ? "#f5a52455" : "#c77c0255",
+      backgroundColor: c.warnSoft,
+    },
+    failureTitle: { fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", color: c.fg, marginTop: 4 },
+    failureBody: { fontFamily: SANS, fontSize: 14, lineHeight: 21, color: c.fgMuted },
+    failureCode: { borderRadius: radius.md, backgroundColor: c.inset, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, padding: 10 },
+    failureCodeText: { fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint },
+    failureButton: {
+      alignSelf: "flex-start",
+      marginTop: 4,
+      height: 38,
+      paddingHorizontal: 16,
+      borderRadius: radius.md,
+      justifyContent: "center",
+      backgroundColor: c.fg,
+    },
+    failureButtonText: { fontFamily: SANS, fontSize: 14, fontWeight: "600", color: c.bg },
   } as const;
 }
