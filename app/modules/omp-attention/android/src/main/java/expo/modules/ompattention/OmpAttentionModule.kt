@@ -73,6 +73,15 @@ class OmpAttentionModule : Module() {
 
     Function("isEnabled") { AttentionState.enabled(context) }
 
+    /** The notification text in the app's language, as a JSON object of key → text; renames the channels. */
+    Function("setStrings") { json: String ->
+      if (json == AttentionState.strings(context).toString()) return@Function
+      AttentionState.setStrings(context, json)
+      Notifier.ensureChannels(context)
+      // A running service redraws its own notification on the next start command.
+      sync()
+    }
+
     /** The session now on screen ("" for none); clears its notifications. */
     Function("setOnScreen") { machineId: String, sessionId: String ->
       if (machineId.isEmpty() || sessionId.isEmpty()) {

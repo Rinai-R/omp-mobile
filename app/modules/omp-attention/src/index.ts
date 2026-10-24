@@ -46,6 +46,7 @@ declare class OmpAttentionModule extends NativeModule<Events> {
   setMachines(json: string): void;
   setEnabled(enabled: boolean): void;
   isEnabled(): boolean;
+  setStrings(json: string): void;
   setOnScreen(machineId: string, sessionId: string): void;
   takePendingOpen(): OpenSession | null;
   notificationsAllowed(): boolean;
@@ -67,6 +68,14 @@ export function setMachines(machines: readonly AttentionMachine[]): void {
 /** Turn background notifications on or off; persisted natively so they resume after a reboot. */
 export function setEnabled(enabled: boolean): void {
   native?.setEnabled(enabled);
+}
+
+/**
+ * The text the service writes into notifications, in the app's language (key → text,
+ * `{name}` placeholders left for it to fill); persisted for the boot receiver.
+ */
+export function setStrings(strings: Readonly<Record<string, string>>): void {
+  native?.setStrings(JSON.stringify(strings));
 }
 
 export function isEnabled(): boolean {

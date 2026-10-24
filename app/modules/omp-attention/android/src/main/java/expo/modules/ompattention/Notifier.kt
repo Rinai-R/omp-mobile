@@ -26,22 +26,45 @@ object Notifier {
   /** OMP's brand pink (accentB), the accent of expanded notifications. */
   private const val BRAND = 0xFFD42EA3.toInt()
 
+  /**
+   * The app's text for `key` (sent by JS in its language, see app/src/i18n/native.ts),
+   * else the English `fallback`; `{name}` placeholders are filled from `args`.
+   */
+  private fun text(context: Context, key: String, fallback: String, vararg args: Pair<String, Any>): String {
+    var value = AttentionState.strings(context).optString(key).ifEmpty { fallback }
+    for ((name, arg) in args) value = value.replace("{$name}", arg.toString())
+    return value
+  }
+
+  /** Create the channels, or rename them: called again when the app's language changes. */
   fun ensureChannels(context: Context) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
     val manager = context.getSystemService(NotificationManager::class.java)
     manager.createNotificationChannel(
-      NotificationChannel(CHANNEL_ATTENTION, "Approvals & questions", NotificationManager.IMPORTANCE_HIGH).apply {
-        description = "An OMP session is waiting for you"
+      NotificationChannel(
+        CHANNEL_ATTENTION,
+        text(context, "notify.channel.attention", "Approvals & questions"),
+        NotificationManager.IMPORTANCE_HIGH,
+      ).apply {
+        description = text(context, "notify.channel.attention.detail", "An OMP session is waiting for you")
       },
     )
     manager.createNotificationChannel(
-      NotificationChannel(CHANNEL_TURNS, "Finished turns", NotificationManager.IMPORTANCE_DEFAULT).apply {
-        description = "An OMP session finished or failed"
+      NotificationChannel(
+        CHANNEL_TURNS,
+        text(context, "notify.channel.turns", "Finished turns"),
+        NotificationManager.IMPORTANCE_DEFAULT,
+      ).apply {
+        description = text(context, "notify.channel.turns.detail", "An OMP session finished or failed")
       },
     )
     manager.createNotificationChannel(
-      NotificationChannel(CHANNEL_SERVICE, "Background connection", NotificationManager.IMPORTANCE_LOW).apply {
-        description = "Keeps OMP connected to your computers"
+      NotificationChannel(
+        CHANNEL_SERVICE,
+        text(context, "notify.channel.service", "Background connection"),
+        NotificationManager.IMPORTANCE_LOW,
+      ).apply {
+        description = text(context, "notify.channel.service.detail", "Keeps OMP connected to your computers")
         setShowBadge(false)
       },
     )
@@ -51,8 +74,20 @@ object Notifier {
   fun serviceNotification(context: Context, connected: Int, total: Int) =
     NotificationCompat.Builder(context, CHANNEL_SERVICE)
       .setSmallIcon(R.drawable.omp_notification)
-      .setContentTitle(if (total == 1) "Watching 1 machine" else "Watching $total machines")
-      .setContentText(if (connected == total) "Connected" else "Connected to $connected of $total")
+      .setContentTitle(
+        if (total == 1) {
+          text(context, "notify.service.title.one", "Watching {count} machine", "count" to total)
+        } else {
+          text(context, "notify.service.title.other", "Watching {count} machines", "count" to total)
+        },
+      )
+      .setContentText(
+        if (connected == total) {
+          text(context, "notify.service.connected", "Connected")
+        } else {
+          text(context, "notify.service.partial", "Connected to {connected} of {total}", "connected" to connected, "total" to total)
+        },
+      )
       .setContentIntent(openIntent(context, null, null, 0))
       .setOngoing(true)
       .setSilent(true)
@@ -66,12 +101,12 @@ object Notifier {
    */
   fun post(context: Context, machine: Machine, frame: AttentionFrame, quiet: Boolean) {
     if (!canPost(context)) return
-    val title = frame.sessionTitle.ifEmpty { "Session" }
+    val title = frame.sessionTitle.ifEmpty { text(context, "common.session", "Session") }
     val (channel, headline) = when (frame.kind) {
-      "approval" -> CHANNEL_ATTENTION to "Approval needed"
-      "question" -> CHANNEL_ATTENTION to "Question for you"
-      "done" -> CHANNEL_TURNS to "Turn finished"
-      "failed" -> CHANNEL_TURNS to "Turn failed"
+      "approval" -> CHANNEL_ATTENTION to text(context, "attention.approval", "Approval needed")
+      "question" -> CHANNEL_ATTENTION to text(context, "attention.question", "Question for you")
+      "done" -> CHANNEL_TURNS to text(context, "attention.done", "Turn finished")
+      "failed" -> CHANNEL_TURNS to text(context, "attention.failed", "Turn failed")
       else -> return
     }
     val where = machine.name.ifEmpty { frame.machine }
