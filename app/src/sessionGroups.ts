@@ -1,4 +1,5 @@
 import type { SessionSummary } from "./types";
+import { t, type Key } from "./i18n/index.ts";
 
 /**
  * How the session lists group a computer's sessions: what needs an answer
@@ -13,12 +14,12 @@ export interface SessionGroup {
   sessions: SessionSummary[];
 }
 
-const TITLES: Record<GroupKey, string> = {
-  waiting: "Needs you",
-  running: "Running",
-  today: "Today",
-  earlier: "Earlier",
-  terminal: "From the terminal",
+const TITLES: Record<GroupKey, Key> = {
+  waiting: "group.waiting",
+  running: "group.running",
+  today: "group.today",
+  earlier: "group.earlier",
+  terminal: "group.terminal",
 };
 
 function startOfDay(now: number): number {
@@ -60,7 +61,7 @@ export function groupSessions(sessions: readonly SessionSummary[], now = Date.no
     .filter((key) => (buckets.get(key)?.length ?? 0) > 0)
     .map((key) => ({
       key,
-      title: TITLES[key],
+      title: t(TITLES[key]),
       sessions: [...(buckets.get(key) ?? [])].sort((a, b) => b.updatedAt - a.updatedAt),
     }));
 }
@@ -69,13 +70,13 @@ export function groupSessions(sessions: readonly SessionSummary[], now = Date.no
 export function age(timestamp: number, now = Date.now()): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return "";
   const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
-  if (seconds < 60) return "now";
-  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)}h`;
-  if (seconds < 7 * 86_400) return `${Math.floor(seconds / 86_400)}d`;
+  if (seconds < 60) return t("age.now");
+  if (seconds < 3_600) return t("age.minutes", { count: Math.floor(seconds / 60) });
+  if (seconds < 86_400) return t("age.hours", { count: Math.floor(seconds / 3_600) });
+  if (seconds < 7 * 86_400) return t("age.days", { count: Math.floor(seconds / 86_400) });
   const date = new Date(timestamp);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[date.getMonth()]} ${date.getDate()}`;
+  const months = t("age.months").split(" ");
+  return t("age.date", { month: months[date.getMonth()] ?? String(date.getMonth() + 1), day: date.getDate() });
 }
 
 /** The last segment of a path: the folder a session runs in. */

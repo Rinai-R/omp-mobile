@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ModelOption } from "../types";
+import { t } from "../i18n/index.ts";
 import { CheckGlyph } from "./icons";
 import { Group, Row, SectionHeader, Sheet } from "./ui";
 
@@ -51,7 +52,7 @@ function LevelChip({
       style={style}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={`Thinking level ${level}`}
+      accessibilityLabel={t("model.levelA11y", { level })}
     >
       <Text style={active ? styles.levelTextOn : styles.levelText}>{level}</Text>
     </Pressable>
@@ -107,10 +108,10 @@ export function ModelSheet({
   const total = models?.length ?? 0;
 
   return (
-    <Sheet visible={visible} title="Model" onClose={onClose}>
+    <Sheet visible={visible} title={t("model.title")} onClose={onClose}>
       <View style={styles.sheet}>
         <View style={styles.levelBlock}>
-          <Text style={styles.levelLabel}>Thinking</Text>
+          <Text style={styles.levelLabel}>{t("model.thinking")}</Text>
           <View style={styles.levelRow}>
             {shown.map((entry) => (
               <LevelChip
@@ -127,7 +128,7 @@ export function ModelSheet({
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder={models === null ? "Loading models…" : `Search ${total} models`}
+            placeholder={models === null ? t("model.loading") : t("model.search", { count: total })}
             placeholderTextColor={colors.fgFaint}
             selectionColor={colors.ring}
             autoCapitalize="none"
@@ -148,9 +149,9 @@ export function ModelSheet({
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {loading ? <Text style={styles.note}>Loading OMP's model catalog…</Text> : null}
+          {loading ? <Text style={styles.note}>{t("model.loadingCatalog")}</Text> : null}
           {!loading && models !== null && groups.length === 0 ? (
-            <Text style={styles.note}>No model matches “{query.trim()}”.</Text>
+            <Text style={styles.note}>{t("model.noMatch", { query: query.trim() })}</Text>
           ) : null}
           {groups.map(([provider, list]) => (
             <View key={provider}>
@@ -166,13 +167,13 @@ export function ModelSheet({
                       mono
                       last={index === list.length - 1}
                       onPress={() => onSelectModel(model)}
-                      accessibilityLabel={`${model.name}, ${model.provider}`}
+                      accessibilityLabel={t("common.pair", { label: model.name, value: model.provider })}
                       trailing={
                         <View style={styles.trailing}>
                           {model.contextWindow !== undefined ? (
                             <Text style={styles.meta}>{contextLabel(model.contextWindow)}</Text>
                           ) : null}
-                          {model.reasoning ? <Text style={styles.meta}>think</Text> : null}
+                          {model.reasoning ? <Text style={styles.meta}>{t("model.reasoning")}</Text> : null}
                           {key === currentKey ? <CheckGlyph size={14} color={colors.accent} /> : null}
                         </View>
                       }

@@ -1,5 +1,5 @@
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -20,6 +20,8 @@ import { SessionSwitcher } from "./src/components/SessionSwitcher";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
 import { PairScanner } from "./src/screens/PairScanner";
+import { resolveLanguage, setLanguage, t, type LanguagePreference } from "./src/i18n/index.ts";
+import { nativeStrings, systemLocale, useLanguage } from "./src/i18n/native.ts";
 import { isPairingLink } from "./src/pairing";
 import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
@@ -61,11 +63,12 @@ function notificationState(enabled: boolean): NotificationState {
 
 /** A session known only by id (a notification tap, so one the daemon runs): the chat's snapshot fills in the rest. */
 function placeholderSession(machine: Machine, sessionId: string, title: string): SessionSummary {
-  return { id: sessionId, title: title || "Session", cwd: machine.cwd, status: "idle", createdAt: 0, updatedAt: 0, origin: "daemon" };
+  return { id: sessionId, title: title || t("common.session"), cwd: machine.cwd, status: "idle", createdAt: 0, updatedAt: 0, origin: "daemon" };
 }
 
 export default function App(): ReactNode {
   const scheme = useColorScheme();
+  const language = useLanguage();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const settingsRef = useRef(settings);
@@ -95,6 +98,7 @@ export default function App(): ReactNode {
       machinesRef.current = stored;
       setMachines(stored);
       setSettings(storedSettings);
+      setLanguage(resolveLanguage(storedSettings.language, systemLocale()));
       // The app opens on the computer used last; with none paired, on the computers screen.
       const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
       if (last !== undefined) setRoute({ kind: "home", machine: last });
@@ -323,6 +327,20 @@ export default function App(): ReactNode {
     setSettings(next);
     void saveSettings(next);
   }, []);
+
+  /** Switch the language now: the whole tree re-renders under the new one, no restart. */
+  const chooseLanguage = useCallback(
+    (preference: LanguagePreference) => {
+      setLanguage(resolveLanguage(preference, systemLocale()));
+      updateSettings({ ...settingsRef.current, language: preference });
+    },
+    [updateSettings],
+  );
+
+  // The notification service composes its text natively: hand it the app's language.
+  useEffect(() => {
+    if (restored) Attention.setStrings(nativeStrings(language));
+  }, [language, restored]);
   // Removing the computer on screen leaves its home: go to another, or to the computers screen.
   useEffect(() => {
     if (route.kind !== "home" && route.kind !== "chat") return;
@@ -400,6 +418,8 @@ export default function App(): ReactNode {
     content = (
       <SettingsScreen
         notifications={notifications}
+        language={settings.language}
+        onLanguage={chooseLanguage}
         batteryRestricted={batteryRestricted}
         onToggleNotifications={toggleNotifications}
         onOpenNotificationSettings={Attention.openNotificationSettings}
@@ -435,43 +455,46 @@ export default function App(): ReactNode {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style={route.kind === "scan" || palette(scheme).dark ? "light" : "dark"} />
-      {route.kind === "scan" ? (
-        // The camera runs edge to edge; the scanner pads its own bars by the safe area.
-        content
-      ) : (
-        <SafeAreaView style={{ flex: 1, backgroundColor: palette(scheme).bg }} edges={EDGES}>
-          {content}
-        </SafeAreaView>
-      )}
-      {banner !== null && route.kind !== "scan" ? (
-        <AttentionBanner attention={banner} onOpen={openBanner} onDismiss={dismissBanner} />
-      ) : null}
-      <SessionSwitcher
-        visible={switcher !== null}
-        machines={machines}
-        probes={probes}
-        machine={switcher?.machine}
-        currentSessionId={switcher?.sessionId}
-        onPick={openChat}
-        onNew={(machine) => {
-          setSwitcher(null);
-          goHome(machine, true);
-        }}
-        onClose={() => setSwitcher(null)}
-      />
-      {homeMachine !== undefined ? (
-        <MachineSwitcher
-          visible={machinePicker}
+      {/* Keyed by the language: every screen and sheet renders again in the new one. */}
+      <Fragment key={language}>
+        <StatusBar style={route.kind === "scan" || palette(scheme).dark ? "light" : "dark"} />
+        {route.kind === "scan" ? (
+          // The camera runs edge to edge; the scanner pads its own bars by the safe area.
+          content
+        ) : (
+          <SafeAreaView style={{ flex: 1, backgroundColor: palette(scheme).bg }} edges={EDGES}>
+            {content}
+          </SafeAreaView>
+        )}
+        {banner !== null && route.kind !== "scan" ? (
+          <AttentionBanner attention={banner} onOpen={openBanner} onDismiss={dismissBanner} />
+        ) : null}
+        <SessionSwitcher
+          visible={switcher !== null}
           machines={machines}
-          current={homeMachine}
           probes={probes}
-          onProbe={probeAllNow}
-          onPick={(machine) => goHome(machine)}
-          onClose={() => setMachinePicker(false)}
-          onManage={() => setRoute({ kind: "machines" })}
+          machine={switcher?.machine}
+          currentSessionId={switcher?.sessionId}
+          onPick={openChat}
+          onNew={(machine) => {
+            setSwitcher(null);
+            goHome(machine, true);
+          }}
+          onClose={() => setSwitcher(null)}
         />
-      ) : null}
+        {homeMachine !== undefined ? (
+          <MachineSwitcher
+            visible={machinePicker}
+            machines={machines}
+            current={homeMachine}
+            probes={probes}
+            onProbe={probeAllNow}
+            onPick={(machine) => goHome(machine)}
+            onClose={() => setMachinePicker(false)}
+            onManage={() => setRoute({ kind: "machines" })}
+          />
+        ) : null}
+      </Fragment>
     </SafeAreaProvider>
   );
 }

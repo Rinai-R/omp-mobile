@@ -1,4 +1,5 @@
 /** OMP's todo list, as `get_state` carries it. */
+import { t } from "./i18n/index.ts";
 
 export type TodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
 
@@ -37,7 +38,7 @@ export function todoPhases(value: unknown): TodoPhase[] {
       }
     }
     if (tasks.length === 0) continue;
-    const name = "name" in entry && typeof entry.name === "string" ? entry.name : "Todos";
+    const name = "name" in entry && typeof entry.name === "string" ? entry.name : t("todo.phase");
     phases.push({ name, tasks });
   }
   return phases;

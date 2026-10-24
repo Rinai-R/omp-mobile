@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- The app speaks Chinese and English. It follows the phone's language (any Chinese → Simplified Chinese, anything else → English); Settings → Language overrides it (System / 中文 / English), and the switch applies at once. Screens, sheets, empty states, the app's own errors, accessibility labels, relative times and the notifications the app posts are translated; what OMP and the computer send (model names, tool output, their errors) is shown as it is (#26).
+
+### 中文
+
+- App 支持中文和英文。默认跟随手机语言（任何中文 → 简体中文，其他 → 英文）；可在“设置 → 语言”中改为 跟随系统 / 中文 / English，切换后立即生效。界面、面板、空状态、App 自己的错误提示、无障碍标签、相对时间以及 App 发出的通知都已翻译；OMP 和电脑发来的内容（模型名、工具输出、它们的错误信息）保持原样（#26）。
+
 ## v0.3.0
 
 A redesigned app in OMP's own look, photos for the agent, a session switcher across computers, and long sessions that open again.

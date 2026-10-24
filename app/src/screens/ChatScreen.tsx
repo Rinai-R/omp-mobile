@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
 import { HttpError, SessionSocket, daemonFeatures, openSession, type OpenFailure } from "../api";
+import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { BrandMark, GradientDot, LiveDot, PulseDot } from "../components/brand";
@@ -59,18 +60,18 @@ const NEAR_BOTTOM = 160;
 function failureText(failure: OpenFailure): { title: string; body: string } {
   switch (failure.status) {
     case 404:
-      return { title: "This session is gone", body: "The computer no longer knows this session." };
+      return { title: t("chat.failure.gone.title"), body: t("chat.failure.gone.body") };
     case 409:
       return {
-        title: "Open in a terminal",
-        body: "Another omp process on the computer has this session open. Exit it there (or /exit), then try again.",
+        title: t("chat.failure.terminal.title"),
+        body: t("chat.failure.terminal.body"),
       };
     case 410:
-      return { title: "The session file is gone", body: "Its file was deleted on the computer." };
+      return { title: t("chat.failure.fileGone.title"), body: t("chat.failure.fileGone.body") };
     default:
       return {
-        title: "This session didn't open",
-        body: "The computer answered, but OMP could not load the session. Trying again will not help until this is fixed on the computer.",
+        title: t("chat.failure.other.title"),
+        body: t("chat.failure.other.body"),
       };
   }
 }
@@ -199,7 +200,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             break;
           case "closed":
             setConnected(false);
-            setError(`OMP stopped: ${message.reason}`);
+            setError(t("chat.stopped", { reason: message.reason }));
             break;
           case "error": {
             const refused = pending.current;
@@ -217,7 +218,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             break;
           }
           case "protocol-error":
-            setError("The computer sent an unreadable OMP frame.");
+            setError(t("chat.protocolError"));
             break;
           default:
             break;
@@ -282,7 +283,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         ? { type: "prompt", text, images: attachments.map((item) => ({ data: item.data, mimeType: item.mimeType })) }
         : { type: "prompt", text };
     if (!socketRef.current.send(message)) {
-      setError("Not connected to the computer.");
+      setError(t("chat.notConnected"));
       return;
     }
     pending.current = { text: draft, attachments };
@@ -299,7 +300,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const attach = useCallback(
     (source: "library" | "camera") => {
       if (!features.includes("prompt-images")) {
-        setError("Update omp-mobile on the computer to send photos (omp plugin install omp-mobile).");
+        setError(t("chat.photosNeedUpdate"));
         return;
       }
       void pickPhotos(source, MAX_ATTACHMENTS - attachments.length)
@@ -325,7 +326,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   const openPicker = useCallback(() => {
     if (!connected) {
-      setError("Not connected to the computer.");
+      setError(t("chat.notConnected"));
       return;
     }
     Keyboard.dismiss();
@@ -402,7 +403,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     [machine, session.cwd],
   );
 
-  const model = state?.model?.name ?? state?.model?.id ?? initialSession.model ?? "default model";
+  const model = state?.model?.name ?? state?.model?.id ?? initialSession.model ?? t("chat.defaultModel");
   const level = state?.thinkingLevel;
   const usage = state?.contextUsage;
   const contextPercent =
@@ -431,14 +432,14 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         keyboardVerticalOffset={insets.top}
       >
         <View style={styles.header}>
-          <IconButton onPress={onBack} label="Back">
+          <IconButton onPress={onBack} label={t("common.back")}>
             <BackGlyph size={22} color={colors.fgMuted} />
           </IconButton>
           <Pressable
             onPress={onSwitch}
             style={({ pressed }) => [styles.title, pressed && styles.titlePressed]}
             accessibilityRole="button"
-            accessibilityLabel={`${title}. Switch session`}
+            accessibilityLabel={t("chat.switchA11y", { title })}
             hitSlop={4}
           >
             <View style={styles.titleRow}>
@@ -447,7 +448,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
               </Text>
               <ChevronDownGlyph size={14} color={colors.fgGhost} />
             </View>
-            <View style={styles.subtitleRow} accessible accessibilityLabel={`${displayName(machine)}, ${status}`}>
+            <View style={styles.subtitleRow} accessible accessibilityLabel={t("common.pair", { label: displayName(machine), value: t(`chat.status.${status}`) })}>
               {status === "working" ? (
                 <GradientDot size={7} />
               ) : status === "live" ? (
@@ -458,7 +459,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <PulseDot color={colors.warn} size={7} />
               )}
               <Text style={styles.subtitle} numberOfLines={1}>
-                {displayName(machine)} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
+                {displayName(machine)} · {status === "connecting" ? t("chat.connecting") : status === "failed" ? t("chat.cannotOpen") : folder}
               </Text>
             </View>
           </Pressable>
@@ -477,7 +478,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
               </Text>
             </View>
             <Pressable onPress={retry} style={({ pressed }) => [styles.failureButton, pressed && styles.titlePressed]} accessibilityRole="button">
-              <Text style={styles.failureButtonText}>Try again</Text>
+              <Text style={styles.failureButtonText}>{t("common.tryAgain")}</Text>
             </Pressable>
           </View>
         ) : null}
@@ -507,16 +508,16 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
               <View style={styles.emptyMark}>
                 <BrandMark size={26} />
               </View>
-              <Text style={styles.emptyTitle}>{connected ? "Ask OMP anything" : "Connecting…"}</Text>
+              <Text style={styles.emptyTitle}>{connected ? t("chat.empty.ready") : t("chat.empty.connecting")}</Text>
               <Text style={styles.emptyBody}>
-                It runs on {displayName(machine)} in {folder}. Tool calls and approvals appear here as it works.
+                {t("chat.empty.body", { machine: displayName(machine), folder })}
               </Text>
             </View>
           ) : null}
           {away ? (
-            <Pressable onPress={jump} style={styles.jump} accessibilityRole="button" accessibilityLabel="Jump to the newest message">
+            <Pressable onPress={jump} style={styles.jump} accessibilityRole="button" accessibilityLabel={t("chat.jumpA11y")}>
               <ArrowDownGlyph size={13} color={colors.fgMuted} />
-              <Text style={styles.jumpText}>{unseen > 0 ? `${unseen} new` : "Latest"}</Text>
+              <Text style={styles.jumpText}>{unseen > 0 ? t("chat.unseen", { count: unseen }) : t("chat.latest")}</Text>
             </Pressable>
           ) : null}
         </View>

@@ -4,6 +4,7 @@ import { dotOf, linkText, type Probe } from "../probe";
 import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
 import { cleanLabel, displayName, shortName } from "../machines";
 import type { Machine } from "../types";
+import { t } from "../i18n/index.ts";
 import { Button, Field, Sheet, StateDot } from "./ui";
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
 function InfoRow({ label, value, last = false }: { label: string; value: string; last?: boolean }): ReactNode {
   const styles = useStyles(createStyles);
   return (
-    <View style={last ? styles.row : styles.rowDivided} accessible accessibilityLabel={`${label}, ${value}`}>
+    <View style={last ? styles.row : styles.rowDivided} accessible accessibilityLabel={t("common.pair", { label, value })}>
       <Text style={styles.label}>{label}</Text>
       <Text style={styles.value} numberOfLines={1} selectable>
         {value}
@@ -65,13 +66,13 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
     const sessions =
       probe?.state === "online"
         ? probe.running > 0
-          ? `${probe.sessionCount} · ${probe.running} running`
+          ? t("machine.sessionsRunning", { count: probe.sessionCount, running: probe.running })
           : String(probe.sessionCount)
         : "—";
     body = (
       <>
         <View style={styles.group}>
-          <View style={styles.row} accessible accessibilityLabel={`Tailscale, ${linkText(probe)}`}>
+          <View style={styles.row} accessible accessibilityLabel={t("machine.linkA11y", { link: linkText(probe) })}>
             <Text style={styles.via}>Tailscale</Text>
             <StateDot dot={dotOf(probe)} used={used} />
             <Text style={used ? styles.linkUsed : styles.linkState} numberOfLines={1}>
@@ -79,16 +80,16 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
             </Text>
           </View>
         </View>
-        <Field label="Name on this phone" value={name} onChangeText={setName} placeholder={shortName(machine.name)} />
-        {changed ? <Button label="Save name" kind="plain" onPress={rename} /> : null}
+        <Field label={t("machine.name")} value={name} onChangeText={setName} placeholder={shortName(machine.name)} />
+        {changed ? <Button label={t("machine.saveName")} kind="plain" onPress={rename} /> : null}
         <View style={styles.group}>
-          <InfoRow label="Host" value={machine.name} />
-          <InfoRow label="Address" value={machine.url.replace(/^https?:\/\//, "")} />
-          <InfoRow label="OMP daemon" value={version} />
-          <InfoRow label="Sessions" value={sessions} last />
+          <InfoRow label={t("machine.host")} value={machine.name} />
+          <InfoRow label={t("machine.address")} value={machine.url.replace(/^https?:\/\//, "")} />
+          <InfoRow label={t("machine.daemon")} value={version} />
+          <InfoRow label={t("machine.sessions")} value={sessions} last />
         </View>
-        <Button label="Open" onPress={open} />
-        <Button label="Remove from this phone" kind="danger" onPress={remove} />
+        <Button label={t("common.open")} onPress={open} />
+        <Button label={t("machine.remove")} kind="danger" onPress={remove} />
       </>
     );
   }

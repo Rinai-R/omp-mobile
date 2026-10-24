@@ -17,6 +17,7 @@ import { summaryOf, type Probe } from "../probe";
 import { attentionCount, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine, SessionSummary } from "../types";
+import { t } from "../i18n/index.ts";
 import { LiveDot } from "./brand";
 import { CloseGlyph, PlusGlyph, SearchGlyph } from "./icons";
 import { SessionGroups, useMachineSessions } from "./SessionList";
@@ -62,23 +63,23 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
     <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <View style={styles.root}>
         <Animated.View style={[styles.scrim, motion.backdrop]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("common.close")} />
         </Animated.View>
         <Animated.View style={[styles.sheet, { height: Math.min(height * 0.88, height - insets.top - 24), paddingBottom: insets.bottom }, motion.sheet]}>
           <View style={styles.grab} />
           <View style={styles.head}>
             <Text style={styles.title} accessibilityRole="header">
-              Sessions
+              {t("sessions.title")}
             </Text>
             {selected !== undefined ? (
               <Pressable
                 onPress={() => onNew(selected)}
                 style={({ pressed }) => [styles.newButton, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`New session on ${selected.name}`}
+                accessibilityLabel={t("sessions.newOn", { name: selected.name })}
               >
                 <PlusGlyph size={15} color={colors.bg} />
-                <Text style={styles.newText}>New</Text>
+                <Text style={styles.newText}>{t("sessions.new")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -87,7 +88,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Search sessions"
+              placeholder={t("sessions.search")}
               placeholderTextColor={colors.fgGhost}
               selectionColor={colors.ring}
               cursorColor={colors.accent}
@@ -97,7 +98,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
               returnKeyType="search"
             />
             {query !== "" ? (
-              <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+              <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("sessions.clearSearch")}>
                 <CloseGlyph size={13} color={colors.fgFaint} />
               </Pressable>
             ) : null}
@@ -137,7 +138,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
               </View>
             ) : groups.length === 0 ? (
               <View style={styles.center}>
-                <Text style={styles.emptyText}>{query !== "" ? "No session matches." : "No sessions on this computer yet."}</Text>
+                <Text style={styles.emptyText}>{query !== "" ? t("sessions.noMatch") : t("sessions.none")}</Text>
               </View>
             ) : (
               <SessionGroups

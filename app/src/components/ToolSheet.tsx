@@ -5,6 +5,7 @@ import { resultText } from "../messages";
 import { stepStat, stepTarget, stepTitle, toolKind, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
+import { t } from "../i18n/index.ts";
 import { KindGlyph, Thumbs } from "./Transcript";
 import { Sheet } from "./ui";
 
@@ -71,7 +72,7 @@ export function ToolSheet({
   const content = useMemo(() => {
     if (step === null) return null;
     if (step.kind === "thought") {
-      return { title: "Thought", body: <Text style={styles.prose} selectable>{(step.item.thinking ?? "").trim()}</Text> };
+      return { title: t("transcript.thought"), body: <Text style={styles.prose} selectable>{(step.item.thinking ?? "").trim()}</Text> };
     }
     const tool = step.tool;
     const target = stepTarget(tool, cwd);
@@ -96,25 +97,25 @@ export function ToolSheet({
             </View>
             <Text style={styles.metaText} numberOfLines={1}>
               {tool.name}
-              {stat !== undefined ? ` · ${stat}` : tool.status === "running" ? " · running" : ""}
+              {stat !== undefined ? ` · ${stat}` : tool.status === "running" ? ` · ${t("step.status.running")}` : ""}
             </Text>
           </View>
           {command !== undefined ? (
-            <Block label="Command" wrap>
+            <Block label={t("tool.command")} wrap>
               <Text style={styles.code} selectable>
                 <Text style={styles.prompt}>$ </Text>
                 {command}
               </Text>
             </Block>
           ) : target !== undefined && diff === undefined ? (
-            <Block label="Target">
+            <Block label={t("tool.target")}>
               <Text style={styles.code} selectable>
                 {target}
               </Text>
             </Block>
           ) : null}
           {diff !== undefined ? (
-            <Block label={target ?? "Changes"}>
+            <Block label={target ?? t("tool.changes")}>
               {diff.slice(0, DIFF_LIMIT).map((line, index) => (
                 <Text
                   key={index}
@@ -126,18 +127,18 @@ export function ToolSheet({
                 </Text>
               ))}
               {diff.length > DIFF_LIMIT ? (
-                <Text style={styles.same}>{`… ${diff.length - DIFF_LIMIT} more lines`}</Text>
+                <Text style={styles.same}>{t("tool.moreLines", { count: diff.length - DIFF_LIMIT })}</Text>
               ) : null}
             </Block>
           ) : rest !== undefined && kind !== "write" ? (
-            <Block label="Input">
+            <Block label={t("tool.input")}>
               <Text style={styles.code} selectable>
                 {clip(pretty(rest))}
               </Text>
             </Block>
           ) : null}
           {kind === "write" && typeof (tool.args as { content?: unknown } | null)?.content === "string" ? (
-            <Block label="Content">
+            <Block label={t("tool.content")}>
               <Text style={styles.code} selectable>
                 {(tool.args as { content: string }).content.slice(0, OUTPUT_LIMIT)}
               </Text>
@@ -149,7 +150,7 @@ export function ToolSheet({
             </View>
           ) : null}
           {text !== undefined && text.trim() !== "" ? (
-            <Block label={tool.isError === true ? "Error" : "Output"} error={tool.isError === true} wrap={tool.isError === true}>
+            <Block label={tool.isError === true ? t("tool.error") : t("tool.output")} error={tool.isError === true} wrap={tool.isError === true}>
               <Text style={tool.isError === true ? styles.codeErr : styles.code} selectable>
                 {cut ? `${text.slice(0, OUTPUT_LIMIT)}\n…` : text}
               </Text>

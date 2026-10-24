@@ -5,6 +5,7 @@
  * Only type imports here: node:test loads this file directly.
  */
 import type { Machine, SessionSummary } from "./types";
+import { t } from "./i18n/index.ts";
 
 /** Why the daemon could not be used. */
 export type Reason = "timeout" | "unauthorized" | "not-omp" | "network";
@@ -121,13 +122,13 @@ export async function probeMachine(
 export function reasonText(reason: Reason): string {
   switch (reason) {
     case "timeout":
-      return "No reply";
+      return t("probe.timeout");
     case "unauthorized":
-      return "Token rejected";
+      return t("probe.unauthorized");
     case "not-omp":
-      return "Not omp-mobile";
+      return t("probe.notOmp");
     case "network":
-      return "Can't connect";
+      return t("probe.network");
   }
 }
 
@@ -138,10 +139,10 @@ const DAY_MS = 24 * HOUR_MS;
 /** How long ago, in words: "just now", "5 min ago", "3 h ago", "2 d ago". */
 export function agoText(time: number, now: number): string {
   const elapsed = Math.max(0, now - time);
-  if (elapsed < MINUTE_MS) return "just now";
-  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / MINUTE_MS)} min ago`;
-  if (elapsed < 2 * DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} h ago`;
-  return `${Math.floor(elapsed / DAY_MS)} d ago`;
+  if (elapsed < MINUTE_MS) return t("ago.now");
+  if (elapsed < HOUR_MS) return t("ago.minutes", { count: Math.floor(elapsed / MINUTE_MS) });
+  if (elapsed < 2 * DAY_MS) return t("ago.hours", { count: Math.floor(elapsed / HOUR_MS) });
+  return t("ago.days", { count: Math.floor(elapsed / DAY_MS) });
 }
 
 /** @returns the dot of a probe; undefined is a machine not probed yet. */
@@ -151,9 +152,9 @@ export function dotOf(probe: Probe | undefined): Dot {
 }
 
 function sessionsText(probe: Extract<Probe, { state: "online" }>): string {
-  if (probe.running > 0) return `${probe.running} running`;
-  if (probe.sessionCount === 0) return "no sessions";
-  return probe.sessionCount === 1 ? "1 session" : `${probe.sessionCount} sessions`;
+  if (probe.running > 0) return t("common.running", { count: probe.running });
+  if (probe.sessionCount === 0) return t("probe.noSessions");
+  return t("probe.sessions", { count: probe.sessionCount });
 }
 
 /**
@@ -166,18 +167,18 @@ export function summaryOf(
   lastSeen: number | undefined,
   now: number,
 ): { dot: Dot; text: string } {
-  if (probe === undefined) return { dot: "checking", text: "Checking…" };
+  if (probe === undefined) return { dot: "checking", text: t("probe.checking") };
   if (probe.state === "online") return { dot: "online", text: `Tailscale · ${sessionsText(probe)}` };
   const reason = reasonText(probe.reason);
   return {
     dot: "down",
-    text: lastSeen === undefined ? reason : `${reason} · seen ${agoText(lastSeen, now)}`,
+    text: lastSeen === undefined ? reason : t("probe.seen", { reason, ago: agoText(lastSeen, now) }),
   };
 }
 
 /** The sheet's link line: "Online · 34 ms", "Unreachable: No reply", or "Checking…". */
 export function linkText(probe: Probe | undefined): string {
-  if (probe === undefined) return "Checking…";
-  if (probe.state === "online") return `Online · ${probe.latencyMs} ms`;
-  return `Unreachable: ${reasonText(probe.reason)}`;
+  if (probe === undefined) return t("probe.checking");
+  if (probe.state === "online") return t("probe.online", { ms: probe.latencyMs });
+  return t("probe.unreachable", { reason: reasonText(probe.reason) });
 }

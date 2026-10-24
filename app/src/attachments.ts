@@ -1,5 +1,6 @@
 import * as ImagePicker from "expo-image-picker";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { t } from "./i18n/index.ts";
 
 /** A photo attached to the message being written: a preview and the bytes that will be sent. */
 export interface Attachment {
@@ -38,7 +39,7 @@ async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<Attachment>
     image?.release();
     context.release();
   }
-  if (saved.base64 === undefined || saved.base64 === "") throw new Error("The photo could not be read.");
+  if (saved.base64 === undefined || saved.base64 === "") throw new Error(t("attachments.unreadable"));
   counter += 1;
   return {
     id: `att-${Date.now().toString(36)}-${counter}`,
@@ -59,7 +60,7 @@ export async function pickPhotos(source: "library" | "camera", room: number): Pr
   if (room <= 0) return [];
   if (source === "camera") {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) throw new Error("Camera access is off for OMP. Turn it on in the system settings to take a photo.");
+    if (!permission.granted) throw new Error(t("attachments.cameraOff"));
   }
   const options: ImagePicker.ImagePickerOptions = {
     mediaTypes: ["images"],

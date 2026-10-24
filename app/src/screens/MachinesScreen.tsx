@@ -20,6 +20,7 @@ import { summaryOf, type Probe } from "../probe";
 import { SANS, MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
+import { t } from "../i18n/index.ts";
 
 /** A request to open the Add machine sheet, optionally pre-filled from a pairing link. */
 export interface AddRequest {
@@ -142,9 +143,9 @@ export function MachinesScreen({
 
   const confirmRemove = useCallback(
     (machine: Machine) => {
-      Alert.alert(`Remove ${displayName(machine)} from this phone?`, "The daemon and its running sessions stay on the computer.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Remove", style: "destructive", onPress: () => onRemove(machine) },
+      Alert.alert(t("machines.remove.title", { name: displayName(machine) }), t("machines.remove.body"), [
+        { text: t("common.cancel"), style: "cancel" },
+        { text: t("common.remove"), style: "destructive", onPress: () => onRemove(machine) },
       ]);
     },
     [onRemove],
@@ -158,16 +159,16 @@ export function MachinesScreen({
     <View style={styles.root}>
       <Header
         large={onBack === undefined}
-        title={onBack === undefined ? "computers" : "Computers"}
+        title={onBack === undefined ? t("machines.titleLarge") : t("machines.title")}
         onBack={onBack}
         right={
           <>
             {machines.length > 0 ? (
-              <IconButton onPress={onScan} label="Add machine">
+              <IconButton onPress={onScan} label={t("machines.add")}>
                 <PlusGlyph size={20} color={colors.fgMuted} />
               </IconButton>
             ) : null}
-            <IconButton onPress={onSettings} label="Settings">
+            <IconButton onPress={onSettings} label={t("common.settings")}>
               <SettingsGlyph size={20} color={colors.fgMuted} />
             </IconButton>
           </>
@@ -183,18 +184,18 @@ export function MachinesScreen({
         {machines.length === 0 ? (
           <EmptyState
             icon={<ComputerGlyph size={26} color={colors.fg} />}
-            title="Connect your first computer"
-            body="Start the omp-mobile daemon on the computer, then scan the QR code it prints. Every OMP you connect, in your pocket."
+            title={t("machines.empty.title")}
+            body={t("machines.empty.body")}
             action={
               <View style={styles.emptyActions}>
-                <Button label="Scan to pair" onPress={onScan} icon={<QrGlyph size={18} color={colors.accentFg} />} />
-                <Button label="Enter address" kind="plain" onPress={openAdd} />
+                <Button label={t("machines.scan")} onPress={onScan} icon={<QrGlyph size={18} color={colors.accentFg} />} />
+                <Button label={t("machines.enterAddress")} kind="plain" onPress={openAdd} />
               </View>
             }
           />
         ) : (
           <>
-            <SectionHeader title="Computers" meta={onlineMeta(machines, probes)} />
+            <SectionHeader title={t("machines.title")} meta={onlineMeta(machines, probes)} />
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
@@ -216,12 +217,12 @@ export function MachinesScreen({
                     last={index === machines.length - 1}
                     onPress={() => onOpen(machine)}
                     onLongPress={() => setSheet(machine)}
-                    accessibilityLabel={`${displayName(machine)}, ${summary.text}`}
+                    accessibilityLabel={t("common.pair", { label: displayName(machine), value: summary.text })}
                   />
                 );
               })}
             </Group>
-            <Text style={styles.footnote}>Long-press a computer for its details.</Text>
+            <Text style={styles.footnote}>{t("machines.footnote")}</Text>
           </>
         )}
       </ScrollView>
@@ -238,23 +239,29 @@ export function MachinesScreen({
         onClose={closeSheet}
       />
 
-      <Sheet visible={adding} title="Add a machine" onClose={close}>
+      <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
         <Text style={styles.hint}>
           {fromLink
-            ? "Opened from a pairing link. Check the address, then tap Connect."
-            : "The daemon prints its address, token and pairing URI when it starts. Use the Tailscale IP, not localhost."}
+            ? t("machines.addSheet.fromLink")
+            : t("machines.addSheet.hint")}
         </Text>
         <Field
-          label="Address or pairing link"
+          label={t("machines.addSheet.address")}
           value={url}
           onChangeText={setUrl}
-          placeholder="100.64.0.1:7390 or omp-mobile://pair?..."
+          placeholder={t("machines.addSheet.addressPlaceholder")}
           autoFocus={!fromLink}
         />
-        <Field label="Token" value={token} onChangeText={setToken} placeholder="daemon token" secure />
+        <Field
+          label={t("machines.addSheet.token")}
+          value={token}
+          onChangeText={setToken}
+          placeholder={t("machines.addSheet.tokenPlaceholder")}
+          secure
+        />
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
         <Button
-          label="Connect"
+          label={t("machines.addSheet.connect")}
           onPress={() => void connect()}
           busy={busy}
           disabled={url.trim() === "" || (token.trim() === "" && !isPairingLink(url))}
@@ -268,7 +275,7 @@ export function MachinesScreen({
 function onlineMeta(machines: Machine[], probes: ReadonlyMap<string, Probe>): string | undefined {
   if (probes.size === 0) return undefined;
   const online = machines.filter((machine) => probes.get(machine.id)?.state === "online").length;
-  return `${online}/${machines.length} online`;
+  return t("machines.online", { online, total: machines.length });
 }
 
 function createStyles(c: Palette) {

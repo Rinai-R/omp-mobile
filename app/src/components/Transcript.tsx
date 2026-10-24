@@ -12,6 +12,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { imageUri } from "../media";
+import { t } from "../i18n/index.ts";
 import {
   activitySummary,
   duration,
@@ -173,12 +174,12 @@ export function Thumbs({
   return (
     <View style={styles.thumbs}>
       {uris.map((uri, index) => (
-        <Pressable key={`${index}-${uri.slice(-24)}`} onPress={() => setOpen(uri)} accessibilityRole="imagebutton" accessibilityLabel="Open image">
+        <Pressable key={`${index}-${uri.slice(-24)}`} onPress={() => setOpen(uri)} accessibilityRole="imagebutton" accessibilityLabel={t("transcript.openImage")}>
           <Image source={{ uri, headers }} style={[styles.thumb, { width: size, height: size }]} resizeMode="cover" />
         </Pressable>
       ))}
       <Modal visible={open !== null} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setOpen(null)}>
-        <Pressable style={styles.viewer} onPress={() => setOpen(null)} accessibilityLabel="Close image">
+        <Pressable style={styles.viewer} onPress={() => setOpen(null)} accessibilityLabel={t("transcript.closeImage")}>
           {open !== null ? <Image source={{ uri: open, headers }} style={styles.viewerImage} resizeMode="contain" /> : null}
           <View style={styles.viewerClose}>
             <CloseGlyph size={18} color="#ffffff" />
@@ -245,7 +246,7 @@ function Thought({ text, active }: { text: string; active: boolean }): ReactNode
         accessibilityState={{ expanded: open }}
       >
         <SparkGlyph size={13} color={colors.fgFaint} />
-        <Animated.Text style={[styles.thoughtLabel, { opacity }]}>{active ? "Thinking…" : "Thought"}</Animated.Text>
+        <Animated.Text style={[styles.thoughtLabel, { opacity }]}>{active ? t("transcript.thinking") : t("transcript.thought")}</Animated.Text>
         <Disclosure open={open} size={12} />
       </Pressable>
       {open ? (
@@ -324,13 +325,13 @@ function ActivityCard({
   const live = liveStep(row.steps);
   const title = row.running
     ? live === undefined
-      ? "Working…"
+      ? t("transcript.working")
       : live.kind === "tool"
         ? stepTitle(live.tool)
-        : "Thinking…"
+        : t("transcript.thinking")
     : activitySummary(row.steps);
   const count = toolCount(row.steps);
-  const meta = [`${count} step${count === 1 ? "" : "s"}`, elapsed !== undefined ? duration(elapsed) : undefined]
+  const meta = [t("transcript.steps", { count }), elapsed !== undefined ? duration(elapsed) : undefined]
     .filter(Boolean)
     .join(" · ");
   const images = tools.flatMap((tool) => tool.images ?? []);
@@ -367,7 +368,7 @@ function ActivityCard({
           {title}
         </Animated.Text>
         <Text style={styles.actMeta} numberOfLines={1}>
-          {row.failed > 0 ? <Text style={styles.actMetaErr}>{`${row.failed} failed · `}</Text> : null}
+          {row.failed > 0 ? <Text style={styles.actMetaErr}>{t("transcript.failed", { count: row.failed })}</Text> : null}
           {meta}
         </Text>
         <Disclosure open={open} size={12} />
@@ -381,7 +382,7 @@ function ActivityCard({
               accessibilityRole="button"
             >
               <Text style={styles.moreText}>
-                {`${row.steps.length - INLINE_STEPS} earlier step${row.steps.length - INLINE_STEPS === 1 ? "" : "s"} · show all`}
+                {t("transcript.earlier", { count: row.steps.length - INLINE_STEPS })}
               </Text>
             </Pressable>
           ) : null}
@@ -423,7 +424,7 @@ function AllSteps({
   const { height } = useWindowDimensions();
   const count = toolCount(steps);
   return (
-    <Sheet visible={visible} title={`${count} step${count === 1 ? "" : "s"}`} onClose={onClose} scroll={false}>
+    <Sheet visible={visible} title={t("transcript.steps", { count })} onClose={onClose} scroll={false}>
       {visible ? (
         <FlatList
           style={{ maxHeight: height * 0.72 }}
@@ -449,13 +450,13 @@ function StepRow({ step, cwd, onOpen }: { step: Step; cwd: string; onOpen: (step
   const press = useCallback(() => onOpen(step), [onOpen, step]);
   if (step.kind === "thought") {
     return (
-      <Pressable onPress={press} style={style} accessibilityRole="button" accessibilityLabel="Thought">
+      <Pressable onPress={press} style={style} accessibilityRole="button" accessibilityLabel={t("transcript.thought")}>
         <View style={styles.stepIcon}>
           <SparkGlyph size={13} color={colors.fgFaint} />
         </View>
         <View style={styles.stepText}>
           <Text style={styles.stepTitleQuiet} numberOfLines={1}>
-            {step.item.streaming === true ? "Thinking…" : "Thought"}
+            {step.item.streaming === true ? t("transcript.thinking") : t("transcript.thought")}
           </Text>
           <Text style={styles.stepTarget} numberOfLines={1}>
             {(step.item.thinking ?? "").replace(/\s+/g, " ").trim()}
@@ -472,7 +473,7 @@ function StepRow({ step, cwd, onOpen }: { step: Step; cwd: string; onOpen: (step
   const stat = stepStat(tool);
   const edit = stat !== undefined && /^\+\d+ −\d+$/.test(stat) ? stat.split(" ") : undefined;
   return (
-    <Pressable onPress={press} style={style} accessibilityRole="button" accessibilityLabel={`${stepTitle(tool)}, ${tool.status}`}>
+    <Pressable onPress={press} style={style} accessibilityRole="button" accessibilityLabel={t("common.pair", { label: stepTitle(tool), value: t(`step.status.${tool.status}`) })}>
       <View style={failed ? styles.stepIconErr : running ? styles.stepIconLive : styles.stepIcon}>
         <KindGlyph kind={kind} color={failed ? colors.err : running ? colors.accent : colors.fgFaint} />
       </View>

@@ -15,6 +15,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ApprovalRequest } from "../types";
+import { t } from "../i18n/index.ts";
 import { GradientDot } from "./brand";
 import { Button, sheetSurface, sheetTransforms, useSheetMotion } from "./ui";
 
@@ -79,13 +80,13 @@ export function ApprovalSheet({
   return (
     <KeyboardAvoidingView style={styles.wrap} behavior="padding">
       <Animated.View style={[styles.scrim, motion.backdrop]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={cancel} accessibilityLabel="Cancel" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={cancel} accessibilityLabel={t("common.cancel")} />
       </Animated.View>
       <Animated.View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }, motion.sheet]}>
         <View style={styles.grab} />
         <View style={styles.eyebrow}>
           <GradientDot size={7} />
-          <Text style={styles.eyebrowText}>omp is waiting for you</Text>
+          <Text style={styles.eyebrowText}>{t("approval.waiting")}</Text>
         </View>
         <Text style={styles.title}>{request.title}</Text>
         {request.message !== undefined ? <Text style={styles.message}>{request.message}</Text> : null}
@@ -107,10 +108,10 @@ export function ApprovalSheet({
         {request.method === "confirm" ? (
           <View style={styles.row}>
             <View style={styles.flex}>
-              <Button label="No" kind="plain" onPress={() => onAnswer({ confirmed: false })} />
+              <Button label={t("approval.no")} kind="plain" onPress={() => onAnswer({ confirmed: false })} />
             </View>
             <View style={styles.flex}>
-              <Button label="Yes" onPress={() => onAnswer({ confirmed: true })} />
+              <Button label={t("approval.yes")} onPress={() => onAnswer({ confirmed: true })} />
             </View>
           </View>
         ) : null}
@@ -131,12 +132,12 @@ export function ApprovalSheet({
                 style={focused ? styles.inputFocused : styles.input}
               />
             </View>
-            <Button label="Submit" onPress={() => onAnswer({ value })} />
+            <Button label={t("approval.submit")} onPress={() => onAnswer({ value })} />
           </>
         ) : null}
 
         <Pressable onPress={cancel} style={cancelStyle} accessibilityRole="button">
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t("common.cancel")}</Text>
         </Pressable>
       </Animated.View>
     </KeyboardAvoidingView>

@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { ScrollView, Switch, View } from "react-native";
+import { CheckGlyph } from "../components/icons";
 import { Button, Group, Header, Row, SectionHeader } from "../components/ui";
+import { t, type Key, type LanguagePreference } from "../i18n/index.ts";
 import { useColors, useStyles, type Palette } from "../theme";
 
 /**
@@ -11,6 +13,8 @@ export type NotificationState = "on" | "off" | "denied" | "unsupported";
 
 interface Props {
   notifications: NotificationState;
+  language: LanguagePreference;
+  onLanguage: (language: LanguagePreference) => void;
   /** Android may stop the background connection to save battery. */
   batteryRestricted: boolean;
   onToggleNotifications: (on: boolean) => void;
@@ -20,15 +24,21 @@ interface Props {
   version: string;
 }
 
-const DETAIL: Record<NotificationState, string> = {
-  on: "Approvals, questions and finished turns arrive while OMP is in the background. A quiet notification shows while it watches your machines.",
-  off: "Approvals and finished turns appear only while a chat is open.",
-  denied: "Android is blocking notifications for OMP. Allow them in system settings, then turn this on.",
-  unsupported: "Background notifications need the Android app. On this device they appear only in the open chat.",
+const DETAIL: Record<NotificationState, Key> = {
+  on: "settings.notifications.on",
+  off: "settings.notifications.off",
+  denied: "settings.notifications.denied",
+  unsupported: "settings.notifications.unsupported",
 };
+
+/** Each language under its own name, the same in every language. */
+const LANGUAGE_NAMES = { en: "English", "zh-CN": "中文" } as const;
+const LANGUAGE_CHOICES: readonly LanguagePreference[] = ["system", "zh-CN", "en"];
 
 export function SettingsScreen({
   notifications,
+  language,
+  onLanguage,
   batteryRestricted,
   onToggleNotifications,
   onOpenNotificationSettings,
@@ -41,13 +51,13 @@ export function SettingsScreen({
   const showBattery = notifications === "on" && batteryRestricted;
   return (
     <View style={styles.root}>
-      <Header title="Settings" onBack={onBack} />
+      <Header title={t("settings.title")} onBack={onBack} />
       <ScrollView contentContainerStyle={styles.content}>
-        <SectionHeader title="Notifications" />
+        <SectionHeader title={t("settings.notifications.section")} />
         <Group>
           <Row
-            title="Notifications"
-            detail={DETAIL[notifications]}
+            title={t("settings.notifications.title")}
+            detail={t(DETAIL[notifications])}
             last={notifications !== "denied" && !showBattery}
             trailing={
               <Switch
@@ -57,33 +67,48 @@ export function SettingsScreen({
                 trackColor={{ false: colors.selected, true: colors.accent }}
                 thumbColor="#ffffff"
                 ios_backgroundColor={colors.selected}
-                accessibilityLabel="Background notifications"
+                accessibilityLabel={t("settings.notifications.a11y")}
               />
             }
           />
           {notifications === "denied" ? (
             <View style={styles.action}>
-              <Button label="Open notification settings" kind="plain" onPress={onOpenNotificationSettings} />
+              <Button label={t("settings.notifications.openSystem")} kind="plain" onPress={onOpenNotificationSettings} />
             </View>
           ) : null}
           {showBattery ? (
             <>
               <Row
-                title="Battery optimization is on"
-                detail="Android may stop the background connection to save battery; notifications then arrive late or not at all."
+                title={t("settings.battery.title")}
+                detail={t("settings.battery.detail")}
                 last
               />
               <View style={styles.action}>
-                <Button label="Allow background use" kind="plain" onPress={onFixBattery} />
+                <Button label={t("settings.battery.fix")} kind="plain" onPress={onFixBattery} />
               </View>
             </>
           ) : null}
         </Group>
 
-        <SectionHeader title="About" />
+        <SectionHeader title={t("settings.language.section")} />
         <Group>
-          <Row title="OMP mobile" detail="Native control for OMP sessions over Tailscale." />
-          <Row title="Version" detail={version} mono last />
+          {LANGUAGE_CHOICES.map((choice, index) => (
+            <Row
+              key={choice}
+              title={choice === "system" ? t("settings.language.system") : LANGUAGE_NAMES[choice]}
+              trailing={choice === language ? <CheckGlyph size={16} color={colors.accent} /> : undefined}
+              chevron={false}
+              selected={choice === language}
+              last={index === LANGUAGE_CHOICES.length - 1}
+              onPress={() => onLanguage(choice)}
+            />
+          ))}
+        </Group>
+
+        <SectionHeader title={t("settings.about.section")} />
+        <Group>
+          <Row title={t("settings.about.app")} detail={t("settings.about.detail")} />
+          <Row title={t("settings.about.version")} detail={version} mono last />
         </Group>
       </ScrollView>
     </View>

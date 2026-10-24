@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { Image, Pressable, StyleSheet, Text, TextInput, View, type PressableStateCallbackType } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import type { Attachment } from "../attachments";
+import { t } from "../i18n/index.ts";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { BrandMark, GradientFill } from "./brand";
 import { CameraGlyph, CloseGlyph, ImageGlyph, PlusGlyph, SendGlyph, StopGlyph } from "./icons";
@@ -77,9 +78,9 @@ export function Composer({
       <View>
       {menu ? (
         <View style={styles.menu}>
-          <MenuItem icon={<ImageGlyph size={18} color={colors.fg} />} label="Photo library" onPress={() => pick("library")} />
+          <MenuItem icon={<ImageGlyph size={18} color={colors.fg} />} label={t("composer.library")} onPress={() => pick("library")} />
           <View style={styles.menuDivider} />
-          <MenuItem icon={<CameraGlyph size={18} color={colors.fg} />} label="Take a photo" onPress={() => pick("camera")} />
+          <MenuItem icon={<CameraGlyph size={18} color={colors.fg} />} label={t("composer.camera")} onPress={() => pick("camera")} />
         </View>
       ) : null}
       <View style={[styles.box, focused && styles.boxFocused, readOnly && styles.boxOff]}>
@@ -93,7 +94,7 @@ export function Composer({
                   hitSlop={8}
                   style={styles.attachmentRemove}
                   accessibilityRole="button"
-                  accessibilityLabel="Remove photo"
+                  accessibilityLabel={t("composer.removePhoto")}
                 >
                   <CloseGlyph size={10} color={colors.fg} />
                 </Pressable>
@@ -107,7 +108,7 @@ export function Composer({
             disabled={readOnly}
             style={({ pressed }) => [menu ? styles.plusOn : styles.plus, pressed && styles.pressedScale]}
             accessibilityRole="button"
-            accessibilityLabel="Attach photos"
+            accessibilityLabel={t("composer.attach")}
             accessibilityState={{ expanded: menu }}
           >
             <View style={menu ? styles.plusTurned : undefined}>
@@ -123,7 +124,7 @@ export function Composer({
             }}
             onBlur={() => setFocused(false)}
             editable={!readOnly}
-            placeholder={readOnly ? "This session is closed" : streaming ? "Steer the current turn…" : "Message OMP"}
+            placeholder={readOnly ? t("composer.placeholder.closed") : streaming ? t("composer.placeholder.steer") : t("composer.placeholder")}
             placeholderTextColor={colors.fgGhost}
             selectionColor={colors.ring}
             cursorColor={colors.accent}
@@ -134,7 +135,7 @@ export function Composer({
             onPress={action}
             disabled={disabled && mode !== "stop"}
             accessibilityRole="button"
-            accessibilityLabel={mode === "stop" ? "Stop" : "Send"}
+            accessibilityLabel={mode === "stop" ? t("composer.stop") : t("composer.send")}
             hitSlop={6}
             style={actionStyle}
           >
@@ -155,7 +156,7 @@ export function Composer({
           onPress={onModel}
           style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
           accessibilityRole="button"
-          accessibilityLabel={`Model ${model}${level !== undefined ? `, thinking ${level}` : ""}. Change`}
+          accessibilityLabel={level !== undefined ? t("composer.modelLevelA11y", { model, level }) : t("composer.modelA11y", { model })}
           hitSlop={6}
         >
           <BrandMark size={10} />
@@ -165,14 +166,14 @@ export function Composer({
           {level !== undefined ? <Text style={styles.chipText}>· {level}</Text> : null}
         </Pressable>
         {contextPercent !== undefined ? (
-          <View style={styles.chip} accessible accessibilityLabel={`Context ${Math.round(contextPercent)} percent used`}>
+          <View style={styles.chip} accessible accessibilityLabel={t("composer.contextA11y", { percent: Math.round(contextPercent) })}>
             <Ring percent={contextPercent} />
             <Text style={styles.chipText}>{Math.round(contextPercent)}%</Text>
           </View>
         ) : null}
         {queued > 0 ? (
           <View style={styles.chip}>
-            <Text style={styles.chipWarn}>{queued} queued</Text>
+            <Text style={styles.chipWarn}>{t("composer.queued", { count: queued })}</Text>
           </View>
         ) : null}
       </View>
