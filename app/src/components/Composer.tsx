@@ -74,6 +74,7 @@ export function Composer({
   );
   return (
     <View style={[styles.root, { paddingBottom: 8 + bottomInset }]}>
+      <View>
       {menu ? (
         <View style={styles.menu}>
           <MenuItem icon={<ImageGlyph size={18} color={colors.fg} />} label="Photo library" onPress={() => pick("library")} />
@@ -147,6 +148,7 @@ export function Composer({
             )}
           </Pressable>
         </View>
+      </View>
       </View>
       <View style={styles.meta}>
         <Pressable
@@ -291,9 +293,9 @@ function createStyles(c: Palette) {
     },
     menu: {
       position: "absolute",
-      left: 12,
+      left: 0,
       bottom: "100%",
-      marginBottom: -2,
+      marginBottom: 8,
       minWidth: 200,
       borderRadius: radius.xl,
       borderWidth: StyleSheet.hairlineWidth,

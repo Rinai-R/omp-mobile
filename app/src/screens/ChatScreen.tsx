@@ -24,6 +24,7 @@ import { ArrowDownGlyph, BackGlyph, ChevronDownGlyph, WarningGlyph } from "../co
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
+import { shortName } from "../components/SessionSwitcher";
 import { TranscriptRow } from "../components/Transcript";
 import { Banner, IconButton } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
@@ -384,6 +385,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const queued = (state?.queuedMessages?.steering?.length ?? 0) + (state?.queuedMessages?.followUp?.length ?? 0);
   const todos = todoPhases(state?.todoPhases);
   const folder = session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd;
+  // A session started here is named by the daemon after its first prompt; until the
+  // next snapshot brings that name, take it from the transcript the same way.
+  const firstPrompt = items.find((item) => item.kind === "message" && item.role === "user" && item.text.trim() !== "");
+  const title =
+    session.title === folder && firstPrompt?.kind === "message" ? firstPrompt.text.replace(/\s+/g, " ").trim().slice(0, 80) : session.title;
   const status = failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
   const failed = failure === null ? null : failureText(failure);
 
@@ -403,12 +409,12 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             onPress={onSwitch}
             style={({ pressed }) => [styles.title, pressed && styles.titlePressed]}
             accessibilityRole="button"
-            accessibilityLabel={`${session.title}. Switch session`}
+            accessibilityLabel={`${title}. Switch session`}
             hitSlop={4}
           >
             <View style={styles.titleRow}>
               <Text style={styles.titleText} numberOfLines={1}>
-                {session.title}
+                {title}
               </Text>
               <ChevronDownGlyph size={14} color={colors.fgGhost} />
             </View>
@@ -423,7 +429,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <PulseDot color={colors.warn} size={7} />
               )}
               <Text style={styles.subtitle} numberOfLines={1}>
-                {machine.name} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
+                {shortName(machine.name)} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
               </Text>
             </View>
           </Pressable>
@@ -456,27 +462,26 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             renderItem={renderItem}
             onScroll={onScroll}
             scrollEventThrottle={64}
-            contentContainerStyle={rows.length === 0 ? styles.listEmpty : styles.list}
+            contentContainerStyle={styles.list}
             style={failure !== null ? styles.listDim : undefined}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: NEAR_BOTTOM }}
             initialNumToRender={14}
             windowSize={11}
-            ListEmptyComponent={
-              failure === null ? (
-                <View style={styles.empty}>
-                  <View style={styles.emptyMark}>
-                    <BrandMark size={26} />
-                  </View>
-                  <Text style={styles.emptyTitle}>{connected ? "Ask OMP anything" : "Connecting…"}</Text>
-                  <Text style={styles.emptyBody}>
-                    It runs on {machine.name} in {folder}. Tool calls and approvals appear here as it works.
-                  </Text>
-                </View>
-              ) : null
-            }
           />
+          {rows.length === 0 && failure === null ? (
+            // Outside the list: an inverted list flips its children on both axes on Android.
+            <View style={styles.emptyOverlay} pointerEvents="none">
+              <View style={styles.emptyMark}>
+                <BrandMark size={26} />
+              </View>
+              <Text style={styles.emptyTitle}>{connected ? "Ask OMP anything" : "Connecting…"}</Text>
+              <Text style={styles.emptyBody}>
+                It runs on {shortName(machine.name)} in {folder}. Tool calls and approvals appear here as it works.
+              </Text>
+            </View>
+          ) : null}
           {away ? (
             <Pressable onPress={jump} style={styles.jump} accessibilityRole="button" accessibilityLabel="Jump to the newest message">
               <ArrowDownGlyph size={13} color={colors.fgMuted} />
@@ -566,15 +571,8 @@ function createStyles(c: Palette) {
 
     listWrap: { flex: 1 },
     list: { paddingTop: 12, paddingBottom: 8 },
-    listEmpty: { flexGrow: 1, justifyContent: "center" },
     listDim: { opacity: 0.5 },
-    empty: {
-      alignItems: "center",
-      paddingHorizontal: 40,
-      paddingVertical: 48,
-      // The list is inverted: so is its empty state.
-      transform: [{ scaleY: -1 }],
-    },
+    emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
     emptyMark: {
       width: 56,
       height: 56,

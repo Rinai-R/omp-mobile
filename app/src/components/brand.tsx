@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
 import { EASE_OUT, GRADIENT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -214,18 +214,35 @@ export function GradientTile({ size = 56, children }: { size?: number; children:
   );
 }
 
-/** A filled gradient surface the size of its parent (clip it with the parent's radius), for the send button. */
+/**
+ * A filled gradient surface the size of its parent (clip it with the parent's
+ * radius): the send button, the New session button. It measures its parent
+ * first, because a percentage-sized Svg in a content-sized parent can draw
+ * before that parent has its final width.
+ */
 export function GradientFill(): ReactNode {
   const c = useColors();
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   return (
-    <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 100 100">
-      <Defs>
-        <LinearGradient id="fill" {...GRADIENT}>
-          {stops(c)}
-        </LinearGradient>
-      </Defs>
-      <Rect x={0} y={0} width={100} height={100} fill="url(#fill)" />
-    </Svg>
+    <View
+      style={StyleSheet.absoluteFill}
+      pointerEvents="none"
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        setSize((current) => (current?.width === width && current.height === height ? current : { width, height }));
+      }}
+    >
+      {size !== null ? (
+        <Svg width={size.width} height={size.height}>
+          <Defs>
+            <LinearGradient id="fill" x1="0" y1="0" x2={size.width} y2={size.height} gradientUnits="userSpaceOnUse">
+              {stops(c)}
+            </LinearGradient>
+          </Defs>
+          <Rect x={0} y={0} width={size.width} height={size.height} fill="url(#fill)" />
+        </Svg>
+      ) : null}
+    </View>
   );
 }
 
