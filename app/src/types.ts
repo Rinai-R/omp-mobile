@@ -164,5 +164,6 @@ export type ServerMessage =
   /** The session could not open (unknown, file gone, held by another omp, OMP failed to load it); the socket closes next. */
   | { type: "open_failed"; status: number; error: string }
   | { type: "accepted"; command: string }
-  | { type: "error"; error: string }
+  /** `command`: the frame that failed (daemons before 0.3 leave it out). */
+  | { type: "error"; error: string; command?: string }
   | { type: "protocol-error"; line: string };

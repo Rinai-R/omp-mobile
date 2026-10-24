@@ -83,13 +83,48 @@ function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps)
     default:
       body = null;
   }
-  return animate ? <Enter>{body}</Enter> : body;
+  // Always the same wrapper: switching it off after the first frame would remount the row.
+  return <Enter animate={animate}>{body}</Enter>;
 }
 
-export const TranscriptRow = memo(TranscriptRowImpl);
+/** The object a step renders from: a changed step is a new object. */
+function stepSource(step: Step): unknown {
+  return step.kind === "tool" ? step.tool : step.item;
+}
 
-function Enter({ children }: { children: ReactNode }): ReactNode {
-  const value = useEnter(300);
+/** Rows are laid out afresh on every change; a row whose items are the same objects need not render again. */
+function sameRow(a: Row, b: Row): boolean {
+  if (a === b) return true;
+  if (a.id !== b.id || a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case "turn":
+      return true;
+    case "activity": {
+      const other = b as typeof a;
+      return (
+        a.running === other.running &&
+        a.failed === other.failed &&
+        a.steps.length === other.steps.length &&
+        a.steps.every((step, index) => stepSource(step) === stepSource(other.steps[index] as Step))
+      );
+    }
+    default:
+      return a.item === (b as typeof a).item;
+  }
+}
+
+export const TranscriptRow = memo(
+  TranscriptRowImpl,
+  (prev, next) =>
+    prev.machine === next.machine &&
+    prev.cwd === next.cwd &&
+    prev.animate === next.animate &&
+    prev.onOpenStep === next.onOpenStep &&
+    sameRow(prev.row, next.row),
+);
+
+function Enter({ animate, children }: { animate: boolean; children: ReactNode }): ReactNode {
+  const value = useEnter(300, !animate);
   return (
     <Animated.View
       style={{ opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}
@@ -276,6 +311,9 @@ function ActivityCard({
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? row.running;
   const [all, setAll] = useState(false);
+  // Mounted from the first opening on (it keeps its closing slide), not for every card in a long transcript.
+  const [allMounted, setAllMounted] = useState(false);
+  if (all && !allMounted) setAllMounted(true);
   const toggle = useCallback(() => setChosen((value) => !(value ?? row.running)), [row.running]);
   const pulse = usePulse(row.running, 1600);
   const titleOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] });
@@ -352,7 +390,9 @@ function ActivityCard({
           ))}
         </View>
       ) : null}
-      <AllSteps visible={all} steps={row.steps} cwd={cwd} onOpenStep={onOpenStep} onClose={() => setAll(false)} />
+      {allMounted ? (
+        <AllSteps visible={all} steps={row.steps} cwd={cwd} onOpenStep={onOpenStep} onClose={() => setAll(false)} />
+      ) : null}
       {images.length > 0 ? (
         <View style={styles.actImages}>
           <Thumbs parts={images} machine={machine} size={88} max={4} />

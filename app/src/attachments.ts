@@ -28,8 +28,16 @@ async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<Attachment>
   if (longest > MAX_SIDE) {
     context.resize(asset.width >= asset.height ? { width: MAX_SIDE, height: null } : { width: null, height: MAX_SIDE });
   }
-  const image = await context.renderAsync();
-  const saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: QUALITY, base64: true });
+  // The context and the image hold full-size native bitmaps until released; garbage collection is too late.
+  let image: Awaited<ReturnType<typeof context.renderAsync>> | undefined;
+  let saved;
+  try {
+    image = await context.renderAsync();
+    saved = await image.saveAsync({ format: SaveFormat.JPEG, compress: QUALITY, base64: true });
+  } finally {
+    image?.release();
+    context.release();
+  }
   if (saved.base64 === undefined || saved.base64 === "") throw new Error("The photo could not be read.");
   counter += 1;
   return {
@@ -64,5 +72,8 @@ export async function pickPhotos(source: "library" | "camera", room: number): Pr
     source === "camera" ? await ImagePicker.launchCameraAsync(options) : await ImagePicker.launchImageLibraryAsync(options);
   if (result.canceled) return [];
   const assets = result.assets.slice(0, room);
-  return Promise.all(assets.map(prepare));
+  // One at a time: each photo is decoded at full size while it is scaled down.
+  const prepared: Attachment[] = [];
+  for (const asset of assets) prepared.push(await prepare(asset));
+  return prepared;
 }

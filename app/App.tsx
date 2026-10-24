@@ -30,7 +30,8 @@ import type { Machine, SessionSummary } from "./src/types";
 
 type Route =
   | { kind: "machines" }
-  | { kind: "home"; machine: Machine }
+  /** `create` is a nonce: a new value opens the New session sheet once. */
+  | { kind: "home"; machine: Machine; create?: number }
   | { kind: "chat"; machine: Machine; session: SessionSummary }
   | { kind: "settings"; from: Machine | null }
   | { kind: "scan" };
@@ -67,6 +68,8 @@ export default function App(): ReactNode {
   const scheme = useColorScheme();
   const [machines, setMachines] = useState<Machine[]>([]);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [route, setRoute] = useState<Route>({ kind: "machines" });
   const [restored, setRestored] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -189,24 +192,14 @@ export default function App(): ReactNode {
       case "scan":
         return { kind: "machines" };
       case "machines": {
-        const first = machinesRef.current[0];
-        return first === undefined ? null : { kind: "home", machine: first };
+        const list = machinesRef.current;
+        const last = list.find((item) => item.id === settingsRef.current.lastMachineId) ?? list[0];
+        return last === undefined ? null : { kind: "home", machine: last };
       }
       default:
         return null;
     }
   }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== "android") return undefined;
-    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
-      const next = backOf(route);
-      if (next === null) return false;
-      setRoute(next);
-      return true;
-    });
-    return () => subscription.remove();
-  }, [backOf, route]);
 
   const persist = useCallback((next: Machine[]) => {
     const before = machinesRef.current;
@@ -246,8 +239,8 @@ export default function App(): ReactNode {
   const probeAllNow = useCallback(() => void probeAll(), [probeAll]);
   /** The home of `machine`, remembered as the computer to open on next time. */
   const goHome = useCallback(
-    (machine: Machine) => {
-      setRoute({ kind: "home", machine });
+    (machine: Machine, create?: boolean) => {
+      setRoute({ kind: "home", machine, create: create === true ? Date.now() : undefined });
       setSettings((current) => {
         if (current.lastMachineId === machine.id) return current;
         const next = { ...current, lastMachineId: machine.id };
@@ -257,9 +250,21 @@ export default function App(): ReactNode {
     },
     [],
   );
+  useEffect(() => {
+    if (Platform.OS !== "android") return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      const next = backOf(route);
+      if (next === null) return false;
+      // Home is remembered as the computer to open on, as the on-screen back buttons do.
+      if (next.kind === "home") goHome(next.machine);
+      else setRoute(next);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [backOf, goHome, route]);
+
   const [switcher, setSwitcher] = useState<{ machine: Machine; sessionId?: string } | null>(null);
   const [machinePicker, setMachinePicker] = useState(false);
-  const [newRequest, setNewRequest] = useState(0);
   const openChat = useCallback((machine: Machine, session: SessionSummary) => {
     setSwitcher(null);
     setRoute((current) =>
@@ -383,7 +388,7 @@ export default function App(): ReactNode {
         onPickMachine={() => setMachinePicker(true)}
         onSettings={() => setRoute({ kind: "settings", from: route.machine })}
         onRetry={(machine) => void probeOne(machine)}
-        newRequest={newRequest}
+        newRequest={route.create ?? 0}
       />
     );
   } else if (route.kind === "scan") {
@@ -412,7 +417,7 @@ export default function App(): ReactNode {
         onScan={openScanner}
         addRequest={addRequest}
         onAddRequestHandled={clearAddRequest}
-        onOpen={goHome}
+        onOpen={(machine) => goHome(machine)}
         onRemove={removeMachine}
         onRename={renameMachine}
         onSettings={() => setRoute({ kind: "settings", from: null })}
@@ -451,8 +456,7 @@ export default function App(): ReactNode {
         onPick={openChat}
         onNew={(machine) => {
           setSwitcher(null);
-          goHome(machine);
-          setNewRequest((count) => count + 1);
+          goHome(machine, true);
         }}
         onClose={() => setSwitcher(null)}
       />
@@ -463,7 +467,7 @@ export default function App(): ReactNode {
           current={homeMachine}
           probes={probes}
           onProbe={probeAllNow}
-          onPick={goHome}
+          onPick={(machine) => goHome(machine)}
           onClose={() => setMachinePicker(false)}
           onManage={() => setRoute({ kind: "machines" })}
         />

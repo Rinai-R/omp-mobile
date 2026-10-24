@@ -87,6 +87,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [items, setItems] = useState<Item[]>([]);
   const [connected, setConnected] = useState(false);
   const [failure, setFailure] = useState<OpenFailure | null>(null);
+  const failedRef = useRef(false);
+  failedRef.current = failure !== null;
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -119,15 +121,19 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     };
   }, [initialSession.id, machine.id]);
 
+  // Asked again whenever the link comes up: the computer may not have been reachable when the chat opened.
   useEffect(() => {
+    if (!connected && features.length > 0) return undefined;
     let cancelled = false;
     void daemonFeatures(machineRef.current).then((list) => {
-      if (!cancelled) setFeatures(list);
+      if (!cancelled && list.length > 0) setFeatures(list);
     });
     return () => {
       cancelled = true;
     };
-  }, [link]);
+    // `features` only gates the call; a fetched list must not trigger another one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [link, connected]);
 
   // Saved once the chat has been quiet for a moment (not on every streamed delta), and on leaving it.
   useEffect(() => {
@@ -197,7 +203,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             break;
           case "error": {
             const refused = pending.current;
-            if (refused !== null) {
+            // Older daemons do not name the command; then any error while a prompt is unanswered is taken as its refusal.
+            if (refused !== null && (message.command === undefined || message.command === "prompt")) {
               // The daemon refused the prompt: give the text and photos back instead of losing them.
               pending.current = null;
               setDraft((current) => (current === "" ? refused.text : current));
@@ -223,6 +230,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       },
       (attempts) => {
         setConnected(false);
+        // A prompt unanswered when the link dropped is never answered on the new link: do not restore it later.
+        pending.current = null;
         // An older daemon only refuses the upgrade; ask over HTTP why, once the retries pile up.
         if (attempts < ASK_AFTER || asking) return;
         asking = true;
@@ -246,8 +255,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     socketRef.current = socket;
     socket.connect();
     // Back in the foreground: reconnect now rather than at the end of a backoff.
+    // A session that could not open stays down until Retry, as the error card says.
     const subscription = AppState.addEventListener("change", (next) => {
-      if (next === "active") socket.reconnect();
+      if (next === "active" && !failedRef.current) socket.reconnect();
     });
     return () => {
       subscription.remove();
@@ -346,9 +356,20 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
   const rows = useMemo(() => layoutRows(items).reverse(), [items]);
+  /** The open step as it is now: a running tool's output keeps arriving while its sheet is open. */
+  const openStep = useMemo(() => {
+    if (step === null || step.kind !== "tool") return step;
+    for (const row of rows) {
+      if (row.kind !== "activity") continue;
+      const found = row.steps.find((item) => item.kind === "tool" && item.tool.id === step.tool.id);
+      if (found !== undefined) return found;
+    }
+    return step;
+  }, [rows, step]);
   /** Rows on screen before the first live frame: they appear without an entrance. */
-  const seen = useRef<Set<string> | null>(null);
-  if (seen.current === null && rows.length > 0) seen.current = new Set(rows.map((row) => row.id));
+  /** Whether each row plays its entrance, decided once per id: rows loaded with the transcript do not, rows that arrive later do. */
+  const seen = useRef<Map<string, boolean> | null>(null);
+  if (seen.current === null && rows.length > 0) seen.current = new Map(rows.map((row) => [row.id, false]));
   const [away, setAway] = useState(false);
   const [unseen, setUnseen] = useState(0);
   const newest = rows[0]?.id;
@@ -370,9 +391,12 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   const renderItem = useCallback<ListRenderItem<Row>>(
     ({ item }) => {
-      const set = seen.current;
-      const animate = set !== null && !set.has(item.id);
-      set?.add(item.id);
+      const map = seen.current;
+      let animate = map?.get(item.id);
+      if (animate === undefined) {
+        animate = map !== null;
+        map?.set(item.id, animate);
+      }
       return <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />;
     },
     [machine, session.cwd],
@@ -533,7 +557,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         onSelectModel={selectModel}
         onSelectLevel={selectLevel}
       />
-      <ToolSheet step={step} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
+      <ToolSheet step={openStep} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
     </View>
   );
 }

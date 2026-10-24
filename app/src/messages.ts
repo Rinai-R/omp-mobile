@@ -35,6 +35,7 @@ function thinkingOf(content: unknown): string | undefined {
  */
 function imageData(data: string): boolean {
   if (/^blob:sha256:[0-9a-f]{64}$/.test(data)) return true;
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(data)) return true;
   return data.length >= 16 && /^[A-Za-z0-9+/]+={0,2}$/.test(data.slice(0, 4096).replace(/\s+/g, ""));
 }
 

@@ -43,12 +43,16 @@ export function usePulse(active = true, period = 1400): Animated.Value {
 }
 
 /** A value that plays 0 → 1 once on mount with the OMP ease-out. */
-export function useEnter(duration = 320): Animated.Value {
-  const value = useRef(new Animated.Value(0)).current;
+export function useEnter(duration = 320, skip = false): Animated.Value {
+  // `skip` starts at the end: read once, so a row that stops animating keeps its value.
+  const value = useRef(new Animated.Value(skip ? 1 : 0)).current;
   useEffect(() => {
+    if (skip) return undefined;
     const run = Animated.timing(value, { toValue: 1, duration, easing: EASE_OUT, useNativeDriver: true });
     run.start();
     return () => run.stop();
+    // Only the first `skip` counts (see above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duration, value]);
   return value;
 }

@@ -51,6 +51,8 @@ function editDiff(args: unknown, result: unknown): DiffLine[] | undefined {
 
 /** Long outputs are cut so the sheet stays responsive; the computer keeps the whole result. */
 const OUTPUT_LIMIT = 40_000;
+/** Diff lines shown; each is its own Text, and thousands of them freeze the sheet. */
+const DIFF_LIMIT = 1_500;
 
 export function ToolSheet({
   step,
@@ -113,7 +115,7 @@ export function ToolSheet({
           ) : null}
           {diff !== undefined ? (
             <Block label={target ?? "Changes"}>
-              {diff.map((line, index) => (
+              {diff.slice(0, DIFF_LIMIT).map((line, index) => (
                 <Text
                   key={index}
                   style={line.kind === "add" ? styles.add : line.kind === "remove" ? styles.remove : styles.same}
@@ -123,11 +125,14 @@ export function ToolSheet({
                   {line.text}
                 </Text>
               ))}
+              {diff.length > DIFF_LIMIT ? (
+                <Text style={styles.same}>{`… ${diff.length - DIFF_LIMIT} more lines`}</Text>
+              ) : null}
             </Block>
           ) : rest !== undefined && kind !== "write" ? (
             <Block label="Input">
               <Text style={styles.code} selectable>
-                {pretty(rest)}
+                {clip(pretty(rest))}
               </Text>
             </Block>
           ) : null}
@@ -162,6 +167,10 @@ export function ToolSheet({
       </ScrollView>
     </Sheet>
   );
+}
+
+function clip(text: string): string {
+  return text.length > OUTPUT_LIMIT ? `${text.slice(0, OUTPUT_LIMIT)}\n…` : text;
 }
 
 /** A labelled mono block; `wrap` breaks long lines (commands, errors), else it scrolls sideways (code, diffs). */

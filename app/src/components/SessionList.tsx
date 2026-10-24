@@ -29,16 +29,19 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
     const machine = machineRef.current;
     if (machine === undefined) return;
     setLoading(true);
+    // An answer for a computer no longer shown (a tab switched while it was in flight) is dropped.
+    const current = () => machineRef.current?.id === machine.id;
     try {
       const list = await listSessions(machine);
+      saveSessionList(machine.id, list);
+      if (!current()) return;
       fetched.current = machine.id;
       setSessions(list);
       setError(null);
-      saveSessionList(machine.id, list);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (current()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setLoading(false);
+      if (current()) setLoading(false);
     }
     // `link` changes only when the computer or how to reach it does.
   }, [link]);

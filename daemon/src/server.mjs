@@ -81,7 +81,7 @@ const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
-/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean}} SessionSummary */
+/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, waiting?: number}} SessionSummary */
 
 /** An error with the HTTP status it answers. */
 function httpError(status, message) {
@@ -886,7 +886,14 @@ class Daemon {
           throw new Error(`unknown command ${String(message.type)}`);
       }
     } catch (error) {
-      ws.send(JSON.stringify({ type: "error", error: error instanceof Error ? error.message : String(error) }));
+      // `command` names the frame that failed, so the app can tell a refused prompt from any other error.
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          command: typeof message?.type === "string" ? message.type : undefined,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   }
 

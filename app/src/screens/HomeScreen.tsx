@@ -43,7 +43,8 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
   const [cwd, setCwd] = useState("");
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [lastRequest, setLastRequest] = useState(newRequest);
+  // Starts at 0, not at newRequest: a home opened with a request (New from the switcher) opens the sheet at once.
+  const [lastRequest, setLastRequest] = useState(0);
   if (newRequest !== lastRequest) {
     setLastRequest(newRequest);
     if (newRequest > 0) {
