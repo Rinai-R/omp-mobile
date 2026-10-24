@@ -18,7 +18,7 @@ The npm package is also an OMP plugin (`package.json` `omp.extensions` → `daem
 2. If none answers, starts one: `omp daemon/src/server.mjs --host tailscale --cwd <OMP's cwd> --omp <omp on PATH> --no-qr` with `BUN_BE_BUN=1`, so it runs on the Bun inside OMP and needs no Node.js. It is detached into its own session with stdin closed and output appended to `~/.omp-mobile/daemon.log`, and it ignores `SIGHUP`, so closing the terminal or exiting OMP leaves it running. OMP sessions it starts do not inherit `BUN_BE_BUN`.
 3. Shows the pairing QR code above the composer, and polls `/status` every 1.5 s. The code closes when a phone makes an authenticated request after it appeared ("phone connected from …"), after five minutes, or on `/mobile hide`. The extension's own polls send `x-omp-mobile-probe` so they do not count as a phone.
 
-`/mobile status` reports the running daemon, `/mobile stop` sends it `SIGTERM` (then `SIGKILL` after 5 s). Outside the interactive TUI, `/mobile` reports the pairing link as a notice instead of drawing the code.
+`/mobile status` reports the running daemon, `/mobile stop` sends it `SIGTERM` (then `SIGKILL` after 25 s: the daemon first closes its omp processes, each with `SIGINT`, then `SIGTERM`, so they save their sessions). Outside the interactive TUI, `/mobile` reports the pairing link as a notice instead of drawing the code.
 
 ## Daemon options
 

@@ -149,9 +149,12 @@ async function startDaemon(cwd) {
   throw new Error(`The omp-mobile daemon did not start (${reason}).\n${logTail()}`);
 }
 
+/** Time the daemon gets to close its omp processes (each up to SIGINT + SIGTERM waits) before it is killed. */
+const STOP_TIMEOUT_MS = 25_000;
+
 async function stopDaemon(state) {
   process.kill(state.pid, "SIGTERM");
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + STOP_TIMEOUT_MS;
   while (Date.now() < deadline && alive(state.pid)) await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   if (alive(state.pid)) process.kill(state.pid, "SIGKILL");
 }

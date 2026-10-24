@@ -18,7 +18,7 @@ import { renderQr } from "./qr.mjs";
 import { RpcSession } from "./rpc-session.mjs";
 import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
-import { listOmpSessions, promptTitle, sessionOwners } from "./omp-sessions.mjs";
+import { listOmpSessions, oneLine, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -347,10 +347,10 @@ function readBody(req) {
   });
 }
 
-function titleOf(messages, state, cwd) {
-  if (typeof state?.sessionName === "string" && state.sessionName.trim() !== "") {
-    return state.sessionName.trim();
-  }
+export function titleOf(messages, state, cwd) {
+  // OMP's session names can start with a Nerd Font icon, as its stored titles do (see `oneLine`).
+  const named = typeof state?.sessionName === "string" ? oneLine(state.sessionName) : "";
+  if (named !== "") return named;
   if (Array.isArray(messages)) {
     const title = promptTitle(messages.find((message) => message?.role === "user")?.content);
     if (title !== "") return title;
@@ -483,10 +483,11 @@ class SessionEntry {
     return this.rpc.extensionRequests instanceof Map ? [...this.rpc.extensionRequests.values()] : [];
   }
 
+  /** Disconnect the phones and stop omp gracefully (see `RpcSession.close`). */
   close() {
     this.closed = true;
-    this.rpc.close();
     for (const client of this.clients) client.close(1001, "session closed");
+    return this.rpc.close();
   }
 }
 
@@ -1002,8 +1003,12 @@ class Daemon {
   async close() {
     for (const end of this.streams) end();
     this.streams.clear();
-    for (const entry of this.sessions.values()) entry.close();
+    // Each omp saves and releases its session before the daemon exits.
+    const closing = [...this.sessions.values()].map((entry) => entry.close());
     this.sessions.clear();
+    const outcomes = await Promise.all(closing);
+    const stuck = outcomes.filter((outcome) => outcome === "running").length;
+    if (stuck > 0) console.error(`omp-mobile: ${stuck} omp process(es) ignored SIGINT and SIGTERM and are still running`);
     this.wsServer.close();
     await new Promise((resolveClose) => this.server.close(() => resolveClose()));
   }
