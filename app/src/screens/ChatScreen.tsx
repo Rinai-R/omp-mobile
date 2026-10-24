@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
+  Alert,
   AppState,
   FlatList,
   Keyboard,
@@ -15,11 +16,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
-import { HttpError, SessionSocket, daemonFeatures, openSession, type OpenFailure } from "../api";
+import { HttpError, SessionSocket, daemonFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
-import { BrandMark, GradientDot, LiveDot, PulseDot } from "../components/brand";
+import { BrandMark, GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { Composer } from "../components/Composer";
 import { ArrowDownGlyph, BackGlyph, ChevronDownGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
@@ -31,6 +32,7 @@ import { applyEvent, snapshotItems } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
 import { loadTranscript, saveTranscript } from "../transcripts";
 import type {
@@ -101,6 +103,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [step, setStep] = useState<Step | null>(null);
   const [features, setFeatures] = useState<string[]>([]);
+  /** A takeover of a session held on the computer is in flight, or what it failed with. */
+  const [taking, setTaking] = useState(false);
+  const [takeError, setTakeError] = useState<string | null>(null);
   /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
   const live = useRef(false);
   const itemsRef = useRef<Item[]>([]);
@@ -241,7 +246,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           .catch((cause: unknown) => {
             if (cause instanceof HttpError && cause.status !== 401 && cause.status !== 403) {
               socket.fail();
-              setFailure({ status: cause.status, error: cause.message });
+              setFailure({ status: cause.status, error: cause.message, owner: cause.owner });
             }
           })
           .finally(() => {
@@ -352,8 +357,36 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   const retry = useCallback(() => {
     setFailure(null);
+    setTakeError(null);
     socketRef.current?.reconnect();
   }, []);
+
+  /** Take the session from the omp that holds it on the computer, once the user confirmed; then open it here. */
+  const takeOver = useCallback(() => {
+    Alert.alert(t("chat.takeover.confirmTitle"), confirmBody(failure?.owner), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("chat.takeover.action"),
+        style: "destructive",
+        onPress: () => {
+          setTaking(true);
+          setTakeError(null);
+          void takeOverSession(machineRef.current, initialSession.id)
+            .then(() => {
+              setFailure(null);
+              socketRef.current?.reconnect();
+            })
+            .catch((cause: unknown) => {
+              setTakeError(cause instanceof Error ? cause.message : String(cause));
+              if (cause instanceof HttpError && cause.status === 409 && cause.owner !== undefined) {
+                setFailure({ status: 409, error: cause.message, owner: cause.owner });
+              }
+            })
+            .finally(() => setTaking(false));
+        },
+      },
+    ]);
+  }, [failure?.owner, initialSession.id]);
 
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
   const rows = useMemo(() => layoutRows(items).reverse(), [items]);
@@ -422,6 +455,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     session.title === folder && firstPrompt?.kind === "message" ? firstPrompt.text.replace(/\s+/g, " ").trim().slice(0, 80) : session.title;
   const status = failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
   const failed = failure === null ? null : failureText(failure);
+  const offerTakeover = failure !== null && canTakeOver(failure.status, features);
 
   return (
     <View style={styles.root}>
@@ -467,7 +501,29 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
         {error !== null ? <Banner text={error} onPress={() => setError(null)} /> : null}
 
-        {failed !== null && failure !== null ? (
+        {failure !== null && offerTakeover ? (
+          <View style={styles.failure}>
+            <View style={styles.held}>
+              <WarningGlyph size={18} color={colors.warn} />
+              <Text style={[styles.failureBody, styles.heldText]}>{heldLine(failure.owner)}</Text>
+            </View>
+            {takeError !== null ? (
+              <Text style={styles.takeError} selectable>
+                {takeError}
+              </Text>
+            ) : null}
+            {taking ? (
+              <View style={styles.taking}>
+                <Spinner size={12} color={colors.fgMuted} />
+                <Text style={styles.failureBody}>{t("chat.takeover.working")}</Text>
+              </View>
+            ) : (
+              <Pressable onPress={takeOver} style={({ pressed }) => [styles.failureButton, pressed && styles.titlePressed]} accessibilityRole="button">
+                <Text style={styles.failureButtonText}>{t("chat.takeover.action")}</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : failed !== null && failure !== null ? (
           <View style={styles.failure}>
             <WarningGlyph size={20} color={colors.warn} />
             <Text style={styles.failureTitle}>{failed.title}</Text>
@@ -661,5 +717,9 @@ function createStyles(c: Palette) {
       backgroundColor: c.fg,
     },
     failureButtonText: { fontFamily: SANS, fontSize: 14, fontWeight: "600", color: c.bg },
+    held: { flexDirection: "row", gap: 10, alignItems: "center" },
+    heldText: { flex: 1, color: c.fg },
+    taking: { flexDirection: "row", gap: 10, alignItems: "center", marginTop: 4, minHeight: 38 },
+    takeError: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.err },
   } as const;
 }
