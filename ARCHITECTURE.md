@@ -59,8 +59,8 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 | Route | Answer |
 | --- | --- |
-| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`. |
-| `GET /sessions` | `{sessions: [...]}`: live sessions, then dormant ones this daemon created, then terminal sessions. Each has `id`, `title`, `cwd`, `status` (`idle` or `streaming`), `model`, `createdAt`, `updatedAt`, `sessionFile`, `origin` (`daemon` or `omp`), and `openElsewhere` when another omp process holds it. |
+| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user, features}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`, `features` what the daemon supports beyond protocol 1 (`prompt-images`: `prompt` frames carry images). The app offers a feature only to a daemon that lists it. |
+| `GET /sessions` | `{sessions: [...]}`: live sessions, then dormant ones this daemon created, then terminal sessions. Each has `id`, `title`, `cwd`, `status` (`idle` or `streaming`), `model`, `createdAt`, `updatedAt`, `sessionFile`, `origin` (`daemon` or `omp`), `openElsewhere` when another omp process holds it, and for live sessions `waiting`: OMP questions and approvals still open. |
 | `POST /sessions` | Body `{cwd?, prompt?}`. Starts a session in `cwd` (default `--cwd`), sends `prompt` if given; `201 {session}`, `400` when `cwd` is not a directory. |
 | `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process. |
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it; the OMP session file stays. |
@@ -96,7 +96,7 @@ On connect the daemon sends `{type: "snapshot", session, state, messages}`, then
 
 ## Rendering
 
-The app folds the same OMP events into the transcript both live and from a saved one: a message per `message_start` / `message_end`, a card per `tool_execution_*` call keyed by `toolCallId`, and notices for compaction, retries and OMP's own `notice` frames. Tool cards show OMP's `intent` line; `edit` calls show a line diff (from `old_string`/`new_string`) or their preformatted `input` block.
+The app folds the same OMP events into the transcript both live and from a saved one: a message per `message_start` / `message_end`, a tool item per `tool_execution_*` call keyed by `toolCallId`, and notices for compaction, retries and OMP's own `notice` frames. `app/src/rows.ts` then lays the items out as rows: per turn the user's bubble, one `omp` header, the prose, and each stretch of consecutive tool calls (with the thinking that only led into them) as one activity card. A running card is open and shows its live step; a finished one is closed and sums itself up by kind ("Edited 2 files, ran 3, read 4"). A step's line is OMP's `intent`, its target (command, path, pattern) and a short result (`+6 −2` from OMP's result diff, a line count, a run time); tapping it opens the full input, diff and output. The list is inverted, so it rests on the newest row while that row streams; scrolled up, it holds the rows in view and offers a jump back with the count of new rows.
 
 Images arrive as `{type: "image", data, mimeType}`. Inline base64 becomes a data URI; `blob:sha256:<hash>` becomes the daemon's `/blobs/<hash>` route, which serves the store under `<omp home>/agent/blobs` to an authenticated client. The todo panel reads `state.todoPhases`, the context chip reads `state.contextUsage`, and queued messages come from `state.queuedMessages`.
 

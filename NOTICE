@@ -4,3 +4,7 @@ Copyright (c) 2026 Rinai
 Licensed under the Apache License, Version 2.0. See the LICENSE file.
 
 OMP Mobile is not affiliated with oh-my-pi or Tailscale.
+
+The app bundles the Geist typeface (Copyright 2023 Vercel, in collaboration with basement.studio) and the
+JetBrains Mono typeface (Copyright 2020 The JetBrains Mono Project Authors), both under the SIL Open Font
+License 1.1; see app/assets/fonts.

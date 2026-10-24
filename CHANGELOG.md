@@ -8,7 +8,16 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - A session that fails to open no longer leaves an OMP process behind. That process kept the session's lock, so every later open was refused as "open in another omp process" naming the daemon's own child, and each retry added another one (#21).
 - A session whose OMP process exited is started again when it is opened, instead of showing a session that cannot answer.
 - When a session cannot open, the session socket now says why (`open_failed`) before it closes, and the daemon logs unexpected failures to `daemon.log`.
-- The daemon accepts images with a prompt (`images` on the session socket's `prompt` frame) and hands them to OMP.
+- The daemon accepts images with a prompt (`images` on the session socket's `prompt` frame) and hands them to OMP; `/hello` lists `features` (`prompt-images`), and live sessions report `waiting` questions (#23).
+- A redesigned app in OMP's own look: Geist and JetBrains Mono, the π mark, a new icon (the π with a cyan "connected" dot, also as an Android 13 themed icon) (#23).
+- The transcript folds each stretch of tool calls into one activity card that shows the step running now and sums itself up when done; tap a step for its command, diff and output. Long stretches list their newest steps and open the rest in a sheet. Thinking that only led into tool calls belongs to the card (#23).
+- The chat stays on the newest message while it streams and stays put while you read back, with a jump to the newest; rows no longer animate in again when scrolled back into view (#23).
+- Attach photos from the library or the camera; they are downscaled on the phone (longest side 1600 px) and sent with the message. A prompt the computer refuses is put back into the box (#23).
+- Tap a chat's title to switch sessions: every computer's sessions, searchable, grouped as Needs you, Running, Today, Earlier and From the terminal (#23).
+- The app opens on the computer used last; its home lists that computer's sessions in the same groups, with a computer card to switch or manage computers, and a New session sheet that offers recent folders. Back goes chat → home → out of the app (#23).
+- Give a computer its own name on this phone; computers with the same host name are told apart by their address (#23).
+- A session that cannot open says why (from `open_failed`, or over HTTP for older daemons) and stops reconnecting until you try again (#23).
+- Images OMP left as `<N bytes>` placeholders no longer render as empty boxes (#23).
 
 ### 中文
 
@@ -16,7 +25,16 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - 打开失败的会话不再留下 OMP 进程。这个进程会一直占着会话锁，之后每次打开都被拒绝为 “open in another omp process”，而这个进程其实是 daemon 自己的子进程；每重试一次还会再多一个（#21）。
 - OMP 进程已退出的会话，再次打开时会重新启动，不再显示一个无法回应的会话。
 - 会话打不开时，会话 socket 会先说明原因（`open_failed`）再关闭；意外错误会写进 `daemon.log`。
-- daemon 支持随消息发送图片（会话 socket 的 `prompt` 帧带 `images`），并转交给 OMP。
+- daemon 支持随消息发送图片（会话 socket 的 `prompt` 帧带 `images`），并转交给 OMP；`/hello` 返回 `features`（`prompt-images`），活跃会话会报告待回答的 `waiting` 数（#23）。
+- App 按 OMP 自己的视觉重新设计：Geist 和 JetBrains Mono 字体、π 标志、新图标（带青色“已连接”圆点的 π，也提供 Android 13 主题图标）（#23）。
+- 对话流把每一段连续的工具调用折叠成一张活动卡片：运行中显示当前步骤，完成后自动汇总；点某一步可查看命令、diff 和输出。很长的一段只列出最新的步骤，其余在面板中查看。只是为调用工具而做的思考归入卡片（#23）。
+- 流式输出时对话停在最新消息，往上翻看时位置保持不动，并提供跳回最新的按钮；滚回来的行不再重复播放入场动画（#23）。
+- 可以从相册或相机附加图片，在手机上压缩（最长边 1600 px）后随消息发送。电脑拒收的消息会放回输入框（#23）。
+- 点对话标题切换会话：所有电脑上的会话，可搜索，按“需要你 / 运行中 / 今天 / 更早 / 来自终端”分组（#23）。
+- App 打开时进入上次使用的电脑；首页按同样的分组列出它的会话，顶部的电脑卡片用于切换或管理电脑，新建会话面板提供最近用过的目录。返回键依次为 对话 → 首页 → 退出 App（#23）。
+- 可以在手机上给电脑起名；主机名相同的电脑用地址区分（#23）。
+- 打不开的会话会说明原因（来自 `open_failed`，旧版 daemon 则通过 HTTP 获取），并停止重连，直到你点“重试”（#23）。
+- OMP 留下的 `<N bytes>` 图片占位符不再显示成空白方块（#23）。
 
 ## v0.2.0
 

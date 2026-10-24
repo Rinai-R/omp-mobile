@@ -13,13 +13,15 @@
 
 OMP Mobile is a native phone app for [oh-my-pi](https://github.com/can1357/oh-my-pi) (OMP), with a small daemon on each computer. Start, follow and steer OMP sessions from the phone: transcript, tool calls, approvals, and the sessions you started in a terminal.
 
-- **Native app:** The app draws the transcript, tool cards, thinking, Markdown and composer itself. No WebView, no web page.
+- **Native app:** The app draws the transcript, tool cards, thinking, Markdown and composer itself, in OMP's own look (Geist, JetBrains Mono, the π mark). No WebView, no web page.
+- **A transcript you can follow:** each stretch of tool calls folds into one card that shows the step running now and sums itself up when done ("Edited 2 files, ran 3"); tap a step for its command, diff and output. The view stays on the newest message while you are at the bottom and stays put while you read back.
 - **The whole transcript:** images the user sent and images tools produce (screenshots, opened files), edit diffs with their intent, tool results, Markdown tables, OMP's todo list, context usage and queued messages.
 - **Model switching:** tap the model in the composer to pick from OMP's catalog — grouped by provider and searchable — and set its thinking level. The model chip follows the session when it changes.
+- **Photos to the agent:** attach photos from the library or the camera; they are downscaled on the phone and sent with your message.
 - **Approvals on the phone:** OMP's own tool approvals and questions arrive as a sheet, and the turn waits for your answer.
 - **Terminal sessions:** Sessions you started in a terminal on the computer are listed too and continue on the phone. One still open in a terminal waits until that terminal exits.
 - **Notifications:** Android notifications for approvals, questions, and finished turns while the app is in the background.
-- **All your machines:** Pair each computer by QR code, switch between them from the session list. A reopened chat shows at once, also offline.
+- **All your machines:** Pair each computer by QR code and give it a name on the phone. Tap a chat's title for every session on every computer — searchable, with what needs you first. The app opens on the computer you used last; a reopened chat shows at once, also offline.
 - **Tailscale only:** The daemon listens on the computer's Tailscale address and admits only your own devices. No relay or cloud service of its own.
 - **An OMP plugin:** `/mobile` in OMP starts the daemon in the background and shows the pairing code. The daemon keeps running after the terminal closes.
 
