@@ -16,11 +16,14 @@ export function hostOf(url: string): string {
   return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
 }
 
-/** A machine's name among `machines`: with its address when another one is called the same. */
+/** A machine's name among `machines`: with its address when another one is called the same, and its port when that is shared too. */
 export function machineLabel(machine: Machine, machines: readonly Machine[]): string {
   const name = displayName(machine);
   const twins = machines.filter((item) => displayName(item) === name);
-  return twins.length < 2 ? name : `${name} · ${hostOf(machine.url)}`;
+  if (twins.length < 2) return name;
+  const host = hostOf(machine.url);
+  const sameHost = twins.filter((item) => hostOf(item.url) === host).length > 1;
+  return `${name} · ${sameHost ? machine.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : host}`;
 }
 
 /** The longest name the rename field keeps. */
