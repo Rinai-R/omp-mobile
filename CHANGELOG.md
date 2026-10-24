@@ -5,10 +5,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 ## Unreleased
 
 - The app speaks Chinese and English. It follows the phone's language (any Chinese → Simplified Chinese, anything else → English); Settings → Language overrides it (System / 中文 / English), and the switch applies at once. Screens, sheets, empty states, the app's own errors, accessibility labels, relative times and the notifications the app posts are translated; what OMP and the computer send (model names, tool output, their errors) is shown as it is (#26).
+- Take over a session that omp in a terminal on the computer has open. OMP lets one process write a session, and a second one would save to a new file, so the two cannot share it; instead the chat offers **Take over**, says when the terminal is mid-turn, and after you confirm the daemon asks that omp to close (through the omp-mobile plugin if it is loaded there, else with `SIGINT`, then `SIGTERM`, never `SIGKILL`), tells the terminal where the session went, and opens it here with nothing lost or forked. New route `POST /sessions/:id/takeover`; held sessions name their `owner` (#28).
 
 ### 中文
 
 - App 支持中文和英文。默认跟随手机语言（任何中文 → 简体中文，其他 → 英文）；可在“设置 → 语言”中改为 跟随系统 / 中文 / English，切换后立即生效。界面、面板、空状态、App 自己的错误提示、无障碍标签、相对时间以及 App 发出的通知都已翻译；OMP 和电脑发来的内容（模型名、工具输出、它们的错误信息）保持原样（#26）。
+- 可以接管电脑终端里 omp 正打开着的会话。OMP 只允许一个进程写一个会话，第二个进程会另存为新文件，所以两边无法同时打开；对话页改为提供 **接管**，并提示终端是否正在执行一轮对话。确认后 daemon 请那个 omp 关闭（若它加载了 omp-mobile 插件则由插件关闭，否则依次发送 `SIGINT`、`SIGTERM`，从不 `SIGKILL`），在终端里说明会话去了哪里，再在手机上打开，记录不丢失也不分叉。新增 `POST /sessions/:id/takeover`；被占用的会话会给出 `owner`（#28）。
 
 ## v0.3.0
 
