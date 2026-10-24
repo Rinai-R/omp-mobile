@@ -13,7 +13,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ApprovalRequest } from "../types";
 import { GradientDot } from "./brand";
 import { Button, sheetSurface, sheetTransforms, useSheetMotion } from "./ui";
@@ -156,7 +156,7 @@ function createStyles(c: Palette) {
     borderColor: c.border,
     backgroundColor: c.raised,
   } as const;
-  const input = {
+  const input = { fontFamily: SANS,
     minHeight: 96,
     maxHeight: 220,
     textAlignVertical: "top",
@@ -177,16 +177,16 @@ function createStyles(c: Palette) {
     grab: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: c.borderStrong },
     eyebrow: { flexDirection: "row", alignItems: "center", gap: 7, marginHorizontal: 2, marginTop: 4 },
     eyebrowText: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
-    title: { fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg, marginHorizontal: 2 },
-    message: { fontSize: 14, lineHeight: 21, color: c.fgMuted, marginHorizontal: 2 },
+    title: { fontFamily: SANS, fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg, marginHorizontal: 2 },
+    message: { fontFamily: SANS, fontSize: 14, lineHeight: 21, color: c.fgMuted, marginHorizontal: 2 },
     options: { flexGrow: 0 },
     optionList: { gap: 6 },
     option,
     optionPressed: { ...option, borderColor: c.ring, backgroundColor: c.ringSoft },
     optionMarker: { width: 16, fontFamily: MONO, fontSize: 12.5, lineHeight: 20, color: c.accent },
     optionText: { flex: 1, gap: 2 },
-    optionLabel: { fontSize: 14.5, lineHeight: 20, fontWeight: "500", color: c.fg },
-    optionDetail: { fontSize: 12.5, lineHeight: 18, color: c.fgMuted },
+    optionLabel: { fontFamily: SANS, fontSize: 14.5, lineHeight: 20, fontWeight: "500", color: c.fg },
+    optionDetail: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.fgMuted },
     pressed: { backgroundColor: c.hover },
     row: { flexDirection: "row", gap: 10 },
     flex: { flex: 1 },
@@ -195,6 +195,6 @@ function createStyles(c: Palette) {
     input,
     inputFocused: { ...input, borderColor: c.ring },
     cancel: { height: 44, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
-    cancelText: { fontSize: 15, fontWeight: "500", color: c.fgMuted },
+    cancelText: { fontFamily: SANS, fontSize: 15, fontWeight: "500", color: c.fgMuted },
   } as const;
 }

@@ -16,7 +16,7 @@ import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { pairMachine } from "../api";
 import { CloseGlyph, KeyboardGlyph } from "../components/icons";
 import { pairingMessage, readPairing } from "../pairing";
-import { EASE_OUT, GRADIENT, MONO, palette, radius } from "../theme";
+import { EASE_OUT, GRADIENT, MONO, SANS, palette, radius } from "../theme";
 import type { Machine } from "../types";
 
 interface Props {
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
   },
   iconSpacer: { width: 36 },
   titleBlock: { alignItems: "center", gap: 1 },
-  title: { color: DARK.fg, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15 },
+  title: { fontFamily: SANS, color: DARK.fg, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15 },
   subtitle: { color: DARK.fgFaint, fontFamily: MONO, fontSize: 11, lineHeight: 15 },
   bottom: {
     position: "absolute",
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: DARK.edgeTop,
   },
-  hint: { color: DARK.fgMuted, fontSize: 14, lineHeight: 21, textAlign: "center", maxWidth: 340 },
+  hint: { fontFamily: SANS, color: DARK.fgMuted, fontSize: 14, lineHeight: 21, textAlign: "center", maxWidth: 340 },
   error: {
     alignSelf: "stretch",
     color: DARK.err,
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: DARK.borderStrong,
   },
-  ghostText: { color: DARK.fg, fontSize: 14, fontWeight: "500" },
+  ghostText: { fontFamily: SANS, color: DARK.fg, fontSize: 14, fontWeight: "500" },
   sheet: {
     alignSelf: "stretch",
     padding: 16,
@@ -412,7 +412,7 @@ const styles = StyleSheet.create({
     borderColor: DARK.borderStrong,
     borderTopColor: DARK.edgeTop,
   },
-  sheetText: { color: DARK.fg, fontSize: 14, lineHeight: 21 },
+  sheetText: { fontFamily: SANS, color: DARK.fg, fontSize: 14, lineHeight: 21 },
   sheetActions: { flexDirection: "row", gap: 10 },
   sheetSecondary: {
     flex: 1,
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: DARK.borderStrong,
   },
-  sheetSecondaryText: { color: DARK.fg, fontSize: 15, fontWeight: "500" },
+  sheetSecondaryText: { fontFamily: SANS, color: DARK.fg, fontSize: 15, fontWeight: "500" },
   sheetPrimary: {
     flex: 1,
     height: 44,
@@ -433,5 +433,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: DARK.accent,
   },
-  sheetPrimaryText: { color: DARK.accentFg, fontSize: 15, fontWeight: "600" },
+  sheetPrimaryText: { fontFamily: SANS, color: DARK.accentFg, fontSize: 15, fontWeight: "600" },
 });

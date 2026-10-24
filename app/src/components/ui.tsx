@@ -3,10 +3,12 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,7 +18,7 @@ import {
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { EASE_OUT, HEADER_HEIGHT, HIT, MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { EASE_OUT, HEADER_HEIGHT, HIT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Dot } from "../probe";
 import { GradientTile, LiveDot, Spinner, Wordmark } from "./brand";
 import { BackGlyph, ChevronDownGlyph, ChevronGlyph, CloseGlyph } from "./icons";
@@ -38,7 +40,7 @@ export function Button({
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
-  const foreground = kind === "primary" ? colors.accentFg : kind === "danger" ? colors.err : colors.fg;
+  const foreground = kind === "primary" ? colors.bg : kind === "danger" ? colors.err : colors.fg;
   const style = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
       kind === "primary" ? styles.primary : kind === "danger" ? styles.danger : styles.secondary,
@@ -451,23 +453,43 @@ export function sheetTransforms(progress: Animated.Value, height: number) {
   };
 }
 
+/** The software keyboard's height while it is up, 0 otherwise. */
+export function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", (event) =>
+      setHeight(event.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
 /** A bottom sheet in a transparent modal, padded above the home indicator; it slides up and back down. */
 export function Sheet({
   visible,
   title,
   onClose,
   children,
+  scroll = true,
 }: {
   visible: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /** Scroll the content when it outgrows the sheet (the keyboard is up); off for content that scrolls itself. */
+  scroll?: boolean;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const { mounted, progress } = useSheetMotion(visible);
+  const keyboard = useKeyboardHeight();
   // While it slides out, the sheet keeps what it showed: callers clear their content on close.
   const shown = useRef({ title, children });
   if (visible) shown.current = { title, children };
@@ -478,7 +500,9 @@ export function Sheet({
         <Animated.View style={[styles.scrim, motion.backdrop]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
         </Animated.View>
-        <Animated.View style={[styles.sheet, { paddingBottom: 20 + insets.bottom }, motion.sheet]}>
+        <Animated.View
+          style={[styles.sheet, { paddingBottom: keyboard > 0 ? 12 : 20 + insets.bottom, maxHeight: height - insets.top - 12 - keyboard }, motion.sheet]}
+        >
           <View style={styles.grab} />
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle} numberOfLines={1}>
@@ -488,7 +512,18 @@ export function Sheet({
               <CloseGlyph size={16} color={colors.fgMuted} />
             </IconButton>
           </View>
-          {shown.current.children}
+          {scroll ? (
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.sheetBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {shown.current.children}
+            </ScrollView>
+          ) : (
+            shown.current.children
+          )}
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -502,9 +537,9 @@ export function sheetSurface(c: Palette) {
     maxWidth: 600,
     alignSelf: "center",
     paddingTop: 8,
-    paddingHorizontal: 16,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
+    paddingHorizontal: 18,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
     borderWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: 0,
     borderColor: c.borderStrong,
@@ -515,8 +550,8 @@ export function sheetSurface(c: Palette) {
 
 function createStyles(c: Palette) {
   const button = {
-    height: 44,
-    borderRadius: radius.md,
+    height: 48,
+    borderRadius: radius.lg,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -542,19 +577,20 @@ function createStyles(c: Palette) {
     borderBottomColor: c.border,
     backgroundColor: c.bg,
   } as const;
-  const rowTitle = { fontSize: 15, lineHeight: 20, fontWeight: "500", letterSpacing: -0.1, color: c.fg } as const;
+  const rowTitle = { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "500", letterSpacing: -0.15, color: c.fg } as const;
   const input = {
     minHeight: 44,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: radius.md + 2,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontFamily: SANS,
     fontSize: 15,
     color: c.fg,
-    backgroundColor: c.inset,
-    borderColor: c.borderStrong,
+    backgroundColor: c.well,
+    borderColor: c.border,
   } as const;
-  const halo = { borderRadius: radius.md + 3, borderWidth: 3, margin: -3, borderColor: "transparent" } as const;
+  const halo = { borderRadius: radius.md + 5, borderWidth: 3, margin: -3, borderColor: "transparent" } as const;
   const chip = {
     flexDirection: "row",
     alignItems: "center",
@@ -569,12 +605,12 @@ function createStyles(c: Palette) {
   } as const;
   const chipText = { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 14, color: c.fgMuted } as const;
   return {
-    primary: { ...button, backgroundColor: c.accent },
+    primary: { ...button, backgroundColor: c.fg },
     secondary: {
       ...button,
-      backgroundColor: c.overlay,
+      backgroundColor: c.well,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.borderStrong,
+      borderColor: c.border,
     },
     danger: {
       ...button,
@@ -584,16 +620,16 @@ function createStyles(c: Palette) {
     },
     disabled: { opacity: 0.4 },
     buttonPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
-    primaryText: { fontSize: 15, fontWeight: "600", color: c.accentFg },
-    secondaryText: { fontSize: 15, fontWeight: "500", color: c.fg },
-    dangerText: { fontSize: 15, fontWeight: "600", color: c.err },
+    primaryText: { fontFamily: SANS, fontSize: 15, fontWeight: "600", color: c.bg },
+    secondaryText: { fontFamily: SANS, fontSize: 15, fontWeight: "500", color: c.fg },
+    dangerText: { fontFamily: SANS, fontSize: 15, fontWeight: "600", color: c.err },
 
     field: { gap: 6 },
-    fieldLabel: { fontSize: 12, lineHeight: 16, fontWeight: "500", color: c.fgMuted, marginLeft: 2 },
+    fieldLabel: { fontFamily: SANS, fontSize: 12.5, lineHeight: 16, fontWeight: "500", color: c.fgFaint, marginLeft: 2 },
     halo,
     haloOn: { ...halo, borderColor: c.ringSoft },
     input,
-    inputFocused: { ...input, borderColor: c.ring },
+    inputFocused: { ...input, borderColor: c.borderStrong },
 
     chip,
     "chip.plain": chip,
@@ -623,54 +659,49 @@ function createStyles(c: Palette) {
     headerText: { flex: 1, minWidth: 0, paddingHorizontal: 4, justifyContent: "center", gap: 1 },
     headerTextPressed: { opacity: 0.6 },
     headerTitleRow: { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 },
-    headerTitleText: { flexShrink: 1, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15, color: c.fg },
+    headerTitleText: { flexShrink: 1, fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
     headerSubtitle: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     headerRight: { flexDirection: "row", alignItems: "center" },
 
-    section: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 22, paddingBottom: 8, paddingHorizontal: 4 },
-    sectionText: { fontSize: 12, lineHeight: 16, fontWeight: "500", color: c.fgFaint },
-    sectionMeta: {
+    section: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 22, paddingBottom: 8, paddingHorizontal: 6 },
+    sectionText: {
       fontFamily: MONO,
       fontSize: 10.5,
-      lineHeight: 16,
-      paddingHorizontal: 6,
-      borderRadius: radius.pill,
-      overflow: "hidden",
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-      backgroundColor: c.raised,
-      color: c.fgMuted,
+      lineHeight: 14,
+      fontWeight: "500",
+      letterSpacing: 1.6,
+      textTransform: "uppercase",
+      color: c.fgGhost,
     },
+    sectionMeta: { fontFamily: MONO, fontSize: 10.5, lineHeight: 14, letterSpacing: 0.4, color: c.fgGhost },
     group: {
-      borderRadius: radius.lg,
+      borderRadius: radius.xl,
       overflow: "hidden",
       backgroundColor: c.panel,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
-      borderTopColor: c.edgeTop,
     },
     row,
     rowDivided: { ...row, ...divider },
     pressed: { backgroundColor: c.hover },
     tile: {
-      width: 34,
-      height: 34,
-      borderRadius: radius.md,
+      width: 36,
+      height: 36,
+      borderRadius: 11,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: c.raised,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
+      backgroundColor: c.well,
     },
     rowText: { flex: 1, minWidth: 0, gap: 3 },
     rowTitle,
     rowTitleDim: { ...rowTitle, color: c.fgMuted },
-    rowDetail: { fontSize: 13, lineHeight: 18, color: c.fgMuted },
-    rowDetailMono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
+    rowDetail: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgFaint },
+    rowDetailMono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
 
     empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 32, paddingVertical: 48 },
     emptyTitle: {
-      fontSize: 16,
+      fontFamily: SANS,
+      fontSize: 17,
       lineHeight: 22,
       fontWeight: "600",
       letterSpacing: -0.2,
@@ -678,7 +709,7 @@ function createStyles(c: Palette) {
       marginTop: 18,
       textAlign: "center",
     },
-    emptyBody: { fontSize: 13.5, lineHeight: 20, color: c.fgMuted, marginTop: 6, textAlign: "center", maxWidth: 320 },
+    emptyBody: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fgFaint, marginTop: 6, textAlign: "center", maxWidth: 320 },
     emptyAction: { marginTop: 22, minWidth: 220 },
 
     banner: {
@@ -692,7 +723,7 @@ function createStyles(c: Palette) {
       borderBottomColor: c.errBorder,
     },
     bannerDot: { alignSelf: "flex-start", paddingTop: 6 },
-    bannerText: { flex: 1, fontSize: 13, lineHeight: 18, color: c.err },
+    bannerText: { flex: 1, fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.err },
     bannerAction: {
       height: 26,
       paddingHorizontal: 10,
@@ -708,8 +739,10 @@ function createStyles(c: Palette) {
     sheetRoot: { flex: 1, justifyContent: "flex-end" },
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
     sheet: { ...sheetSurface(c), gap: 14 },
-    grab: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: c.borderStrong },
+    sheetScroll: { flexGrow: 0 },
+    sheetBody: { gap: 14 },
+    grab: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, backgroundColor: c.borderStrong },
     sheetHeader: { flexDirection: "row", alignItems: "center", marginLeft: 2, marginRight: -10, marginTop: -6 },
-    sheetTitle: { flex: 1, fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
+    sheetTitle: { flex: 1, fontFamily: SANS, fontSize: 19, lineHeight: 25, fontWeight: "600", letterSpacing: -0.4, color: c.fg },
   } as const;
 }

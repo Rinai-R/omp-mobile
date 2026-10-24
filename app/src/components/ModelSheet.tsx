@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
   type PressableStateCallbackType,
 } from "react-native";
-import { MONO, radius, useColors, useStyles, type Palette } from "../theme";
+import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ModelOption } from "../types";
 import { CheckGlyph } from "./icons";
 import { Group, Row, SectionHeader, Sheet } from "./ui";
@@ -224,8 +224,8 @@ function createStyles(c: Palette) {
       backgroundColor: c.raised,
       paddingHorizontal: 12,
     },
-    searchInput: { height: 38, fontSize: 14, color: c.fg },
-    error: { fontSize: 12.5, lineHeight: 18, color: c.err },
+    searchInput: { fontFamily: SANS, height: 38, fontSize: 14, color: c.fg },
+    error: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.err },
     list: { paddingBottom: 8, gap: 2 },
     note: { fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint, paddingHorizontal: 4, paddingVertical: 10 },
     trailing: { flexDirection: "row", alignItems: "center", gap: 8 },

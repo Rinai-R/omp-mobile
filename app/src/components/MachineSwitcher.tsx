@@ -2,6 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useStyles, type Palette } from "../theme";
+import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 import { Button, Group, Row, Sheet, StateDot } from "./ui";
 
@@ -34,7 +35,7 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
           return (
             <Row
               key={machine.id}
-              title={machine.name}
+              title={machineLabel(machine, machines)}
               dim={summary.dot === "down"}
               detail={
                 <View style={styles.detailRow}>
@@ -51,7 +52,7 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
                 onClose();
                 if (!here) onPick(machine);
               }}
-              accessibilityLabel={`${machine.name}, ${summary.text}${here ? ", current" : ""}`}
+              accessibilityLabel={`${displayName(machine)}, ${summary.text}${here ? ", current" : ""}`}
             />
           );
         })}

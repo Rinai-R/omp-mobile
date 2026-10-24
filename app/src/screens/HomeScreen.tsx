@@ -5,9 +5,10 @@ import { createSession, deleteSession } from "../api";
 import { GradientFill, LiveDot, PulseDot, Wordmark } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
 import { SessionGroups, useMachineSessions } from "../components/SessionList";
-import { shortName } from "../components/SessionSwitcher";
+import { displayName } from "../machines";
 import { Banner, Button, Field, IconButton, Sheet } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
+import { hostOf } from "../machines";
 import { attentionCount, folderOf, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { dropTranscript } from "../transcripts";
@@ -30,10 +31,6 @@ function osName(os: string): string {
   if (os === "win32") return "Windows";
   if (os === "linux") return "Linux";
   return os;
-}
-
-function hostOf(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/:\d+$/, "");
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
@@ -156,7 +153,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           </View>
           <View style={styles.machineText}>
             <Text style={styles.machineName} numberOfLines={1}>
-              {shortName(machine.name)}
+              {displayName(machine)}
             </Text>
             <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>
               {detail}
@@ -186,7 +183,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
         {sessions === undefined ? (
           error !== null ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Can't reach {shortName(machine.name)}</Text>
+              <Text style={styles.emptyTitle}>Can't reach {displayName(machine)}</Text>
               <Text style={styles.emptyBody}>{error}</Text>
               <View style={styles.emptyAction}>
                 <Button label="Try again" kind="plain" onPress={() => void refresh()} />
@@ -205,7 +202,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
               <ChatGlyph size={22} color={colors.fgMuted} />
             </View>
             <Text style={styles.emptyTitle}>No sessions yet</Text>
-            <Text style={styles.emptyBody}>Start one and OMP runs it on {shortName(machine.name)}.</Text>
+            <Text style={styles.emptyBody}>Start one and OMP runs it on {displayName(machine)}.</Text>
           </View>
         ) : (
           <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={confirmDelete} />
@@ -224,7 +221,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
       </Pressable>
 
       <Sheet visible={creating} title="New session" onClose={() => setCreating(false)}>
-        <Text style={styles.hint}>OMP starts a new session on {shortName(machine.name)}.</Text>
+        <Text style={styles.hint}>OMP starts a new session on {displayName(machine)}.</Text>
         <Field label="Working directory" value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
         {recent.length > 0 ? (
           <View style={styles.recent}>

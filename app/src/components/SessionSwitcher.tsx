@@ -12,6 +12,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { machineLabel } from "../machines";
 import { summaryOf, type Probe } from "../probe";
 import { attentionCount, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -117,7 +118,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
                   >
                     <LiveDot color={dot === "online" ? colors.ok : dot === "down" ? colors.fgGhost : colors.warn} size={7} />
                     <Text style={on ? styles.tabTextOn : styles.tabText} numberOfLines={1}>
-                      {shortName(item.name)}
+                      {machineLabel(item, machines)}
                     </Text>
                     {on && counts.waiting > 0 ? (
                       <View style={styles.badge}>
@@ -156,10 +157,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
   );
 }
 
-/** "RinaideMacBook-Pro.local" → "RinaideMacBook-Pro": the .local suffix says nothing on a tab. */
-export function shortName(name: string): string {
-  return name.replace(/\.(local|lan|home)$/i, "");
-}
+export { shortName } from "../machines";
 
 function createStyles(c: Palette) {
   const tab = {
@@ -172,7 +170,7 @@ function createStyles(c: Palette) {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
   } as const;
-  const tabText = { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgMuted, maxWidth: 160 } as const;
+  const tabText = { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgMuted, maxWidth: 260 } as const;
   return {
     root: { flex: 1, justifyContent: "flex-end" },
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },

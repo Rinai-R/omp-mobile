@@ -24,10 +24,10 @@ import { ArrowDownGlyph, BackGlyph, ChevronDownGlyph, WarningGlyph } from "../co
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
-import { shortName } from "../components/SessionSwitcher";
 import { TranscriptRow } from "../components/Transcript";
 import { Banner, IconButton } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
+import { displayName } from "../machines";
 import { layoutRows, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { todoPhases } from "../todos";
@@ -103,6 +103,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const itemsRef = useRef<Item[]>([]);
   /** A prompt the daemon has not accepted yet, restored to the box if it refuses it. */
   const pending = useRef<{ text: string; attachments: Attachment[] } | null>(null);
+  /** Effects follow the computer by how it is reached, not by object: a rename must not reconnect. */
+  const link = `${machine.id}\n${machine.url}\n${machine.token}`;
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
 
   // The saved transcript shows at once, offline too, until the daemon's snapshot arrives.
   useEffect(() => {
@@ -117,13 +121,13 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   useEffect(() => {
     let cancelled = false;
-    void daemonFeatures(machine).then((list) => {
+    void daemonFeatures(machineRef.current).then((list) => {
       if (!cancelled) setFeatures(list);
     });
     return () => {
       cancelled = true;
     };
-  }, [machine]);
+  }, [link]);
 
   // Saved once the chat has been quiet for a moment (not on every streamed delta), and on leaving it.
   useEffect(() => {
@@ -141,6 +145,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   useEffect(() => {
     let asking = false;
+    const machine = machineRef.current;
     const socket = new SessionSocket(
       machine,
       initialSession.id,
@@ -249,7 +254,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       socket.close();
       socketRef.current = null;
     };
-  }, [initialSession.id, machine]);
+  }, [initialSession.id, link]);
 
   // This session is on screen: its background notifications are cleared and not posted.
   useEffect(() => {
@@ -418,7 +423,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
               </Text>
               <ChevronDownGlyph size={14} color={colors.fgGhost} />
             </View>
-            <View style={styles.subtitleRow} accessible accessibilityLabel={`${machine.name}, ${status}`}>
+            <View style={styles.subtitleRow} accessible accessibilityLabel={`${displayName(machine)}, ${status}`}>
               {status === "working" ? (
                 <GradientDot size={7} />
               ) : status === "live" ? (
@@ -429,7 +434,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <PulseDot color={colors.warn} size={7} />
               )}
               <Text style={styles.subtitle} numberOfLines={1}>
-                {shortName(machine.name)} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
+                {displayName(machine)} · {status === "connecting" ? "connecting…" : status === "failed" ? "cannot open" : folder}
               </Text>
             </View>
           </Pressable>
@@ -478,7 +483,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
               </View>
               <Text style={styles.emptyTitle}>{connected ? "Ask OMP anything" : "Connecting…"}</Text>
               <Text style={styles.emptyBody}>
-                It runs on {shortName(machine.name)} in {folder}. Tool calls and approvals appear here as it works.
+                It runs on {displayName(machine)} in {folder}. Tool calls and approvals appear here as it works.
               </Text>
             </View>
           ) : null}

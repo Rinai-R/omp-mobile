@@ -20,8 +20,13 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
   /** The daemon has answered for this machine: a saved list arriving later must not replace it. */
   const fetched = useRef<string | null>(null);
   const machineId = machine?.id;
+  // A probe or a rename hands in a new object for the same computer: follow it without starting over.
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
+  const link = machine === undefined ? "" : `${machine.id}\n${machine.url}\n${machine.token}`;
 
   const refresh = useCallback(async () => {
+    const machine = machineRef.current;
     if (machine === undefined) return;
     setLoading(true);
     try {
@@ -35,7 +40,8 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
     } finally {
       setLoading(false);
     }
-  }, [machine]);
+    // `link` changes only when the computer or how to reach it does.
+  }, [link]);
 
   useEffect(() => {
     if (machineId === undefined || !active) return undefined;

@@ -12,6 +12,8 @@ export interface Machine {
   cwd: string;
   /** When a probe last reached the daemon (epoch ms); absent until one has. */
   lastSeen?: number;
+  /** The user's own name for this computer on this phone; the host name when absent. */
+  label?: string;
 }
 
 export interface SessionSummary {

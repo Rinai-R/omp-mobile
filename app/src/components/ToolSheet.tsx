@@ -156,7 +156,7 @@ export function ToolSheet({
   }, [colors, cwd, machine, step, styles]);
 
   return (
-    <Sheet visible={step !== null} title={content?.title ?? ""} onClose={onClose}>
+    <Sheet visible={step !== null} title={content?.title ?? ""} onClose={onClose} scroll={false}>
       <ScrollView style={{ maxHeight: height * 0.72 }} contentContainerStyle={styles.scroll}>
         {content?.body}
       </ScrollView>

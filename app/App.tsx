@@ -307,6 +307,13 @@ export default function App(): ReactNode {
     [persist],
   );
 
+  const renameMachine = useCallback(
+    (machine: Machine, label: string | undefined) => {
+      persist(machinesRef.current.map((item) => (item.id === machine.id ? { ...item, label } : item)));
+    },
+    [persist],
+  );
+
   const updateSettings = useCallback((next: Settings) => {
     setSettings(next);
     void saveSettings(next);
@@ -346,6 +353,8 @@ export default function App(): ReactNode {
     setRoute({ kind: "chat", machine, session: placeholderSession(machine, attention.sessionId, attention.sessionTitle) });
   }, []);
 
+  /** The stored machine a route names: routes keep a copy, and a rename or probe updates the stored one. */
+  const liveMachine = (machine: Machine): Machine => machines.find((item) => item.id === machine.id) ?? machine;
   let content: ReactNode;
   if (!restored) {
     content = (
@@ -357,7 +366,7 @@ export default function App(): ReactNode {
     content = (
       <ChatScreen
         key={`${route.machine.id}\n${route.session.id}`}
-        machine={route.machine}
+        machine={liveMachine(route.machine)}
         session={route.session}
         onBack={() => goHome(route.machine)}
         onSwitch={() => setSwitcher({ machine: route.machine, sessionId: route.session.id })}
@@ -368,7 +377,7 @@ export default function App(): ReactNode {
       <HomeScreen
         // Another computer's home starts fresh: its list and probe state.
         key={route.machine.id}
-        machine={route.machine}
+        machine={liveMachine(route.machine)}
         probe={probes.get(route.machine.id)}
         onOpen={openChat}
         onPickMachine={() => setMachinePicker(true)}
@@ -405,7 +414,9 @@ export default function App(): ReactNode {
         onAddRequestHandled={clearAddRequest}
         onOpen={goHome}
         onRemove={removeMachine}
+        onRename={renameMachine}
         onSettings={() => setRoute({ kind: "settings", from: null })}
+        onBack={machines[0] === undefined ? undefined : () => goHome(machinesRef.current.find((item) => item.id === settings.lastMachineId) ?? machines[0] as Machine)}
         refreshing={refreshing}
         onRefresh={() => {
           setRefreshing(true);
@@ -415,7 +426,7 @@ export default function App(): ReactNode {
     );
   }
 
-  const homeMachine = route.kind === "home" || route.kind === "chat" ? route.machine : undefined;
+  const homeMachine = route.kind === "home" || route.kind === "chat" ? liveMachine(route.machine) : undefined;
 
   return (
     <SafeAreaProvider>

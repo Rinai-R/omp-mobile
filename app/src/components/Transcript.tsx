@@ -383,7 +383,7 @@ function AllSteps({
   const { height } = useWindowDimensions();
   const count = toolCount(steps);
   return (
-    <Sheet visible={visible} title={`${count} step${count === 1 ? "" : "s"}`} onClose={onClose}>
+    <Sheet visible={visible} title={`${count} step${count === 1 ? "" : "s"}`} onClose={onClose} scroll={false}>
       {visible ? (
         <FlatList
           style={{ maxHeight: height * 0.72 }}

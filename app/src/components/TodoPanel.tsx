@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
 import { todoProgress, type TodoPhase, type TodoTask } from "../todos";
-import { MONO, radius, useStyles, type Palette } from "../theme";
+import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
 import { Disclosure } from "./ui";
 
 /** The mark a task carries: done, running, waiting, blocked, dropped. */
@@ -145,7 +145,7 @@ function createStyles(c: Palette) {
     },
     task: { flexDirection: "row", gap: 7, alignItems: "flex-start" },
     markSlot: { width: 12, alignItems: "center", justifyContent: "center", minHeight: 17 },
-    markDone: { fontSize: 11, lineHeight: 15, color: c.ok },
+    markDone: { fontFamily: SANS, fontSize: 11, lineHeight: 15, color: c.ok },
     markActive: { width: 6, height: 6, borderRadius: 3, backgroundColor: c.accent },
     markPending: {
       width: 5,
@@ -154,8 +154,8 @@ function createStyles(c: Palette) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.fgFaint,
     },
-    markBlocked: { fontSize: 11, lineHeight: 15, color: c.warn },
-    markAbandoned: { fontSize: 11, lineHeight: 15, color: c.fgFaint },
+    markBlocked: { fontFamily: SANS, fontSize: 11, lineHeight: 15, color: c.warn },
+    markAbandoned: { fontFamily: SANS, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     taskDone: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint, textDecorationLine: "line-through" },
     taskActive: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fg },
     taskBlocked: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.warn },
