@@ -67,3 +67,9 @@ test("a session waiting on an OMP question says so in its summary", async () => 
   assert.equal(entry.summary().waiting, 1);
   assert.equal(entry.summary().status, "streaming");
 });
+
+test("live session titles drop the Nerd Font icon OMP puts in names", async () => {
+  const { titleOf } = await import("../src/server.mjs");
+  assert.equal(titleOf([], { sessionName: "\u{F0A7A}  Fix   the build" }, "/w/proj"), "Fix the build");
+  assert.equal(titleOf([{ role: "user", content: "hello there" }], { sessionName: "\uE62B" }, "/w/proj"), "hello there");
+});

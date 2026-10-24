@@ -56,3 +56,45 @@ test("starts, hydrates a session, strips the system prompt, and streams events",
   assert.equal(events.at(-1).message.content, "Hello from fake");
   rpc.close();
 });
+
+/** A fake omp that answers `ready`, then reacts to signals as `onSignal` says. */
+function signalOmp(onSignal) {
+  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-test-"));
+  const path = join(dir, "omp");
+  writeFileSync(
+    path,
+    `#!${process.execPath}
+${onSignal}
+process.stdin.resume();
+process.stdout.write(JSON.stringify({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1] }) + "\\n");
+setInterval(() => undefined, 1000);
+`,
+    { mode: 0o755 },
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+test("close leaves on SIGINT, the way Ctrl+C does", async () => {
+  const rpc = new RpcSession({ cwd: tmpdir(), ompBin: signalOmp(`process.on("SIGINT", () => process.exit(0));`) });
+  await rpc.start();
+  assert.equal(await rpc.close({ sigint: 2_000, sigterm: 2_000 }), "SIGINT");
+});
+
+test("close falls back to SIGTERM and never sends SIGKILL", async () => {
+  const term = signalOmp(`process.on("SIGINT", () => undefined); process.on("SIGTERM", () => process.exit(0));`);
+  const rpc = new RpcSession({ cwd: tmpdir(), ompBin: term });
+  await rpc.start();
+  assert.equal(await rpc.close({ sigint: 200, sigterm: 2_000 }), "SIGTERM");
+
+  const deaf = signalOmp(`process.on("SIGINT", () => undefined); process.on("SIGTERM", () => undefined);`);
+  const stuck = new RpcSession({ cwd: tmpdir(), ompBin: deaf });
+  await stuck.start();
+  assert.equal(await stuck.close({ sigint: 100, sigterm: 100 }), "running");
+  // Still alive: nothing killed it. The test cleans up after itself.
+  assert.equal(stuck.child.exitCode, null);
+  assert.equal(stuck.child.signalCode, null);
+  // A second close reports the same attempt instead of signalling again.
+  assert.equal(await stuck.close(), "running");
+  process.kill(stuck.child.pid, "SIGKILL");
+});

@@ -12,6 +12,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Thinking no longer disappears when a message ends or a chat is reopened. A reply's thinking folds into a "Thought for 12s" row that opens inline; thoughts between tool calls stay in their activity card (#27).
 - An activity card watched while it ran stays open after the turn ends, and "Show all" lists every step inline; tap a step for its details as before (#27).
 - Larger user bubbles and softer notices in the transcript (#27).
+- The daemon closes its OMP processes the way Ctrl+C does (SIGINT, then SIGTERM, waiting for each) and no longer kills them, so a turn being saved is not cut off; on exit it waits for them to save their sessions (#33).
+- Live session titles no longer start with an empty box where OMP put a Nerd Font icon (#33).
 
 ### 中文
 
@@ -23,6 +25,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - 消息结束或重新打开对话后，思考内容不再消失。回复的思考折叠为一行“思考了 12 秒”，点开即在原处展开；工具调用之间的思考留在所属的活动卡片里（#27）。
 - 运行时看着的活动卡片在这一轮结束后保持展开，“显示全部”会在卡片内列出所有步骤；点某一步仍可查看详情（#27）。
 - 对话中用户气泡字号更大，提示条更柔和（#27）。
+- daemon 关闭自己的 OMP 进程时改用 Ctrl+C 的方式（先 SIGINT，再 SIGTERM，每次都等待），不再强杀，正在保存的回合不会被截断；退出时会等它们保存好会话（#33）。
+- 运行中会话的标题不再以空白方块开头（那是 OMP 放的 Nerd Font 图标）（#33）。
 
 ## v0.3.0
 

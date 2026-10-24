@@ -12,6 +12,8 @@ import { createInterface } from "node:readline";
 import { RpcFrameDecoder, supportsProtocolV2 } from "./rpc-frame.mjs";
 
 const START_TIMEOUT_MS = 45_000;
+/** How long omp gets to leave after `SIGINT`, and again after `SIGTERM`, when the daemon closes it. */
+const CLOSE_WAIT_MS = 10_000;
 
 /**
  * The environment without `BUN_BE_BUN`: /mobile starts the daemon under omp's
@@ -403,16 +405,47 @@ export class RpcSession extends EventEmitter {
     this.#settle(id, answer.cancelled === true ? "cancelled" : "answered");
   }
 
-  close() {
-    if (this.closed) return;
+  /**
+   * Stop the omp child the way Ctrl+C does: `SIGINT`, then `SIGTERM`, each
+   * followed by a wait. OMP routes both through its teardown (the turn is
+   * aborted, the session file flushed, its lock released). Never `SIGKILL`: a
+   * process cut off mid-write can leave a session half saved. Resolves to how
+   * it left, or `"running"` when it ignored both signals.
+   * @param {{sigint?: number, sigterm?: number}} [waits] milliseconds after each signal
+   * @returns {Promise<"exited" | "SIGINT" | "SIGTERM" | "running">}
+   */
+  close(waits = {}) {
+    if (this.closing !== undefined) return this.closing;
     this.closed = true;
     for (const pending of this.pending.values()) pending.reject(new Error("omp session closed"));
     this.pending.clear();
-    this.child?.kill("SIGTERM");
-    setTimeout(() => {
-      if (this.child !== undefined && this.child.exitCode === null) this.child.kill("SIGKILL");
-    }, 2_000).unref();
+    const child = this.child;
+    this.closing = (async () => {
+      if (child === undefined || child.exitCode !== null || child.signalCode !== null) return "exited";
+      const exited = new Promise((resolveExit) => child.once("exit", () => resolveExit(true)));
+      for (const [signal, wait] of /** @type {const} */ ([
+        ["SIGINT", waits.sigint ?? CLOSE_WAIT_MS],
+        ["SIGTERM", waits.sigterm ?? CLOSE_WAIT_MS],
+      ])) {
+        try {
+          child.kill(signal);
+        } catch {
+          return "exited";
+        }
+        let timer;
+        const left = await Promise.race([
+          exited,
+          new Promise((resolveWait) => {
+            timer = setTimeout(() => resolveWait(false), wait);
+          }),
+        ]);
+        clearTimeout(timer);
+        if (left) return signal;
+      }
+      return "running";
+    })();
+    return this.closing;
   }
 }
 
-export { REQUEST_TIMEOUT_MS, START_TIMEOUT_MS, MESSAGE_PAGE_LIMIT };
+export { REQUEST_TIMEOUT_MS, START_TIMEOUT_MS, MESSAGE_PAGE_LIMIT, CLOSE_WAIT_MS };

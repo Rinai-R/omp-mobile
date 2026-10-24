@@ -42,7 +42,7 @@ export function promptTitle(content) {
  * A title as one line of at most 80 characters. OMP's title cards start with
  * a Nerd Font icon (private-use code points) a phone font has no glyph for.
  */
-function oneLine(text) {
+export function oneLine(text) {
   return text
     .replace(/[\uE000-\uF8FF\u{F0000}-\u{10FFFF}]/gu, "")
     .trim()
