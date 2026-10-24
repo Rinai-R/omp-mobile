@@ -364,7 +364,7 @@ export function Row({
   );
 }
 
-/** An empty list: the icon in a gradient-edged tile, a title, a line of body and one primary action. */
+/** An empty list: the icon in a gradient-edged tile, a title, an optional line of body and the actions. */
 export function EmptyState({
   icon,
   title,
@@ -373,7 +373,7 @@ export function EmptyState({
 }: {
   icon: ReactNode;
   title: string;
-  body: string;
+  body?: string;
   action?: ReactNode;
 }): ReactNode {
   const styles = useStyles(createStyles);
@@ -381,7 +381,7 @@ export function EmptyState({
     <View style={styles.empty}>
       <GradientTile>{icon}</GradientTile>
       <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptyBody}>{body}</Text>
+      {body !== undefined ? <Text style={styles.emptyBody}>{body}</Text> : null}
       {action !== undefined ? <View style={styles.emptyAction}>{action}</View> : null}
     </View>
   );
@@ -510,7 +510,7 @@ export function Sheet({
         >
           <View style={styles.grab} />
           <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle} numberOfLines={1}>
+            <Text style={styles.sheetTitle} numberOfLines={2}>
               {shown.current.title}
             </Text>
             <IconButton onPress={onClose} label={t("common.close")}>
@@ -532,6 +532,51 @@ export function Sheet({
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
+  );
+}
+
+/**
+ * A confirmation in the app's sheet style: a title, one short sentence, then
+ * the secondary and the primary action side by side. `danger` tints the
+ * primary for an action that cannot be undone from the phone.
+ */
+export function ConfirmSheet({
+  visible,
+  title,
+  body,
+  action,
+  danger = false,
+  onConfirm,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  body?: string;
+  action: string;
+  danger?: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}): ReactNode {
+  const styles = useStyles(createStyles);
+  return (
+    <Sheet visible={visible} title={title} onClose={onClose}>
+      {body !== undefined ? <Text style={styles.confirmBody}>{body}</Text> : null}
+      <View style={styles.confirmRow}>
+        <View style={styles.confirmButton}>
+          <Button label={t("common.cancel")} kind="plain" onPress={onClose} />
+        </View>
+        <View style={styles.confirmButton}>
+          <Button
+            label={action}
+            kind={danger ? "danger" : "primary"}
+            onPress={() => {
+              onClose();
+              onConfirm();
+            }}
+          />
+        </View>
+      </View>
+    </Sheet>
   );
 }
 
@@ -748,6 +793,9 @@ function createStyles(c: Palette) {
     sheetBody: { gap: 14 },
     grab: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, backgroundColor: c.borderStrong },
     sheetHeader: { flexDirection: "row", alignItems: "center", marginLeft: 2, marginRight: -10, marginTop: -6 },
+    confirmBody: { fontFamily: SANS, fontSize: 15, lineHeight: 22, color: c.fgMuted, marginHorizontal: 2, marginTop: -4 },
+    confirmRow: { flexDirection: "row", gap: 10, marginTop: 4 },
+    confirmButton: { flex: 1 },
     sheetTitle: { flex: 1, fontFamily: SANS, fontSize: 19, lineHeight: 25, fontWeight: "600", letterSpacing: -0.4, color: c.fg },
   } as const;
 }

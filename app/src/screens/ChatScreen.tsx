@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Alert,
   AppState,
   FlatList,
   Keyboard,
@@ -27,7 +26,7 @@ import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptRow } from "../components/Transcript";
-import { Banner, IconButton } from "../components/ui";
+import { Banner, ConfirmSheet, IconButton } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, type Row, type Step } from "../rows";
@@ -58,23 +57,17 @@ const ASK_AFTER = 3;
 /** How far from the newest message (px) still counts as "at the bottom". */
 const NEAR_BOTTOM = 160;
 
-/** What the failure card says for the status the daemon answered with. */
-function failureText(failure: OpenFailure): { title: string; body: string } {
+/** What the failure card says for the status the daemon answered with; the status line under it carries the detail. */
+function failureText(failure: OpenFailure): { title: string; body?: string } {
   switch (failure.status) {
     case 404:
-      return { title: t("chat.failure.gone.title"), body: t("chat.failure.gone.body") };
+      return { title: t("chat.failure.gone.title") };
     case 409:
-      return {
-        title: t("chat.failure.terminal.title"),
-        body: t("chat.failure.terminal.body"),
-      };
+      return { title: t("chat.failure.terminal.title"), body: t("chat.failure.terminal.body") };
     case 410:
-      return { title: t("chat.failure.fileGone.title"), body: t("chat.failure.fileGone.body") };
+      return { title: t("chat.failure.fileGone.title") };
     default:
-      return {
-        title: t("chat.failure.other.title"),
-        body: t("chat.failure.other.body"),
-      };
+      return { title: t("chat.failure.other.title") };
   }
 }
 
@@ -106,6 +99,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   /** A takeover of a session held on the computer is in flight, or what it failed with. */
   const [taking, setTaking] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
+  const [confirmTake, setConfirmTake] = useState(false);
   /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
   const live = useRef(false);
   const itemsRef = useRef<Item[]>([]);
@@ -363,30 +357,21 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
 
   /** Take the session from the omp that holds it on the computer, once the user confirmed; then open it here. */
   const takeOver = useCallback(() => {
-    Alert.alert(t("chat.takeover.confirmTitle"), confirmBody(failure?.owner), [
-      { text: t("common.cancel"), style: "cancel" },
-      {
-        text: t("chat.takeover.action"),
-        style: "destructive",
-        onPress: () => {
-          setTaking(true);
-          setTakeError(null);
-          void takeOverSession(machineRef.current, initialSession.id)
-            .then(() => {
-              setFailure(null);
-              socketRef.current?.reconnect();
-            })
-            .catch((cause: unknown) => {
-              setTakeError(cause instanceof Error ? cause.message : String(cause));
-              if (cause instanceof HttpError && cause.status === 409 && cause.owner !== undefined) {
-                setFailure({ status: 409, error: cause.message, owner: cause.owner });
-              }
-            })
-            .finally(() => setTaking(false));
-        },
-      },
-    ]);
-  }, [failure?.owner, initialSession.id]);
+    setTaking(true);
+    setTakeError(null);
+    void takeOverSession(machineRef.current, initialSession.id)
+      .then(() => {
+        setFailure(null);
+        socketRef.current?.reconnect();
+      })
+      .catch((cause: unknown) => {
+        setTakeError(cause instanceof Error ? cause.message : String(cause));
+        if (cause instanceof HttpError && cause.status === 409 && cause.owner !== undefined) {
+          setFailure({ status: 409, error: cause.message, owner: cause.owner });
+        }
+      })
+      .finally(() => setTaking(false));
+  }, [initialSession.id]);
 
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
   const rows = useMemo(() => layoutRows(items).reverse(), [items]);
@@ -453,9 +438,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const firstPrompt = items.find((item) => item.kind === "message" && item.role === "user" && item.text.trim() !== "");
   const title =
     session.title === folder && firstPrompt?.kind === "message" ? firstPrompt.text.replace(/\s+/g, " ").trim().slice(0, 80) : session.title;
-  const status = failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
   const failed = failure === null ? null : failureText(failure);
   const offerTakeover = failure !== null && canTakeOver(failure.status, features);
+  // A session a terminal holds is not broken: the card under the header says where it is and offers to take it.
+  const status = offerTakeover ? "held" : failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
 
   return (
     <View style={styles.root}>
@@ -489,6 +475,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <LiveDot color={colors.ok} size={7} />
               ) : status === "failed" ? (
                 <LiveDot color={colors.err} size={7} />
+              ) : status === "held" ? (
+                <LiveDot color={colors.warn} size={7} />
               ) : (
                 <PulseDot color={colors.warn} size={7} />
               )}
@@ -518,7 +506,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <Text style={styles.failureBody}>{t("chat.takeover.working")}</Text>
               </View>
             ) : (
-              <Pressable onPress={takeOver} style={({ pressed }) => [styles.failureButton, pressed && styles.titlePressed]} accessibilityRole="button">
+              <Pressable onPress={() => setConfirmTake(true)} style={({ pressed }) => [styles.failureButton, pressed && styles.titlePressed]} accessibilityRole="button">
                 <Text style={styles.failureButtonText}>{t("chat.takeover.action")}</Text>
               </Pressable>
             )}
@@ -527,7 +515,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           <View style={styles.failure}>
             <WarningGlyph size={20} color={colors.warn} />
             <Text style={styles.failureTitle}>{failed.title}</Text>
-            <Text style={styles.failureBody}>{failed.body}</Text>
+            {failed.body !== undefined ? <Text style={styles.failureBody}>{failed.body}</Text> : null}
             <View style={styles.failureCode}>
               <Text style={styles.failureCodeText} selectable>
                 {failure.status} · {failure.error}
@@ -561,13 +549,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           {rows.length === 0 && failure === null ? (
             // Outside the list: an inverted list flips its children on both axes on Android.
             <View style={styles.emptyOverlay} pointerEvents="none">
-              <View style={styles.emptyMark}>
+              <View style={connected ? styles.emptyMark : styles.emptyMarkWaiting}>
                 <BrandMark size={26} />
               </View>
-              <Text style={styles.emptyTitle}>{connected ? t("chat.empty.ready") : t("chat.empty.connecting")}</Text>
-              <Text style={styles.emptyBody}>
-                {t("chat.empty.body", { machine: displayName(machine), folder })}
-              </Text>
             </View>
           ) : null}
           {away ? (
@@ -614,6 +598,15 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         onSelectModel={selectModel}
         onSelectLevel={selectLevel}
       />
+      <ConfirmSheet
+        visible={confirmTake}
+        title={t("chat.takeover.confirmTitle")}
+        body={confirmBody(failure?.owner)}
+        action={t("chat.takeover.action")}
+        danger={failure?.owner?.busy === true}
+        onConfirm={takeOver}
+        onClose={() => setConfirmTake(false)}
+      />
       <ToolSheet step={openStep} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
     </View>
   );
@@ -638,6 +631,16 @@ function useKeyboardVisible(): boolean {
 }
 
 function createStyles(c: Palette) {
+  const emptyMark = {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: c.panel,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.border,
+  } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
     header: {
@@ -661,18 +664,8 @@ function createStyles(c: Palette) {
     list: { paddingTop: 12, paddingBottom: 8 },
     listDim: { opacity: 0.5 },
     emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
-    emptyMark: {
-      width: 56,
-      height: 56,
-      borderRadius: 18,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.panel,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-    },
-    emptyTitle: { fontFamily: SANS, fontSize: 17, lineHeight: 22, fontWeight: "600", letterSpacing: -0.3, color: c.fg, marginTop: 16 },
-    emptyBody: { fontFamily: SANS, fontSize: 13.5, lineHeight: 20, color: c.fgFaint, marginTop: 6, textAlign: "center" },
+    emptyMark,
+    emptyMarkWaiting: { ...emptyMark, opacity: 0.45 },
     jump: {
       position: "absolute",
       alignSelf: "center",

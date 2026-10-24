@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Alert, RefreshControl, ScrollView, Text, View } from "react-native";
+import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { pairMachine } from "../api";
-import { ComputerGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
+import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
 import { MachineSheet } from "../components/MachineSheet";
 import {
   Button,
+  ConfirmSheet,
   EmptyState,
   Field,
   Group,
   Header,
   IconButton,
   Row,
-  SectionHeader,
   Sheet,
   StateDot,
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
 import { summaryOf, type Probe } from "../probe";
-import { SANS, MONO, useColors, useStyles, type Palette } from "../theme";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
@@ -77,6 +77,8 @@ export function MachinesScreen({
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
+  /** The machine whose removal is being confirmed. */
+  const [removing, setRemoving] = useState<Machine | null>(null);
 
   const close = useCallback(() => {
     setAdding(false);
@@ -141,15 +143,7 @@ export function MachinesScreen({
     }
   }, [machines, onAdd, token, url]);
 
-  const confirmRemove = useCallback(
-    (machine: Machine) => {
-      Alert.alert(t("machines.remove.title", { name: displayName(machine) }), t("machines.remove.body"), [
-        { text: t("common.cancel"), style: "cancel" },
-        { text: t("common.remove"), style: "destructive", onPress: () => onRemove(machine) },
-      ]);
-    },
-    [onRemove],
-  );
+  const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
   const openAdd = useCallback(() => setAdding(true), []);
   // "seen 5 min ago" is recomputed on each render; each probe round re-renders the list.
@@ -195,7 +189,7 @@ export function MachinesScreen({
           />
         ) : (
           <>
-            <SectionHeader title={t("machines.title")} meta={onlineMeta(machines, probes)} />
+            <View style={styles.top} />
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
@@ -214,6 +208,12 @@ export function MachinesScreen({
                       </View>
                     }
                     leading={<ComputerGlyph size={18} color={summary.dot === "down" ? colors.fgFaint : colors.fgMuted} />}
+                    trailing={
+                      <IconButton onPress={() => setSheet(machine)} label={t("machines.details", { name: machineLabel(machine, machines) })}>
+                        <MoreGlyph size={18} color={colors.fgFaint} />
+                      </IconButton>
+                    }
+                    chevron={false}
                     last={index === machines.length - 1}
                     onPress={() => onOpen(machine)}
                     onLongPress={() => setSheet(machine)}
@@ -222,7 +222,6 @@ export function MachinesScreen({
                 );
               })}
             </Group>
-            <Text style={styles.footnote}>{t("machines.footnote")}</Text>
           </>
         )}
       </ScrollView>
@@ -239,12 +238,19 @@ export function MachinesScreen({
         onClose={closeSheet}
       />
 
+      <ConfirmSheet
+        visible={removing !== null}
+        title={removing === null ? "" : t("machines.remove.title", { name: displayName(removing) })}
+        body={t("machines.remove.body")}
+        action={t("common.remove")}
+        danger
+        onConfirm={() => {
+          if (removing !== null) onRemove(removing);
+        }}
+        onClose={() => setRemoving(null)}
+      />
+
       <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
-        <Text style={styles.hint}>
-          {fromLink
-            ? t("machines.addSheet.fromLink")
-            : t("machines.addSheet.hint")}
-        </Text>
         <Field
           label={t("machines.addSheet.address")}
           value={url}
@@ -256,7 +262,6 @@ export function MachinesScreen({
           label={t("machines.addSheet.token")}
           value={token}
           onChangeText={setToken}
-          placeholder={t("machines.addSheet.tokenPlaceholder")}
           secure
         />
         {error !== null ? <Text style={styles.error}>{error}</Text> : null}
@@ -271,13 +276,6 @@ export function MachinesScreen({
   );
 }
 
-/** "2/3 online" once any probe has answered; nothing before. */
-function onlineMeta(machines: Machine[], probes: ReadonlyMap<string, Probe>): string | undefined {
-  if (probes.size === 0) return undefined;
-  const online = machines.filter((machine) => probes.get(machine.id)?.state === "online").length;
-  return t("machines.online", { online, total: machines.length });
-}
-
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
@@ -286,8 +284,7 @@ function createStyles(c: Palette) {
     emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
     state: { flexDirection: "row", alignItems: "center", gap: 5 },
-    footnote: { fontFamily: SANS, fontSize: 12, lineHeight: 17, paddingTop: 10, paddingHorizontal: 4, color: c.fgFaint },
-    hint: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.fgMuted, marginHorizontal: 2 },
+    top: { height: 16 },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }

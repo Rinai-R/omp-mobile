@@ -22,6 +22,15 @@ test("computers with the same name are told apart by their address", () => {
   assert.equal(hostOf("http://box.tail1.ts.net:7390/x"), "box.tail1.ts.net");
 });
 
+test("computers with the same name on the same host are told apart by their port", () => {
+  const one = m("http://10.0.2.2:7391", "mac.local");
+  const two = m("http://10.0.2.2:7392", "mac.local");
+  const three = m("http://100.68.127.23:7390", "mac.local");
+  assert.equal(machineLabel(one, [one, two, three]), "mac · 10.0.2.2:7391");
+  assert.equal(machineLabel(two, [one, two, three]), "mac · 10.0.2.2:7392");
+  assert.equal(machineLabel(three, [one, two, three]), "mac · 100.68.127.23");
+});
+
 test("a typed name is trimmed to one bounded line; empty restores the host name", () => {
   assert.equal(cleanLabel("  Work\n Mac  "), "Work Mac");
   assert.equal(cleanLabel("   "), undefined);

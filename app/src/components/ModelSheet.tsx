@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -149,13 +150,13 @@ export function ModelSheet({
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
         >
-          {loading ? <Text style={styles.note}>{t("model.loadingCatalog")}</Text> : null}
+          {loading ? <ActivityIndicator style={styles.loading} color={colors.fgFaint} /> : null}
           {!loading && models !== null && groups.length === 0 ? (
             <Text style={styles.note}>{t("model.noMatch", { query: query.trim() })}</Text>
           ) : null}
           {groups.map(([provider, list]) => (
             <View key={provider}>
-              <SectionHeader title={provider} meta={`${list.length}`} />
+              <SectionHeader title={provider} />
               <Group>
                 {list.map((model, index) => {
                   const key = `${model.provider}/${model.id}`;
@@ -165,6 +166,7 @@ export function ModelSheet({
                       title={model.name}
                       detail={model.id === model.name ? undefined : model.id}
                       mono
+                      chevron={false}
                       last={index === list.length - 1}
                       onPress={() => onSelectModel(model)}
                       accessibilityLabel={t("common.pair", { label: model.name, value: model.provider })}
@@ -228,6 +230,7 @@ function createStyles(c: Palette) {
     searchInput: { fontFamily: SANS, height: 38, fontSize: 14, color: c.fg },
     error: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.err },
     list: { paddingBottom: 8, gap: 2 },
+    loading: { paddingVertical: 16 },
     note: { fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint, paddingHorizontal: 4, paddingVertical: 10 },
     trailing: { flexDirection: "row", alignItems: "center", gap: 8 },
     meta: { fontFamily: MONO, fontSize: 10.5, lineHeight: 14, color: c.fgFaint },

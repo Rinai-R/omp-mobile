@@ -84,11 +84,12 @@ export function ApprovalSheet({
       </Animated.View>
       <Animated.View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }, motion.sheet]}>
         <View style={styles.grab} />
-        <View style={styles.eyebrow}>
-          <GradientDot size={7} />
-          <Text style={styles.eyebrowText}>{t("approval.waiting")}</Text>
+        <View style={styles.head}>
+          <View style={styles.headDot}>
+            <GradientDot size={8} />
+          </View>
+          <Text style={styles.title}>{request.title}</Text>
         </View>
-        <Text style={styles.title}>{request.title}</Text>
         {request.message !== undefined ? <Text style={styles.message}>{request.message}</Text> : null}
 
         {request.method === "select" ? (
@@ -176,9 +177,9 @@ function createStyles(c: Palette) {
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
     sheet: { ...sheetSurface(c), maxHeight: "85%", gap: 12 },
     grab: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: c.borderStrong },
-    eyebrow: { flexDirection: "row", alignItems: "center", gap: 7, marginHorizontal: 2, marginTop: 4 },
-    eyebrowText: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
-    title: { fontFamily: SANS, fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg, marginHorizontal: 2 },
+    head: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginHorizontal: 2, marginTop: 6 },
+    headDot: { height: 24, justifyContent: "center" },
+    title: { flex: 1, fontFamily: SANS, fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
     message: { fontFamily: SANS, fontSize: 14, lineHeight: 21, color: c.fgMuted, marginHorizontal: 2 },
     options: { flexGrow: 0 },
     optionList: { gap: 6 },

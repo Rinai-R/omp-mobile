@@ -1,10 +1,11 @@
 import { useEffect, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { summaryOf, type Probe } from "../probe";
-import { MONO, useStyles, type Palette } from "../theme";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
+import { CheckGlyph } from "./icons";
 import { Button, Group, Row, Sheet, StateDot } from "./ui";
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
 /** Jump from one computer's sessions to another's without going back to the list. */
 export function MachineSwitcher({ visible, machines, current, probes, onProbe, onPick, onClose, onManage }: Props): ReactNode {
   const styles = useStyles(createStyles);
+  const colors = useColors();
   useEffect(() => {
     if (visible) onProbe();
   }, [onProbe, visible]);
@@ -46,7 +48,8 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
                   </Text>
                 </View>
               }
-              trailing={here ? <Text style={styles.here}>{t("switcher.here")}</Text> : undefined}
+              trailing={here ? <CheckGlyph size={16} color={colors.accent} /> : undefined}
+              selected={here}
               chevron={!here}
               last={index === machines.length - 1}
               onPress={() => {
@@ -80,6 +83,5 @@ function createStyles(c: Palette) {
   return {
     detailRow: { flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
-    here: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.accent },
   } as const;
 }

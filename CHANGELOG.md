@@ -14,6 +14,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Larger user bubbles and softer notices in the transcript (#27).
 - The daemon closes its OMP processes the way Ctrl+C does (SIGINT, then SIGTERM, waiting for each) and no longer kills them, so a turn being saved is not cut off; on exit it waits for them to save their sessions (#33).
 - Live session titles no longer start with an empty box where OMP put a Nerd Font icon (#33).
+- Less text on every screen; the layout says it instead. Gone: captions under the Notifications switch, the About tagline, the hints in the New session, Add computer and scanner screens, the footnote and online count on Computers, the chat's empty-state paragraph, and labels that repeated a title or an icon. Computers get a ⋯ button for their details instead of a long-press hint; the current computer is checked instead of marked "here" (#32).
+- Closing a session, removing a computer and taking a session over are confirmed in the app's own sheet instead of a system dialog (#32).
 
 ### 中文
 
@@ -27,6 +29,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - 对话中用户气泡字号更大，提示条更柔和（#27）。
 - daemon 关闭自己的 OMP 进程时改用 Ctrl+C 的方式（先 SIGINT，再 SIGTERM，每次都等待），不再强杀，正在保存的回合不会被截断；退出时会等它们保存好会话（#33）。
 - 运行中会话的标题不再以空白方块开头（那是 OMP 放的 Nerd Font 图标）（#33）。
+- 每个界面的文字都更少，由布局来说明。去掉了：通知开关下的说明、“关于”里的标语、新建会话 / 添加电脑 / 扫码页的提示、电脑列表的脚注和在线计数、对话空状态的说明段落，以及重复标题或图标含义的标签。电脑列表每行改为 ⋯ 按钮查看详情，不再提示长按；当前电脑用勾号标出，不再写“当前”（#32）。
+- 关闭会话、移除电脑和接管会话改用 App 自己的底部面板确认，不再弹系统对话框（#32）。
 
 ## v0.3.0
 

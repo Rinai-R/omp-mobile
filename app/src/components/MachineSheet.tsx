@@ -35,8 +35,8 @@ function InfoRow({ label, value, last = false }: { label: string; value: string;
 
 /**
  * A machine's details and actions: its one link (Tailscale) and its state,
- * where it is, the daemon's version and sessions, then Open and Remove from
- * this phone. Values are mono, labels quiet.
+ * its name on this phone, where it is and the daemon's version, then Open and
+ * Remove. Values are mono, labels quiet.
  */
 export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClose }: Props): ReactNode {
   const styles = useStyles(createStyles);
@@ -63,12 +63,6 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
     // The one link is in use exactly when it answers.
     const used = probe?.state === "online";
     const version = probe?.state === "online" ? probe.version : machine.version;
-    const sessions =
-      probe?.state === "online"
-        ? probe.running > 0
-          ? t("machine.sessionsRunning", { count: probe.sessionCount, running: probe.running })
-          : String(probe.sessionCount)
-        : "—";
     body = (
       <>
         <View style={styles.group}>
@@ -83,13 +77,13 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
         <Field label={t("machine.name")} value={name} onChangeText={setName} placeholder={shortName(machine.name)} />
         {changed ? <Button label={t("machine.saveName")} kind="plain" onPress={rename} /> : null}
         <View style={styles.group}>
-          <InfoRow label={t("machine.host")} value={machine.name} />
+          {/* The title is the host's own name unless the user renamed it: then the host is worth a row. */}
+          {machine.label !== undefined ? <InfoRow label={t("machine.host")} value={machine.name} /> : null}
           <InfoRow label={t("machine.address")} value={machine.url.replace(/^https?:\/\//, "")} />
-          <InfoRow label={t("machine.daemon")} value={version} />
-          <InfoRow label={t("machine.sessions")} value={sessions} last />
+          <InfoRow label={t("machine.daemon")} value={version} last />
         </View>
         <Button label={t("common.open")} onPress={open} />
-        <Button label={t("machine.remove")} kind="danger" onPress={remove} />
+        <Button label={t("common.remove")} kind="danger" onPress={remove} />
       </>
     );
   }
