@@ -71,6 +71,11 @@ export function promptImages(value) {
   });
 }
 
+/**
+ * What this daemon supports beyond protocol 1, for an app to offer only what
+ * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`.
+ */
+const FEATURES = ["prompt-images"];
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
 const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
@@ -395,6 +400,8 @@ class SessionEntry {
       updatedAt: this.updatedAt,
       sessionFile: this.state?.sessionFile,
       origin: "daemon",
+      // OMP questions and tool approvals still waiting for an answer: the session needs the user.
+      waiting: this.openRequests().length,
     };
   }
 
@@ -566,6 +573,7 @@ class Daemon {
         sessionCount: this.sessions.size,
         cwd: this.options.cwd,
         user: this.user || null,
+        features: FEATURES,
       });
       return;
     }

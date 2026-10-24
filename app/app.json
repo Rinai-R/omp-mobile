@@ -28,6 +28,11 @@
         "dark": {
           "backgroundColor": "#000000"
         }
+      },
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon/adaptive-foreground.png",
+        "backgroundImage": "./assets/icon/adaptive-background.png",
+        "monochromeImage": "./assets/icon/adaptive-monochrome.png"
       }
     },
     "ios": {
@@ -54,6 +59,67 @@
           "cameraPermission": "OMP uses the camera to scan the pairing QR code your computer shows.",
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-font",
+        {
+          "android": {
+            "fonts": [
+              {
+                "fontFamily": "Geist",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/Geist-Regular.ttf",
+                    "weight": 400
+                  },
+                  {
+                    "path": "./assets/fonts/Geist-Medium.ttf",
+                    "weight": 500
+                  },
+                  {
+                    "path": "./assets/fonts/Geist-SemiBold.ttf",
+                    "weight": 600
+                  }
+                ]
+              },
+              {
+                "fontFamily": "JetBrains Mono",
+                "fontDefinitions": [
+                  {
+                    "path": "./assets/fonts/JetBrainsMono-Regular.ttf",
+                    "weight": 400
+                  },
+                  {
+                    "path": "./assets/fonts/JetBrainsMono-Medium.ttf",
+                    "weight": 500
+                  },
+                  {
+                    "path": "./assets/fonts/JetBrainsMono-SemiBold.ttf",
+                    "weight": 600
+                  }
+                ]
+              }
+            ]
+          },
+          "ios": {
+            "fonts": [
+              "./assets/fonts/Geist-Regular.ttf",
+              "./assets/fonts/Geist-Medium.ttf",
+              "./assets/fonts/Geist-SemiBold.ttf",
+              "./assets/fonts/JetBrainsMono-Regular.ttf",
+              "./assets/fonts/JetBrainsMono-Medium.ttf",
+              "./assets/fonts/JetBrainsMono-SemiBold.ttf"
+            ]
+          }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "OMP lets you attach photos to a message for the agent.",
+          "cameraPermission": "OMP uses the camera to scan the pairing QR code and to take photos you send to the agent.",
+          "microphonePermission": false
+        }
       ]
     ],
     "splash": {
@@ -61,6 +127,7 @@
       "dark": {
         "backgroundColor": "#000000"
       }
-    }
+    },
+    "icon": "./assets/icon/icon.png"
   }
 }

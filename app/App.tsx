@@ -313,6 +313,7 @@ export default function App(): ReactNode {
         machine={route.machine}
         session={route.session}
         onBack={() => setRoute({ kind: "sessions", machine: route.machine })}
+        onSwitch={() => setRoute({ kind: "sessions", machine: route.machine })}
       />
     );
   } else if (route.kind === "sessions") {

@@ -29,6 +29,16 @@ function thinkingOf(content: unknown): string | undefined {
 }
 
 /**
+ * Image data the phone can show: a blob reference into the computer's store, or
+ * base64. OMP writes placeholders such as `<76 bytes>` where it dropped the
+ * bytes; those are not images.
+ */
+function imageData(data: string): boolean {
+  if (/^blob:sha256:[0-9a-f]{64}$/.test(data)) return true;
+  return data.length >= 16 && /^[A-Za-z0-9+/]+={0,2}$/.test(data.slice(0, 4096).replace(/\s+/g, ""));
+}
+
+/**
  * Image parts of a content array. OMP keeps them as `{type:"image", data, mimeType}`,
  * where `data` is base64 or a `blob:sha256:` reference into the computer's store.
  */
@@ -38,7 +48,7 @@ function imagesOf(content: unknown): ImagePart[] | undefined {
   for (const part of content) {
     if (part === null || typeof part !== "object") continue;
     if (!("type" in part) || part.type !== "image") continue;
-    if (!("data" in part) || typeof part.data !== "string" || part.data === "") continue;
+    if (!("data" in part) || typeof part.data !== "string" || !imageData(part.data)) continue;
     const mimeType = "mimeType" in part && typeof part.mimeType === "string" ? part.mimeType : undefined;
     images.push({ data: part.data, mimeType });
   }
@@ -276,6 +286,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       intent: typeof event.intent === "string" && event.intent.trim() !== "" ? event.intent : undefined,
       args: event.args,
       status: "running",
+      startedAt: Date.now(),
     };
     return [...items.filter((entry) => entry.id !== id), tool];
   }
@@ -300,6 +311,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       item.status = isError ? "error" : "done";
       item.partial = undefined;
       item.images = images;
+      item.endedAt = Date.now();
     });
   }
   if (type === "auto_compaction_start" || type === "auto_retry_start" || type === "auto_retry_end") {

@@ -1,21 +1,28 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Animated, Easing, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
-import { EASE_OUT, GRADIENT, radius, useColors, useStyles, type Palette } from "../theme";
+import { EASE_OUT, GRADIENT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 
 /**
- * OMP's brand pieces and motion: the cyan → pink gradient mark, the wordmark,
- * gradient and live dots, the tool spinner and the streaming pulse. The
- * gradient appears only here, so it stays rare on screen.
+ * OMP's brand pieces and motion: the π mark in its magenta → violet → cyan
+ * gradient, the wordmark, gradient and live dots, the tool spinner and the
+ * streaming pulse. The gradient appears only here, so it stays rare on screen.
  */
 
 /**
- * The two gradient stops, in the current scheme. LinearGradient reads its Stop
+ * The three gradient stops, in the current scheme. LinearGradient reads its Stop
  * children directly, so they are returned as elements, not wrapped in a component.
  */
-function stops(c: Palette) {
-  return [<Stop key="a" offset="0" stopColor={c.accentA} />, <Stop key="b" offset="1" stopColor={c.accentB} />];
+export function stops(c: Palette) {
+  return [
+    <Stop key="a" offset="0" stopColor={c.accentA} />,
+    <Stop key="v" offset="0.5" stopColor={c.accentV} />,
+    <Stop key="b" offset="1" stopColor={c.accentB} />,
+  ];
 }
+
+/** OMP's π, as omp.sh draws it in a 64-unit box. */
+export const PI_PATH = "M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z";
 
 /** A looping 0 → 1 → 0 value for a breathing opacity; still when `active` is false. */
 export function usePulse(active = true, period = 1400): Animated.Value {
@@ -46,25 +53,19 @@ export function useEnter(duration = 320): Animated.Value {
   return value;
 }
 
-/** The OMP mark: a gradient tile holding a terminal prompt. */
-export function BrandMark({ size = 22 }: { size?: number }): ReactNode {
+/** The OMP mark: the π in the brand gradient, or in one `color`. */
+export function BrandMark({ size = 22, color }: { size?: number; color?: string }): ReactNode {
   const c = useColors();
   return (
-    <Svg width={size} height={size} viewBox="0 0 24 24">
-      <Defs>
-        <LinearGradient id="mark" {...GRADIENT}>
-          {stops(c)}
-        </LinearGradient>
-      </Defs>
-      <Rect x={0} y={0} width={24} height={24} rx={7} fill="url(#mark)" />
-      <Path
-        d="M7 8.5l3.5 3.5L7 15.5M12.5 16h4.5"
-        stroke={c.dark ? "#0a0a0b" : "#ffffff"}
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
+    <Svg width={size} height={size} viewBox="8 12 48 46">
+      {color === undefined ? (
+        <Defs>
+          <LinearGradient id="mark" {...GRADIENT}>
+            {stops(c)}
+          </LinearGradient>
+        </Defs>
+      ) : null}
+      <Path d={PI_PATH} fill={color ?? "url(#mark)"} />
     </Svg>
   );
 }
@@ -74,7 +75,7 @@ export function Wordmark({ app }: { app?: string }): ReactNode {
   const styles = useStyles(createStyles);
   return (
     <View style={styles.wordmark} accessible accessibilityRole="header" accessibilityLabel={app ?? "omp"}>
-      <BrandMark />
+      <BrandMark size={24} />
       <Text style={styles.wordmarkText}>omp</Text>
       {app !== undefined ? (
         <>
@@ -230,10 +231,10 @@ export function GradientFill(): ReactNode {
 
 function createStyles(c: Palette) {
   return {
-    wordmark: { flexDirection: "row", alignItems: "center", gap: 9, minWidth: 0 },
-    wordmarkText: { fontSize: 17, lineHeight: 22, fontWeight: "700", letterSpacing: -0.3, color: c.fg },
-    wordmarkSlash: { fontSize: 18, lineHeight: 22, fontWeight: "300", color: c.fgFaint, opacity: 0.6 },
-    wordmarkApp: { flexShrink: 1, fontSize: 15, lineHeight: 22, fontWeight: "500", color: c.fgMuted },
+    wordmark: { flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 },
+    wordmarkText: { fontFamily: SANS, fontSize: 26, lineHeight: 32, fontWeight: "600", letterSpacing: -0.8, color: c.fg },
+    wordmarkSlash: { fontFamily: SANS, fontSize: 22, lineHeight: 32, fontWeight: "400", color: c.fgGhost },
+    wordmarkApp: { flexShrink: 1, fontFamily: MONO, fontSize: 13, lineHeight: 32, fontWeight: "400", color: c.fgFaint },
     stream: { height: 18, justifyContent: "center" },
     streamBar: { width: STREAM_W, height: 3, transformOrigin: "left" },
   } as const;

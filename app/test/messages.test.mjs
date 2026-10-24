@@ -173,3 +173,21 @@ test("a read result that names a stored media path shows that image", () => {
   });
   assert.equal(outside[0].images, undefined);
 });
+
+test("image placeholders OMP leaves in place of dropped bytes are not images", () => {
+  const items = snapshotItems([
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "see" },
+        { type: "image", data: "<76 bytes>", mimeType: "image/webp" },
+        { type: "image", data: `blob:sha256:${"a".repeat(64)}`, mimeType: "image/png" },
+        { type: "image", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", mimeType: "image/png" },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    items[0].images.map((image) => image.data.slice(0, 12)),
+    ["blob:sha256:", "iVBORw0KGgoA"],
+  );
+});
