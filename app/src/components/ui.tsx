@@ -22,6 +22,7 @@ import { EASE_OUT, HEADER_HEIGHT, HIT, MONO, SANS, radius, useColors, useStyles,
 import type { Dot } from "../probe";
 import { GradientTile, LiveDot, Spinner, Wordmark } from "./brand";
 import { BackGlyph, ChevronDownGlyph, ChevronGlyph, CloseGlyph } from "./icons";
+import { t } from "../i18n/index.ts";
 
 export function Button({
   label,
@@ -247,7 +248,7 @@ export function Header({
   return (
     <View style={onBack === undefined ? styles.headerRoot : styles.header}>
       {onBack !== undefined ? (
-        <IconButton onPress={onBack} label="Back">
+        <IconButton onPress={onBack} label={t("common.back")}>
           <BackGlyph size={20} color={colors.fgMuted} />
         </IconButton>
       ) : null}
@@ -303,6 +304,7 @@ export function Row({
   accessibilityLabel,
   dim = false,
   mono = false,
+  selected,
 }: {
   title: string;
   detail?: ReactNode;
@@ -316,6 +318,8 @@ export function Row({
   dim?: boolean;
   /** Set a string detail in the mono face: a version, a path. */
   mono?: boolean;
+  /** One choice of several (a radio row): announced as selected or not. */
+  selected?: boolean;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -351,7 +355,8 @@ export function Row({
       onPress={onPress}
       onLongPress={onLongPress}
       style={style}
-      accessibilityRole="button"
+      accessibilityRole={selected === undefined ? "button" : "radio"}
+      accessibilityState={selected === undefined ? undefined : { selected }}
       accessibilityLabel={accessibilityLabel ?? title}
     >
       {body}
@@ -498,7 +503,7 @@ export function Sheet({
     <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.sheetRoot} behavior="padding">
         <Animated.View style={[styles.scrim, motion.backdrop]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("common.close")} />
         </Animated.View>
         <Animated.View
           style={[styles.sheet, { paddingBottom: keyboard > 0 ? 12 : 20 + insets.bottom, maxHeight: height - insets.top - 12 - keyboard }, motion.sheet]}
@@ -508,7 +513,7 @@ export function Sheet({
             <Text style={styles.sheetTitle} numberOfLines={1}>
               {shown.current.title}
             </Text>
-            <IconButton onPress={onClose} label="Close">
+            <IconButton onPress={onClose} label={t("common.close")}>
               <CloseGlyph size={16} color={colors.fgMuted} />
             </IconButton>
           </View>

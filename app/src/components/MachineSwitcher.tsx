@@ -4,6 +4,7 @@ import { summaryOf, type Probe } from "../probe";
 import { MONO, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
+import { t } from "../i18n/index.ts";
 import { Button, Group, Row, Sheet, StateDot } from "./ui";
 
 interface Props {
@@ -27,7 +28,7 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
   }, [onProbe, visible]);
   const now = Date.now();
   return (
-    <Sheet visible={visible} title="Computers" onClose={onClose}>
+    <Sheet visible={visible} title={t("switcher.title")} onClose={onClose}>
       <Group>
         {machines.map((machine, index) => {
           const summary = summaryOf(probes.get(machine.id), machine.lastSeen, now);
@@ -45,21 +46,25 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
                   </Text>
                 </View>
               }
-              trailing={here ? <Text style={styles.here}>here</Text> : undefined}
+              trailing={here ? <Text style={styles.here}>{t("switcher.here")}</Text> : undefined}
               chevron={!here}
               last={index === machines.length - 1}
               onPress={() => {
                 onClose();
                 if (!here) onPick(machine);
               }}
-              accessibilityLabel={`${displayName(machine)}, ${summary.text}${here ? ", current" : ""}`}
+              accessibilityLabel={
+                here
+                  ? t("switcher.hereA11y", { name: displayName(machine), summary: summary.text })
+                  : t("common.pair", { label: displayName(machine), value: summary.text })
+              }
             />
           );
         })}
       </Group>
       {onManage !== undefined ? (
         <Button
-          label="Manage computers"
+          label={t("switcher.manage")}
           kind="plain"
           onPress={() => {
             onClose();

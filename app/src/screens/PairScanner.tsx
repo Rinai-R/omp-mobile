@@ -18,6 +18,7 @@ import { CloseGlyph, KeyboardGlyph } from "../components/icons";
 import { pairingMessage, readPairing } from "../pairing";
 import { EASE_OUT, GRADIENT, MONO, SANS, palette, radius } from "../theme";
 import type { Machine } from "../types";
+import { t } from "../i18n/index.ts";
 
 interface Props {
   machines: Machine[];
@@ -162,18 +163,18 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
 
   let panel: ReactNode = null;
   if (camera.access === "failed") {
-    panel = <Problem message="The camera is not available." action="Try again" onAction={camera.ask} onManual={onManual} />;
+    panel = <Problem message={t("scanner.unavailable")} action={t("common.tryAgain")} onAction={camera.ask} onManual={onManual} />;
   } else if (camera.access === "denied") {
     panel = (
       <Problem
-        message="OMP needs camera access to scan the pairing code. Allow it in Settings, or enter the address by hand."
-        action="Open settings"
+        message={t("scanner.denied")}
+        action={t("scanner.openSettings")}
         onAction={camera.openSettings}
         onManual={onManual}
       />
     );
   } else if (camera.access === "live" && mountFailed) {
-    panel = <Problem message="The camera could not start." action="Try again" onAction={remount} onManual={onManual} />;
+    panel = <Problem message={t("scanner.failed")} action={t("common.tryAgain")} onAction={remount} onManual={onManual} />;
   }
 
   return (
@@ -194,7 +195,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
           {pairing.busy || camera.access === "pending" ? (
             <View style={styles.busy}>
               <ActivityIndicator color={DARK.fg} />
-              {pairing.busy ? <Text style={styles.busyText}>connecting…</Text> : null}
+              {pairing.busy ? <Text style={styles.busyText}>{t("scanner.connecting")}</Text> : null}
             </View>
           ) : camera.access === "live" && !mountFailed && panel === null ? (
             <ScanLine size={frame} />
@@ -207,12 +208,12 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
           hitSlop={HIT_SLOP}
           style={styles.iconButton}
           accessibilityRole="button"
-          accessibilityLabel="Close"
+          accessibilityLabel={t("common.close")}
         >
           <CloseGlyph size={16} color={DARK.fg} />
         </Pressable>
         <View style={styles.titleBlock}>
-          <Text style={styles.title}>Scan to pair</Text>
+          <Text style={styles.title}>{t("scanner.title")}</Text>
           <Text style={styles.subtitle}>omp-mobile daemon</Text>
         </View>
         <View style={styles.iconSpacer} />
@@ -225,10 +226,10 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
                 {pairing.error}
               </Text>
             ) : null}
-            <Text style={styles.hint}>Point the camera at the QR code the omp-mobile daemon prints in its terminal.</Text>
+            <Text style={styles.hint}>{t("scanner.hint")}</Text>
             <Pressable onPress={onManual} style={styles.ghost} accessibilityRole="button">
               <KeyboardGlyph color={DARK.fgMuted} />
-              <Text style={styles.ghostText}>Enter address</Text>
+              <Text style={styles.ghostText}>{t("machines.enterAddress")}</Text>
             </Pressable>
           </>
         )}
@@ -254,7 +255,7 @@ function Problem({
       <Text style={styles.sheetText}>{message}</Text>
       <View style={styles.sheetActions}>
         <Pressable onPress={onManual} style={styles.sheetSecondary} accessibilityRole="button">
-          <Text style={styles.sheetSecondaryText}>Enter address</Text>
+          <Text style={styles.sheetSecondaryText}>{t("machines.enterAddress")}</Text>
         </Pressable>
         <Pressable onPress={onAction} style={styles.sheetPrimary} accessibilityRole="button">
           <Text style={styles.sheetPrimaryText}>{action}</Text>

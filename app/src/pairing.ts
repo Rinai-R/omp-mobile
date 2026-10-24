@@ -5,6 +5,7 @@
  * normalization can turn it into a different address, and its address must be
  * on the tailnet, since that is the only network the daemon is meant to serve.
  */
+import { t } from "./i18n/index.ts";
 
 export interface Pairing {
   /** The daemon base URL: scheme, lowercased host and optional port, no slash. */
@@ -91,22 +92,22 @@ export function parsePairing(input: string): Pairing | null {
 export function pairingMessage(problem: PairingProblem, host?: string): string {
   switch (problem) {
     case "not-pairing":
-      return "That is not an OMP pairing code. Scan the code the omp-mobile daemon prints.";
+      return t("pairing.notPairing");
     case "bad-address":
-      return "This pairing code has no valid daemon address.";
+      return t("pairing.badAddress");
     case "not-tailnet":
-      return `${host ?? "This address"} is not on your tailnet. Start the daemon with --host set to the computer's Tailscale IP.`;
+      return t("pairing.notTailnet", { host: host ?? t("pairing.thisAddress") });
     case "missing-token":
-      return "This pairing code has no token.";
+      return t("pairing.missingToken");
   }
 }
 
 /** Normalize what a user typed into a daemon base URL. */
 export function normalizeUrl(input: string): string {
   let value = input.trim();
-  if (value === "") throw new Error("Enter the daemon address");
+  if (value === "") throw new Error(t("pairing.enterAddress"));
   if (!/^https?:\/\//i.test(value)) value = `http://${value}`;
   const url = new URL(value);
-  if (url.pathname !== "/" && url.pathname !== "") throw new Error("Enter only the daemon base address");
+  if (url.pathname !== "/" && url.pathname !== "") throw new Error(t("pairing.baseOnly"));
   return `${url.protocol}//${url.host}`;
 }

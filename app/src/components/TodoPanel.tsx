@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
 import { todoProgress, type TodoPhase, type TodoTask } from "../todos";
+import { t } from "../i18n/index.ts";
 import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
 import { Disclosure } from "./ui";
 
@@ -9,27 +10,27 @@ function TaskMark({ status }: { status: TodoTask["status"] }): ReactNode {
   const styles = useStyles(createStyles);
   if (status === "completed") {
     return (
-      <Text style={styles.markDone} accessibilityLabel="done">
+      <Text style={styles.markDone} accessibilityLabel={t("todo.completed")}>
         ✓
       </Text>
     );
   }
-  if (status === "in_progress") return <View style={styles.markActive} accessibilityLabel="in progress" />;
+  if (status === "in_progress") return <View style={styles.markActive} accessibilityLabel={t("todo.inProgress")} />;
   if (status === "blocked") {
     return (
-      <Text style={styles.markBlocked} accessibilityLabel="blocked">
+      <Text style={styles.markBlocked} accessibilityLabel={t("todo.blocked")}>
         !
       </Text>
     );
   }
   if (status === "abandoned") {
     return (
-      <Text style={styles.markAbandoned} accessibilityLabel="abandoned">
+      <Text style={styles.markAbandoned} accessibilityLabel={t("todo.abandoned")}>
         ×
       </Text>
     );
   }
-  return <View style={styles.markPending} accessibilityLabel="pending" />;
+  return <View style={styles.markPending} accessibilityLabel={t("todo.pending")} />;
 }
 
 /**
@@ -53,9 +54,9 @@ export function TodoPanel({ phases }: { phases: readonly TodoPhase[] }): ReactNo
         style={head}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`Todos, ${done} of ${total} done`}
+        accessibilityLabel={t("todo.a11y", { done, total })}
       >
-        <Text style={styles.title}>todos</Text>
+        <Text style={styles.title}>{t("todo.title")}</Text>
         <Text style={styles.count}>
           {done}/{total}
         </Text>

@@ -1,4 +1,5 @@
 import type { ChatItem, MessageItem, NoticeItem, ToolItem } from "./types";
+import { listSeparator, t, type Key } from "./i18n/index.ts";
 
 /**
  * The transcript as the chat screen lays it out. A turn is the user's message
@@ -158,23 +159,27 @@ export function stepTitle(tool: ToolItem): string {
   const path = str(args?.path) ?? str(args?.file_path);
   switch (toolKind(tool.name)) {
     case "read":
-      return path !== undefined ? `Read ${basename(path)}` : "Read a file";
+      return path !== undefined ? t("step.read", { name: basename(path) }) : t("step.readAny");
     case "edit":
-      return path !== undefined ? `Edit ${basename(path)}` : "Edit a file";
+      return path !== undefined ? t("step.edit", { name: basename(path) }) : t("step.editAny");
     case "write":
-      return path !== undefined ? `Write ${basename(path)}` : "Write a file";
+      return path !== undefined ? t("step.write", { name: basename(path) }) : t("step.writeAny");
     case "run":
-      return str(args?.title) !== undefined ? oneLine(String(args?.title)) : tool.name === "eval" ? "Run code" : "Run a command";
+      return str(args?.title) !== undefined
+        ? oneLine(String(args?.title))
+        : tool.name === "eval"
+          ? t("step.runCode")
+          : t("step.runCommand");
     case "search":
-      return str(args?.pattern) !== undefined ? `Search for ${oneLine(String(args?.pattern), 60)}` : "Search";
+      return str(args?.pattern) !== undefined ? t("step.search", { pattern: oneLine(String(args?.pattern), 60) }) : t("step.searchAny");
     case "web":
-      return str(args?.query) !== undefined ? `Search the web for ${oneLine(String(args?.query), 60)}` : "Fetch a page";
+      return str(args?.query) !== undefined ? t("step.web", { query: oneLine(String(args?.query), 60) }) : t("step.webAny");
     case "plan":
-      return "Update the plan";
+      return t("step.plan");
     case "agent":
-      return tool.name === "task" ? "Delegate to subagents" : tool.name === "wait" ? "Wait" : "Check background jobs";
+      return tool.name === "task" ? t("step.delegate") : tool.name === "wait" ? t("step.wait") : t("step.jobs");
     case "ask":
-      return "Ask you a question";
+      return t("step.ask");
     default:
       return tool.name;
   }
@@ -221,19 +226,19 @@ export function editCounts(tool: ToolItem): { added: number; removed: number } |
 /** The short result on a step's right: `+6 −2`, `142 lines`, `1.2s`, `failed`. */
 export function stepStat(tool: ToolItem): string | undefined {
   if (tool.status === "running") return undefined;
-  if (tool.status === "error") return "failed";
+  if (tool.status === "error") return t("step.failed");
   const details = record(record(tool.result)?.details);
   const kind = toolKind(tool.name);
   if (kind === "edit" || kind === "write") {
     if (kind === "write") {
       const content = str(record(tool.args)?.content);
-      if (content !== undefined) return `${content.split("\n").length} lines`;
+      if (content !== undefined) return t("step.lines", { count: content.split("\n").length });
     }
     const counts = editCounts(tool);
     if (counts !== undefined) return `+${counts.added} −${counts.removed}`;
   }
   if (kind === "read" && typeof details?.totalLines === "number") {
-    return `${details.totalLines} line${details.totalLines === 1 ? "" : "s"}`;
+    return t("step.lines", { count: details.totalLines });
   }
   if (kind === "run" && typeof details?.wallTimeMs === "number") return duration(details.wallTimeMs);
   return undefined;
@@ -248,17 +253,18 @@ export function duration(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-const SUMMARY: Record<ToolKind, [one: string, many: string, later: string]> = {
-  read: ["Read a file", "Read %d files", "read %d"],
-  edit: ["Edited a file", "Edited %d files", "edited %d"],
-  write: ["Wrote a file", "Wrote %d files", "wrote %d"],
-  run: ["Ran a command", "Ran %d commands", "ran %d"],
-  search: ["Searched once", "Searched %d times", "searched %d×"],
-  web: ["Searched the web", "Searched the web %d times", "web %d×"],
-  plan: ["Updated the plan", "Updated the plan", "planned"],
-  agent: ["Worked with subagents", "Worked with subagents", "subagents"],
-  ask: ["Asked you", "Asked you %d times", "asked %d×"],
-  other: ["Used a tool", "Used %d tools", "%d other"],
+/** Per kind: the summary's lead (counted) and the shorter form for the kinds after it. */
+const SUMMARY: Record<ToolKind, [first: Key, later: Key]> = {
+  read: ["summary.read", "summary.read.more"],
+  edit: ["summary.edit", "summary.edit.more"],
+  write: ["summary.write", "summary.write.more"],
+  run: ["summary.run", "summary.run.more"],
+  search: ["summary.search", "summary.search.more"],
+  web: ["summary.web", "summary.web.more"],
+  plan: ["summary.plan", "summary.plan.more"],
+  agent: ["summary.agent", "summary.agent.more"],
+  ask: ["summary.ask", "summary.ask.more"],
+  other: ["summary.other", "summary.other.more"],
 };
 
 const ORDER: ToolKind[] = ["edit", "write", "run", "read", "search", "web", "agent", "ask", "plan", "other"];
@@ -285,12 +291,11 @@ export function activitySummary(steps: readonly Step[]): string {
   }
   const parts = ORDER.filter((kind) => (counts.get(kind) ?? 0) > 0).map((kind, index) => {
     const n = counts.get(kind) ?? 0;
-    const [one, many, later] = SUMMARY[kind];
-    if (index === 0) return (n === 1 ? one : many).replace("%d", String(n));
-    return later.replace("%d", String(n));
+    const [first, later] = SUMMARY[kind];
+    return t(index === 0 ? first : later, { count: n });
   });
-  if (parts.length === 0) return "Thought it through";
-  return parts.slice(0, 3).join(", ");
+  if (parts.length === 0) return t("summary.thought");
+  return parts.slice(0, 3).join(listSeparator());
 }
 
 /** The step a running card shows on its head: the last tool still running, else the last step. */

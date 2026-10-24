@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
 import { EASE_OUT, GRADIENT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { t } from "../i18n/index.ts";
 
 /**
  * OMP's brand pieces and motion: the π mark in its magenta → violet → cyan
@@ -181,7 +182,7 @@ export function StreamPulse(): ReactNode {
   const opacity = value.interpolate({ inputRange: [0, 1], outputRange: [1, 0.35] });
   const scaleX = value.interpolate({ inputRange: [0, 1], outputRange: [1, 0.6] });
   return (
-    <View style={styles.stream} accessibilityLabel="OMP is working">
+    <View style={styles.stream} accessibilityLabel={t("brand.working")}>
       <Animated.View style={[styles.streamBar, { opacity, transform: [{ scaleX }] }]}>
         <Svg width={STREAM_W} height={3}>
           <Defs>

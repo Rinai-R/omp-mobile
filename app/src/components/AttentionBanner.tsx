@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Attention } from "../../modules/omp-attention/src";
+import { t, type Key } from "../i18n/index.ts";
 import { SANS, EASE_OUT, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import { GradientDot, LiveDot } from "./brand";
 import { CloseGlyph } from "./icons";
 
-const HEADLINE: Record<string, string> = {
-  approval: "Approval needed",
-  question: "Question for you",
-  done: "Turn finished",
-  failed: "Turn failed",
+const HEADLINE: Record<string, Key> = {
+  approval: "attention.approval",
+  question: "attention.question",
+  done: "attention.done",
+  failed: "attention.failed",
 };
 
 /** Waiting items stay until handled; results slide away after a few seconds. */
@@ -51,8 +52,9 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
   );
   const open = useCallback(() => onOpen(attention), [attention, onOpen]);
   const dismiss = useCallback(() => onDismiss(attention), [attention, onDismiss]);
-  const headline = HEADLINE[attention.kind] ?? "Session";
-  const title = attention.sessionTitle || "Session";
+  const headlineKey = HEADLINE[attention.kind];
+  const headline = headlineKey !== undefined ? t(headlineKey) : t("common.session");
+  const title = attention.sessionTitle || t("common.session");
 
   return (
     <Animated.View style={position} pointerEvents="box-none">
@@ -60,7 +62,7 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
         onPress={open}
         style={({ pressed }) => [styles.card, pressed && styles.pressed]}
         accessibilityRole="button"
-        accessibilityLabel={`${headline}: ${title}. Open`}
+        accessibilityLabel={t("attention.openA11y", { headline, title })}
       >
         <View style={styles.dot}>
           {waiting ? (
@@ -87,7 +89,7 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
           hitSlop={12}
           style={styles.close}
           accessibilityRole="button"
-          accessibilityLabel="Dismiss"
+          accessibilityLabel={t("attention.dismiss")}
         >
           <CloseGlyph size={15} color={colors.fgFaint} />
         </Pressable>

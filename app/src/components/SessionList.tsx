@@ -5,6 +5,7 @@ import { age, folderOf, type SessionGroup } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SessionSummary } from "../types";
+import { t } from "../i18n/index.ts";
 import { BrandMark, LiveDot, Spinner } from "./brand";
 import { LockGlyph } from "./icons";
 
@@ -83,7 +84,7 @@ export function SessionRow({
   const running = session.status === "streaming";
   const waiting = (session.waiting ?? 0) > 0;
   const locked = session.openElsewhere === true;
-  const detail = [folderOf(session.cwd), locked ? "open in a terminal" : waiting ? "waiting for you" : session.model]
+  const detail = [folderOf(session.cwd), locked ? t("session.inTerminal") : waiting ? t("session.waiting") : session.model]
     .filter(Boolean)
     .join(" · ");
   const when = age(session.updatedAt);
@@ -93,7 +94,10 @@ export function SessionRow({
       onLongPress={onLongPress === undefined ? undefined : () => onLongPress(session)}
       style={({ pressed }) => [styles.row, current && styles.rowCurrent, pressed && styles.rowPressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${session.title}, ${running ? "running" : waiting ? "waiting for you" : locked ? "open in a terminal" : when}`}
+      accessibilityLabel={t("common.pair", {
+        label: session.title,
+        value: running ? t("session.running") : waiting ? t("session.waiting") : locked ? t("session.inTerminal") : when,
+      })}
       accessibilityState={{ selected: current }}
     >
       {current ? <View style={styles.currentBar} /> : null}
@@ -120,9 +124,9 @@ export function SessionRow({
         {busy ? (
           <Spinner size={12} />
         ) : waiting ? (
-          <Text style={styles.need}>answer</Text>
+          <Text style={styles.need}>{t("session.answer")}</Text>
         ) : running ? (
-          <Text style={styles.live}>working</Text>
+          <Text style={styles.live}>{t("session.working")}</Text>
         ) : locked ? (
           <LockGlyph size={12} color={colors.warn} />
         ) : (

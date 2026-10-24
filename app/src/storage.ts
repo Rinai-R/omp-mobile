@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { isLanguagePreference, type LanguagePreference } from "./i18n/index.ts";
 import type { Machine } from "./types";
 
 const MACHINES_KEY = "omp.machines.v1";
@@ -9,10 +10,12 @@ export interface Settings {
   notifications: boolean;
   /** The computer whose sessions the app opened on last: it opens there again. */
   lastMachineId?: string;
+  /** The app's language: the phone's (`system`) or one chosen in Settings. */
+  language: LanguagePreference;
 }
 
 /** Off until the user turns them on: that is when Android asks for the notification permission. */
-export const DEFAULT_SETTINGS: Settings = { notifications: false };
+export const DEFAULT_SETTINGS: Settings = { notifications: false, language: "system" };
 
 export async function loadMachines(): Promise<Machine[]> {
   try {
@@ -38,7 +41,9 @@ export async function loadSettings(): Promise<Settings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (raw === null) return DEFAULT_SETTINGS;
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    const stored = { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    // A value a later version wrote, or garbage, falls back to the phone's language.
+    return isLanguagePreference(stored.language) ? stored : { ...stored, language: "system" };
   } catch {
     return DEFAULT_SETTINGS;
   }

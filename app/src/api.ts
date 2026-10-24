@@ -1,4 +1,5 @@
 import type { Hello, Machine, SessionSummary, ServerMessage } from "./types";
+import { t } from "./i18n/index.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 
@@ -54,9 +55,9 @@ function errorText(body: string): string {
 
 export async function hello(url: string, token: string): Promise<Hello> {
   const response = await fetch(`${url}/hello`);
-  if (!response.ok) throw new Error(`The daemon answered HTTP ${response.status}`);
+  if (!response.ok) throw new Error(t("api.http", { status: response.status }));
   const data = (await response.json()) as Hello;
-  if (data.protocol !== 1) throw new Error(`Unsupported daemon protocol ${data.protocol}`);
+  if (data.protocol !== 1) throw new Error(t("api.protocol", { protocol: String(data.protocol) }));
   // /hello is public; this verifies the token before the machine is saved.
   await request<{ sessions: SessionSummary[] }>({ id: url, url, token, name: data.name, os: data.os, version: data.version, cwd: data.cwd }, "/sessions");
   return data;
@@ -68,8 +69,8 @@ export async function hello(url: string, token: string): Promise<Hello> {
  */
 export async function pairMachine(url: string, token: string, machines: readonly Machine[]): Promise<Machine> {
   const secret = token.trim();
-  if (secret === "") throw new Error("Enter the daemon token");
-  if (machines.some((machine) => machine.url === url)) throw new Error("This machine is already in the list");
+  if (secret === "") throw new Error(t("api.enterToken"));
+  if (machines.some((machine) => machine.url === url)) throw new Error(t("api.duplicate"));
   const info = await hello(url, secret);
   return {
     id: url,

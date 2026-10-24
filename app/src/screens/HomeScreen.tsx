@@ -12,6 +12,7 @@ import { hostOf } from "../machines";
 import { attentionCount, folderOf, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { dropTranscript } from "../transcripts";
+import { t } from "../i18n/index.ts";
 import type { Machine, SessionSummary } from "../types";
 
 interface Props {
@@ -69,8 +70,8 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
   const reachable = sessions !== undefined && error === null;
   const down = probe?.state === "unreachable" && !reachable;
   const detail = down
-    ? `Unreachable · ${reasonText(probe.reason)}`
-    : [osName(machine.os), hostOf(machine.url), counts.running > 0 ? `${counts.running} running` : undefined]
+    ? t("home.unreachable", { reason: reasonText(probe.reason) })
+    : [osName(machine.os), hostOf(machine.url), counts.running > 0 ? t("common.running", { count: counts.running }) : undefined]
         .filter(Boolean)
         .join(" · ");
 
@@ -92,10 +93,10 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
   const confirmDelete = useCallback(
     (session: SessionSummary) => {
       if (session.origin !== "daemon") return;
-      Alert.alert(`Close “${session.title}”?`, "This stops its OMP process on the computer. The session file stays.", [
-        { text: "Cancel", style: "cancel" },
+      Alert.alert(t("home.close.title", { title: session.title }), t("home.close.body"), [
+        { text: t("common.cancel"), style: "cancel" },
         {
-          text: "Close session",
+          text: t("home.close.action"),
           style: "destructive",
           onPress: () => {
             void deleteSession(machine, session.id)
@@ -103,7 +104,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
                 dropTranscript(machine.id, session.id);
                 setSessions((current) => (current ?? []).filter((item) => item.id !== session.id));
               })
-              .catch((cause: unknown) => Alert.alert("Could not close it", cause instanceof Error ? cause.message : String(cause)));
+              .catch((cause: unknown) => Alert.alert(t("home.close.failed"), cause instanceof Error ? cause.message : String(cause)));
           },
         },
       ]);
@@ -122,7 +123,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
       <View style={styles.header}>
         <Wordmark />
         <View style={styles.headerRight}>
-          <IconButton onPress={onSettings} label="Settings">
+          <IconButton onPress={onSettings} label={t("common.settings")}>
             <SettingsGlyph size={21} color={colors.fgMuted} />
           </IconButton>
         </View>
@@ -147,7 +148,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           onPress={onPickMachine}
           style={({ pressed }) => [styles.machine, pressed && styles.machinePressed]}
           accessibilityRole="button"
-          accessibilityLabel={`${machine.name}, ${detail}. Switch computer`}
+          accessibilityLabel={t("home.machineA11y", { name: machine.name, detail })}
         >
           <View style={styles.machineTile}>
             <ComputerGlyph size={18} color={down ? colors.fgGhost : colors.fgMuted} />
@@ -177,17 +178,17 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
 
         {error !== null && sessions !== undefined ? (
           <View style={styles.bannerWrap}>
-            <Banner text={`Showing the last list this phone saw. ${error}`} action={{ label: "Retry", onPress: () => void refresh() }} />
+            <Banner text={t("home.stale", { error })} action={{ label: t("common.retry"), onPress: () => void refresh() }} />
           </View>
         ) : null}
 
         {sessions === undefined ? (
           error !== null ? (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Can't reach {displayName(machine)}</Text>
+              <Text style={styles.emptyTitle}>{t("home.cantReach", { name: displayName(machine) })}</Text>
               <Text style={styles.emptyBody}>{error}</Text>
               <View style={styles.emptyAction}>
-                <Button label="Try again" kind="plain" onPress={() => void refresh()} />
+                <Button label={t("common.tryAgain")} kind="plain" onPress={() => void refresh()} />
               </View>
             </View>
           ) : (
@@ -202,8 +203,8 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
             <View style={styles.emptyTile}>
               <ChatGlyph size={22} color={colors.fgMuted} />
             </View>
-            <Text style={styles.emptyTitle}>No sessions yet</Text>
-            <Text style={styles.emptyBody}>Start one and OMP runs it on {displayName(machine)}.</Text>
+            <Text style={styles.emptyTitle}>{t("home.empty.title")}</Text>
+            <Text style={styles.emptyBody}>{t("home.empty.body", { name: displayName(machine) })}</Text>
           </View>
         ) : (
           <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={confirmDelete} />
@@ -214,16 +215,16 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
         onPress={openCreate}
         style={({ pressed }) => [styles.fab, { bottom: 20 + insets.bottom }, pressed && styles.fabPressed]}
         accessibilityRole="button"
-        accessibilityLabel="New session"
+        accessibilityLabel={t("home.new")}
       >
         <GradientFill />
         <PlusGlyph size={19} color="#ffffff" />
-        <Text style={styles.fabText}>New session</Text>
+        <Text style={styles.fabText}>{t("home.new")}</Text>
       </Pressable>
 
-      <Sheet visible={creating} title="New session" onClose={() => setCreating(false)}>
-        <Text style={styles.hint}>OMP starts a new session on {displayName(machine)}.</Text>
-        <Field label="Working directory" value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
+      <Sheet visible={creating} title={t("home.new")} onClose={() => setCreating(false)}>
+        <Text style={styles.hint}>{t("home.newSheet.hint", { name: displayName(machine) })}</Text>
+        <Field label={t("home.newSheet.cwd")} value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
         {recent.length > 0 ? (
           <View style={styles.recent}>
             {recent.map((path) => (
@@ -232,7 +233,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
                 onPress={() => setCwd(path)}
                 style={({ pressed }) => [cwd === path ? styles.recentChipOn : styles.recentChip, pressed && styles.machinePressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`Use ${path}`}
+                accessibilityLabel={t("home.newSheet.use", { path })}
               >
                 <Text style={cwd === path ? styles.recentTextOn : styles.recentText} numberOfLines={1}>
                   {folderOf(path)}
@@ -242,7 +243,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           </View>
         ) : null}
         {createError !== null ? <Text style={styles.error}>{createError}</Text> : null}
-        <Button label="Start session" onPress={() => void create()} busy={busy} />
+        <Button label={t("home.newSheet.start")} onPress={() => void create()} busy={busy} />
       </Sheet>
     </View>
   );

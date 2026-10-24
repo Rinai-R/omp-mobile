@@ -1,4 +1,5 @@
 import type { AgentMessage, ChatItem, ImagePart, MessageItem, NoticeItem, ToolItem } from "./types";
+import { t } from "./i18n/index.ts";
 
 let counter = 0;
 const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(counter += 1)}`;
@@ -320,21 +321,25 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       type === "auto_retry_end" && event.success !== true ? "error" : type === "auto_retry_start" ? "warning" : "info";
     const text =
       type === "auto_compaction_start"
-        ? "Compacting the conversation…"
+        ? t("notice.compacting")
         : type === "auto_retry_end"
           ? event.success === true
-            ? "Retry succeeded."
-            : `Retry stopped: ${String(event.finalError ?? "unknown error")}`
-          : `Retrying (attempt ${String(event.attempt ?? "?")}/${String(event.maxAttempts ?? "?")}): ${String(event.errorMessage ?? "")}`;
+            ? t("notice.retrySucceeded")
+            : t("notice.retryStopped", { error: String(event.finalError ?? t("notice.unknownError")) })
+          : t("notice.retrying", {
+              attempt: String(event.attempt ?? "?"),
+              max: String(event.maxAttempts ?? "?"),
+              error: String(event.errorMessage ?? ""),
+            });
     return [...items, { kind: "notice", id: nextId("notice"), level, text }];
   }
   if (type === "auto_compaction_end") {
     const failed = event.errorMessage !== undefined && event.errorMessage !== null;
     const text = failed
-      ? `Compaction failed: ${String(event.errorMessage)}`
+      ? t("notice.compactionFailed", { error: String(event.errorMessage) })
       : event.aborted === true
-        ? "Compaction stopped."
-        : "Context compacted.";
+        ? t("notice.compactionStopped")
+        : t("notice.compacted");
     return [...items, { kind: "notice", id: nextId("notice"), level: failed ? "warning" : "info", text }];
   }
   if (type === "notice") {
@@ -372,7 +377,7 @@ export function resultText(value: unknown): string | undefined {
 /** A short one-line result for a tool card. */
 export function toolSummary(tool: ToolItem): string {
   const value = tool.result ?? tool.partial ?? tool.args;
-  if (value === null || value === undefined) return tool.status === "running" ? "Running…" : "";
+  if (value === null || value === undefined) return tool.status === "running" ? t("tool.running") : "";
   const text = resultText(value);
   if (text !== undefined) return text.replace(/\s+/g, " ").slice(0, 300);
   try {
