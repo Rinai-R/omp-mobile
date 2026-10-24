@@ -253,6 +253,17 @@ export function duration(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
+/**
+ * A thought's row: "Thought for 12s" when the phone timed it, else "Thought"
+ * (a transcript loaded from the computer carries no duration).
+ */
+export function thoughtLabel(ms: number | undefined): string {
+  if (ms === undefined) return t("transcript.thought");
+  const seconds = Math.max(1, Math.round(ms / 1_000));
+  if (seconds < 60) return t("transcript.thoughtFor", { seconds });
+  return t("transcript.thoughtForLong", { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
+}
+
 /** Per kind: the summary's lead (counted) and the shorter form for the kinds after it. */
 const SUMMARY: Record<ToolKind, [first: Key, later: Key]> = {
   read: ["summary.read", "summary.read.more"],

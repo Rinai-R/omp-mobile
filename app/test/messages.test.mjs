@@ -191,3 +191,66 @@ test("image placeholders OMP leaves in place of dropped bytes are not images", (
     ["blob:sha256:", "iVBORw0KGgoA"],
   );
 });
+
+/** A turn whose model thinks first, as OMP stores it: thinking parts carry `thinking`, not `text`. */
+const thinkingTurn = [
+  { type: "message_start", message: { role: "assistant", content: [] } },
+  { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "Look at " } },
+  { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "the files." } },
+  {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Look at the files.", thinkingSignature: "sig" },
+        { type: "toolCall", id: "t1", name: "read", arguments: { path: "a.txt" } },
+      ],
+    },
+  },
+  { type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "a.txt" } },
+  { type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: { content: [{ type: "text", text: "hi" }] } },
+  { type: "message_start", message: { role: "assistant", content: [] } },
+  { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "Answer now." } },
+  { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "It says hi." } },
+  {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "Answer now." },
+        { type: "text", text: "It says hi." },
+      ],
+    },
+  },
+  { type: "turn_end" },
+  { type: "agent_end" },
+];
+
+test("thinking survives the end of its message and of the turn", () => {
+  const items = thinkingTurn.reduce(applyEvent, []);
+  assert.deepEqual(
+    items.map((item) => [item.kind, item.kind === "message" ? item.thinking : item.status, item.kind === "message" ? item.text : undefined]),
+    [
+      ["message", "Look at the files.", ""],
+      ["tool", "done", undefined],
+      ["message", "Answer now.", "It says hi."],
+    ],
+  );
+  for (const item of items) {
+    if (item.kind !== "message") continue;
+    assert.equal(item.streaming, false);
+    assert.equal(typeof item.thinkingMs, "number");
+  }
+});
+
+test("a reopened chat keeps the thinking of stored messages", () => {
+  const items = snapshotItems([
+    { role: "assistant", content: [{ type: "thinking", thinking: "Plan it." }, { type: "toolCall", id: "t1", name: "read", arguments: {} }] },
+    { role: "toolResult", toolCallId: "t1", content: [{ type: "text", text: "ok" }] },
+    { role: "assistant", content: [{ type: "thinking", thinking: "Wrap up." }, { type: "text", text: "Done." }] },
+  ]);
+  assert.deepEqual(
+    items.map((item) => (item.kind === "message" ? [item.thinking, item.text] : item.kind)),
+    [["Plan it.", ""], "tool", ["Wrap up.", "Done."]],
+  );
+});

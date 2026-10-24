@@ -8,6 +8,8 @@ function partText(part: unknown): string {
   if (typeof part === "string") return part;
   if (part === null || part === undefined || typeof part !== "object") return "";
   const value = part as { type?: unknown; text?: unknown; content?: unknown };
+  // Thinking is not the message's text; `thinkingOf` reads it.
+  if (value.type === "thinking" || value.type === "redactedThinking") return "";
   if (typeof value.text === "string") return value.text;
   if (typeof value.content === "string") return value.content;
   return "";
@@ -20,13 +22,22 @@ export function textOf(content: unknown): string {
   return partText(content);
 }
 
-function thinkingOf(content: unknown): string | undefined {
+/**
+ * The thinking of an assistant message. OMP keeps it as
+ * `{type: "thinking", thinking}` parts; `text` is accepted too.
+ */
+export function thinkingOf(content: unknown): string | undefined {
   if (!Array.isArray(content)) return undefined;
   const text = content
-    .filter((part) => part !== null && typeof part === "object" && (part as { type?: unknown }).type === "thinking")
-    .map(partText)
-    .join("");
-  return text === "" ? undefined : text;
+    .map((part) => {
+      if (part === null || typeof part !== "object" || (part as { type?: unknown }).type !== "thinking") return "";
+      const value = part as { thinking?: unknown; text?: unknown };
+      if (typeof value.thinking === "string") return value.thinking;
+      return typeof value.text === "string" ? value.text : "";
+    })
+    .filter((value) => value !== "")
+    .join("\n\n");
+  return text.trim() === "" ? undefined : text;
 }
 
 /**
@@ -247,12 +258,20 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     if (delta.text === undefined && delta.thinking === undefined) return items;
     const at = openIndex(items, message);
     if (at === -1) return items;
+    const now = Date.now();
     return items.map((entry, index) => {
       if (index !== at || entry.kind !== "message") return entry;
+      const thinkingStartedAt = entry.thinkingStartedAt ?? (delta.thinking !== undefined ? now : undefined);
+      // Thinking ends where the answer starts.
+      const thinkingMs =
+        entry.thinkingMs ??
+        (delta.text !== undefined && delta.text !== "" && thinkingStartedAt !== undefined ? now - thinkingStartedAt : undefined);
       return {
         ...entry,
         text: entry.text + (delta.text ?? ""),
         thinking: delta.thinking === undefined ? entry.thinking : (entry.thinking ?? "") + delta.thinking,
+        thinkingStartedAt,
+        thinkingMs,
         streaming: true,
       };
     });
@@ -264,12 +283,18 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     if (role === undefined) return items;
     const at = openIndex(items, message);
     const previous = at === -1 ? undefined : items[at];
+    const before = previous?.kind === "message" ? previous : undefined;
+    const thinking = thinkingOf(message.content) ?? before?.thinking;
+    const started = before?.thinkingStartedAt;
     const final: MessageItem = {
       kind: "message",
       id: previous?.id ?? message.id ?? nextId("msg"),
       role,
       text: textOf(message.content),
-      thinking: thinkingOf(message.content),
+      // What streamed stays when the final message leaves a part out.
+      thinking,
+      thinkingStartedAt: started,
+      thinkingMs: before?.thinkingMs ?? (started !== undefined && thinking !== undefined ? Date.now() - started : undefined),
       images: imagesOf(message.content),
       streaming: false,
       open: false,
@@ -353,11 +378,18 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     return [...items, notice];
   }
   if (type === "turn_end" || type === "agent_end") {
+    const now = Date.now();
     return items
       .filter((item) => !(item.kind === "message" && item.open === true && blank(item)))
       .map((item) =>
         item.kind === "message" && (item.streaming === true || item.open === true)
-          ? { ...item, streaming: false, open: false }
+          ? {
+              ...item,
+              streaming: false,
+              open: false,
+              thinkingMs:
+                item.thinkingMs ?? (item.thinkingStartedAt !== undefined && item.thinking !== undefined ? now - item.thinkingStartedAt : undefined),
+            }
           : item,
       );
   }

@@ -2,10 +2,11 @@ import { useMemo, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { diffLines, editInput, editSides, type DiffLine } from "../diff";
 import { resultText } from "../messages";
-import { stepStat, stepTarget, stepTitle, toolKind, type Step } from "../rows";
+import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
+import { Markdown } from "./Markdown";
 import { KindGlyph, Thumbs } from "./Transcript";
 import { Sheet } from "./ui";
 
@@ -72,7 +73,10 @@ export function ToolSheet({
   const content = useMemo(() => {
     if (step === null) return null;
     if (step.kind === "thought") {
-      return { title: t("transcript.thought"), body: <Text style={styles.prose} selectable>{(step.item.thinking ?? "").trim()}</Text> };
+      return {
+        title: thoughtLabel(step.item.thinkingMs),
+        body: <Markdown text={(step.item.thinking ?? "").trim()} variant="thought" />,
+      };
     }
     const tool = step.tool;
     const target = stepTarget(tool, cwd);
@@ -236,6 +240,5 @@ function createStyles(c: Palette) {
     remove: { ...code, color: c.err },
     same: { ...code, color: c.fgFaint },
     images: { marginTop: 2 },
-    prose: { fontFamily: SANS, fontSize: 14, lineHeight: 22, color: c.fgMuted },
   } as const;
 }

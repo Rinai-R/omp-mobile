@@ -110,6 +110,10 @@ export interface MessageItem {
   role: "user" | "assistant" | "system";
   text: string;
   thinking?: string;
+  /** When the phone saw the first thinking arrive (epoch ms); absent for messages loaded from a snapshot. */
+  thinkingStartedAt?: number;
+  /** How long the thinking ran, until the answer's first text (or the message's end). */
+  thinkingMs?: number;
   /** Images the user attached, in content order. */
   images?: ImagePart[];
   streaming?: boolean;

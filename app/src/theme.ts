@@ -7,7 +7,8 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  * `panel`, `raised` and `overlay`; `inset` sits below them for code and tool
  * output, `well` is the fill of icon tiles and inputs. The brand gradient runs
  * magenta → violet → cyan (`accentA` → `accentV` → `accentB`) and is used
- * sparingly; `accent` is the solid magenta.
+ * sparingly; `accent` is the solid magenta. `codeBg`, `codeHead` and
+ * `inlineCode` tint code in replies: a block, its header, a span in prose.
  */
 export function palette(scheme: ColorSchemeName) {
   return scheme === "light"
@@ -20,6 +21,9 @@ export function palette(scheme: ColorSchemeName) {
         overlay: "#ffffff",
         well: "#f0f0f2",
         userBubble: "#ececf0",
+        codeBg: "#f4f4f6",
+        codeHead: "#ebebef",
+        inlineCode: "#00000009",
         hover: "#00000008",
         selected: "#0000000f",
         fg: "#111114",
@@ -58,6 +62,9 @@ export function palette(scheme: ColorSchemeName) {
         overlay: "#0f0f12",
         well: "#1a1a1f",
         userBubble: "#17171c",
+        codeBg: "#0e0e11",
+        codeHead: "#16161b",
+        inlineCode: "#ffffff10",
         hover: "#ffffff0a",
         selected: "#ffffff14",
         fg: "#f5f5f5",
@@ -115,7 +122,9 @@ export function useColors(): Palette {
  * `fontWeight` "400", "500" or "600"; nothing heavier is bundled.
  */
 export const SANS = "Geist";
+/** JetBrains Mono NL, the cut without ligatures: code shows `=>` and `!=` as typed. */
 export const MONO = "JetBrains Mono";
+
 
 /** The topbar height and the minimum touch target. */
 export const HEADER_HEIGHT = 56;
