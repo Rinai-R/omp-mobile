@@ -124,6 +124,10 @@ data: {"kind":"approval","key":"<request id>","sessionId":"…","sessionTitle":"
 
 On Android, **Settings → Notifications** asks for the notification permission (Android 13 and later) and starts a foreground service ("Watching N machines") that holds one stream per paired computer and reconnects with backoff and on network changes. Approvals and questions are posted heads-up on the "Approvals & questions" channel, finished turns on "Finished turns"; `resolved` withdraws the notification, nothing is posted for the session on screen, and a tap opens that chat. The service starts again after a reboot when notifications were on. While the app is open, a frame for another session shows as a banner. iOS has no background service; the module does nothing there.
 
+## Language
+
+The app's text lives in two catalogs, `app/src/i18n/en.ts` and `app/src/i18n/zh-CN.ts`, with the same keys and `{name}` placeholders (a test checks both); a counted message has `one` / `other` forms in English and one form in Chinese. The language follows the phone's locale (any `zh*` → Simplified Chinese, else English) unless **Settings → Language** picks one; the choice is stored with the settings, and a change re-renders the whole tree at once. The notification service composes its text natively, so the app hands it the strings in its language (`setStrings`), which it keeps for after a reboot and uses to rename its channels. Text from OMP and the daemon is shown as it arrives.
+
 ## Phone storage
 
 - Paired machines and settings: AsyncStorage.
@@ -151,6 +155,7 @@ On Android, **Settings → Notifications** asks for the notification permission 
 | `app/src/probe.ts` | Machine reachability and its one-line summary |
 | `app/src/pairing.ts` | Pairing link parsing and the tailnet check |
 | `app/src/cache.ts`, `app/src/transcripts.ts` | What the phone keeps of transcripts and session lists, and where |
+| `app/src/i18n/` | Catalogs, `t()`, the language preference and the phone's locale |
 | `app/src/screens/` | Machines, Sessions, Chat, Settings, pairing scanner |
 | `app/src/components/` | Transcript items, sheets, machine switcher, brand, shared UI |
 | `app/modules/omp-attention/` | Expo local module (Kotlin): foreground service, notifications, boot receiver; `src/index.ts` is its JS API |
