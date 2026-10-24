@@ -1,5 +1,6 @@
-import type { Hello, Machine, SessionSummary, ServerMessage } from "./types";
+import type { Hello, Machine, SessionOwner, SessionSummary, ServerMessage } from "./types";
 import { t } from "./i18n/index.ts";
+import { ownerOf } from "./takeover.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 
@@ -14,7 +15,7 @@ async function request<T>(machine: Machine, path: string, init: RequestInit = {}
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new HttpError(response.status, errorText(text) || `HTTP ${response.status}`);
+    throw new HttpError(response.status, errorText(text) || `HTTP ${response.status}`, ownerOf(errorField(text, "owner")));
   }
   return (await response.json()) as T;
 }
@@ -24,6 +25,8 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** For a 409: the omp process that holds the session. */
+    readonly owner?: SessionOwner,
   ) {
     super(message);
     this.name = "HttpError";
@@ -39,6 +42,15 @@ export async function daemonFeatures(machine: Machine): Promise<string[]> {
     return Array.isArray(data.features) ? data.features.filter((feature) => typeof feature === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/** One field of a JSON error answer. */
+function errorField(body: string, field: string): unknown {
+  try {
+    return (JSON.parse(body) as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
   }
 }
 
@@ -105,10 +117,23 @@ export async function openSession(machine: Machine, id: string): Promise<void> {
   await request<unknown>(machine, `/sessions/${encodeURIComponent(id)}`);
 }
 
+/**
+ * Ask the daemon to take a session over from the omp process that holds it
+ * (it closes that process, gracefully), then open it. Resolves once the session is the daemon's.
+ */
+export async function takeOverSession(machine: Machine, id: string): Promise<void> {
+  await request<unknown>(machine, `/sessions/${encodeURIComponent(id)}/takeover`, {
+    method: "POST",
+    body: JSON.stringify({ device: "OMP Mobile" }),
+  });
+}
+
 /** Why a session socket gave up: the daemon's own answer, as `open_failed` carries it. */
 export interface OpenFailure {
   status: number;
   error: string;
+  /** For a 409 from a daemon that offers takeover: the process that holds the session. */
+  owner?: SessionOwner;
 }
 
 /**
@@ -161,7 +186,7 @@ export class SessionSocket {
       }
       if (message.type === "open_failed") {
         this.failed = true;
-        this.onFailed({ status: message.status, error: message.error });
+        this.onFailed({ status: message.status, error: message.error, owner: ownerOf(message.owner) });
         return;
       }
       if (!opened && message.type === "snapshot") {

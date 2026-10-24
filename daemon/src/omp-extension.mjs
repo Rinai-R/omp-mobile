@@ -9,13 +9,19 @@
  *
  * It runs on the Bun that ships inside omp (`BUN_BE_BUN=1`), so no separate
  * Node.js is needed, and binds this computer's Tailscale IPv4 (`--host tailscale`).
+ *
+ * In every omp it is loaded into, it also watches for the daemon's takeover
+ * request for the session that omp has open (a file beside the session file,
+ * see `takeover.mjs`): it then says where the session went, stops the turn and
+ * closes omp through OMP's own shutdown, so the phone can continue it.
  */
 import { spawn } from "node:child_process";
-import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync } from "node:fs";
+import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderQr } from "./qr.mjs";
+import { requestPath } from "./takeover.mjs";
 
 const HOME = join(homedir(), ".omp-mobile");
 const STATE_FILE = join(HOME, "daemon.json");
@@ -26,6 +32,11 @@ const START_TIMEOUT_MS = 20_000;
 const POLL_MS = 1_500;
 /** How long the code stays up without a phone connecting. */
 const SHOW_MS = 5 * 60_000;
+/** How often the session's takeover request is looked for, and how stale one may be. */
+const TAKEOVER_POLL_MS = 1_000;
+const TAKEOVER_MAX_AGE_MS = 60_000;
+/** How long a running turn gets to stop before omp closes anyway. */
+const TAKEOVER_IDLE_WAIT_MS = 5_000;
 const SUBCOMMANDS = [
   { value: "status", label: "status", description: "Is the daemon running, and where" },
   { value: "stop", label: "stop", description: "Stop the background daemon" },
@@ -180,7 +191,51 @@ export function pairingWidget({ title, code, notes }) {
   });
 }
 
+/**
+ * The daemon's takeover request for this process and session, if there is a
+ * fresh one. A request for another process or an old one is left alone.
+ * @returns {{device: string} | undefined}
+ */
+export function takeoverRequest(sessionFile, sessionId, pid = process.pid, now = Date.now()) {
+  if (typeof sessionFile !== "string" || sessionFile === "") return undefined;
+  let request;
+  try {
+    request = JSON.parse(readFileSync(requestPath(sessionFile), "utf8"));
+  } catch {
+    return undefined;
+  }
+  if (request?.pid !== pid || request.sessionId !== sessionId) return undefined;
+  if (typeof request.at !== "number" || now - request.at > TAKEOVER_MAX_AGE_MS) return undefined;
+  return { device: typeof request.device === "string" && request.device !== "" ? request.device : "OMP Mobile" };
+}
+
 export default function ompMobile(pi) {
+  /** The takeover watch for the session this omp has open. */
+  let watching;
+  let leaving = false;
+
+  pi.on("session_start", (_event, ctx) => {
+    if (watching !== undefined) ctx.clearTimer(watching);
+    watching = ctx.setInterval(async () => {
+      if (leaving) return;
+      const file = ctx.sessionManager.getSessionFile();
+      const request = takeoverRequest(file, ctx.sessionManager.getSessionId());
+      if (request === undefined) return;
+      leaving = true;
+      // Taking the request is the answer the daemon waits for before it would signal.
+      rmSync(requestPath(file), { force: true });
+      // OMP closes once the session is idle; the daemon signals it if that does not come soon,
+      // and tells the terminal where the session went once omp is gone.
+      ctx.ui.notify(`OMP Mobile: this session continues on ${request.device}. Closing omp here…`, "warning");
+      if (!ctx.isIdle()) {
+        ctx.abort();
+        const deadline = Date.now() + TAKEOVER_IDLE_WAIT_MS;
+        while (!ctx.isIdle() && Date.now() < deadline) await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+      ctx.shutdown();
+    }, TAKEOVER_POLL_MS);
+  });
+
   /** The pairing code on screen: its watcher and when it appeared. */
   let showing;
 

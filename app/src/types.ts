@@ -27,10 +27,21 @@ export interface SessionSummary {
   sessionFile?: string;
   /** `daemon`: started from this app; `omp`: an OMP session from a terminal on the computer. */
   origin: "daemon" | "omp";
-  /** Another omp process (a terminal) has it open; the daemon will not open it until that one exits. */
+  /** Another omp process (a terminal) has it open; the daemon will not open it until that one exits or is taken over. */
   openElsewhere?: boolean;
+  /** That process, from daemons that offer the `takeover` feature. */
+  owner?: SessionOwner;
   /** OMP questions and tool approvals waiting for an answer (live sessions, newer daemons). */
   waiting?: number;
+}
+
+/** The omp process on the computer that holds a session (issue #28). */
+export interface SessionOwner {
+  pid: number;
+  /** It is in the middle of a turn. */
+  busy: boolean;
+  /** It runs in a terminal. */
+  terminal: boolean;
 }
 
 export interface SessionState {
@@ -162,7 +173,7 @@ export type ServerMessage =
   | { type: "notice"; level: "info" | "warning" | "error"; message: string }
   | { type: "closed"; reason: string; stderr?: string }
   /** The session could not open (unknown, file gone, held by another omp, OMP failed to load it); the socket closes next. */
-  | { type: "open_failed"; status: number; error: string }
+  | { type: "open_failed"; status: number; error: string; owner?: SessionOwner }
   | { type: "accepted"; command: string }
   /** `command`: the frame that failed (daemons before 0.3 leave it out). */
   | { type: "error"; error: string; command?: string }

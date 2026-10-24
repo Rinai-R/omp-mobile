@@ -59,10 +59,11 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 | Route | Answer |
 | --- | --- |
-| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user, features}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`, `features` what the daemon supports beyond protocol 1 (`prompt-images`: `prompt` frames carry images). The app offers a feature only to a daemon that lists it. |
-| `GET /sessions` | `{sessions: [...]}`: live sessions, then dormant ones this daemon created, then terminal sessions. Each has `id`, `title`, `cwd`, `status` (`idle` or `streaming`), `model`, `createdAt`, `updatedAt`, `sessionFile`, `origin` (`daemon` or `omp`), `openElsewhere` when another omp process holds it, and for live sessions `waiting`: OMP questions and approvals still open. |
+| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user, features}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`, `features` what the daemon supports beyond protocol 1 (`prompt-images`: `prompt` frames carry images; `takeover`: `POST /sessions/:id/takeover`). The app offers a feature only to a daemon that lists it. |
+| `GET /sessions` | `{sessions: [...]}`: live sessions, then dormant ones this daemon created, then terminal sessions. Each has `id`, `title`, `cwd`, `status` (`idle` or `streaming`), `model`, `createdAt`, `updatedAt`, `sessionFile`, `origin` (`daemon` or `omp`), `openElsewhere` when another omp process holds it with `owner` `{pid, busy, terminal}` (`busy`: mid-turn by the session file's last message; `terminal`: it has a controlling terminal), and for live sessions `waiting`: OMP questions and approvals still open. |
 | `POST /sessions` | Body `{cwd?, prompt?}`. Starts a session in `cwd` (default `--cwd`), sends `prompt` if given; `201 {session}`, `400` when `cwd` is not a directory. |
-| `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process. |
+| `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process (with `owner`). |
+| `POST /sessions/:id/takeover` | Body `{device?}`. Takes the session from the omp process that holds it (see Sessions), then opens it: the snapshot plus `takeover: {pid, via, waitedMs, busy, forks}`, `via` being `extension`, `SIGINT`, `SIGTERM`, `exited`, `free` (nobody held it) or `live` (already the daemon's). `504` when the holder did not exit (it keeps the session), `409` when the holder is not omp, `503` without `lsof`. Concurrent takeovers of one session share one attempt. |
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it; the OMP session file stays. |
 | `GET /events` | The attention stream (Server-Sent Events), see below. |
 | `GET /blobs/<sha256>` | One image from OMP's content-addressed store (`<omp home>/agent/blobs`), typed from its bytes. |
@@ -71,7 +72,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 ### Session socket
 
-On connect the daemon sends `{type: "snapshot", session, state, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
+On connect the daemon sends `{type: "snapshot", session, state, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error, owner?}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
 
 | From the daemon | Meaning |
 | --- | --- |
@@ -105,6 +106,7 @@ Images arrive as `{type: "image", data, mimeType}`. Inline base64 becomes a data
 - **Created by the daemon:** registered in the registry file and resumed with `omp --resume <file>` the first time one is opened after a daemon restart.
 - **Terminal sessions:** the 50 most recently written OMP sessions under `<omp home>/agent/sessions`, titled by OMP's title slot, else the first prompt, else the directory. Opening one resumes it and it becomes one of the daemon's sessions.
 - **Held elsewhere:** every writing omp process holds `<omp home>/run/session-owners/<id>.lock` open. The daemon reads these with `lsof`, marks such sessions `openElsewhere`, and answers a resume `409`, because a second omp on the same file saves to a new file instead of sharing it. Without `lsof` ownership is unknown and the resume goes ahead.
+- **Taking over** (`daemon/src/takeover.mjs`): OMP has no way to attach a second process to a running session, so the phone continues one by asking its owner to leave. The daemon writes `.<session file name>.omp-mobile-takeover` beside the session file; the omp-mobile plugin in that omp removes it, shows where the session went, aborts the turn and closes omp through OMP's shutdown. If nothing takes the request within 2.5 s, or omp is still running 10 s after it did, the owner gets `SIGINT`, then after 10 s `SIGTERM`; OMP runs both through its Ctrl+C teardown (the session is flushed, a `session_exit` entry closes it, the lock is released). There is no `SIGKILL`. Only the lock's holder is signalled: an omp that has a session open without having written it holds no lock and would fork the session when it saves on exit. The terminal gets one line saying the session continues on the phone, and a session file forked from the session during the takeover (a header whose `parentSession` is its id) is logged and reported in `forks`.
 - Concurrent opens of one session share one OMP start. If the start or the first load fails, the daemon closes the OMP process it started, so no child of its own is left holding the session's lock.
 - A live session whose OMP process exited is started again on the next open instead of being served dead.
 
@@ -147,8 +149,9 @@ The app's text lives in two catalogs, `app/src/i18n/en.ts` and `app/src/i18n/zh-
 | `daemon/src/admission.mjs` | `tailscale status` / `whois` wrapper, Host and same-user admission |
 | `daemon/src/attention.mjs` | Attention frames from session broadcasts, `GET /events` |
 | `daemon/src/omp-sessions.mjs` | OMP's sessions on disk and their owner locks |
+| `daemon/src/takeover.mjs` | Taking a session from the omp that holds it: request file, signals, mid-turn and fork checks |
 | `daemon/src/qr.mjs` | Terminal QR code |
-| `daemon/src/omp-extension.mjs` | The OMP plugin: `/mobile`, starting and stopping the background daemon, the pairing widget |
+| `daemon/src/omp-extension.mjs` | The OMP plugin: `/mobile`, starting and stopping the background daemon, the pairing widget, answering a takeover |
 | `app/App.tsx` | Routes, machines, probing, notification wiring |
 | `app/src/api.ts` | Daemon REST and the session socket |
 | `app/src/messages.ts` | OMP events and stored messages to native transcript items |

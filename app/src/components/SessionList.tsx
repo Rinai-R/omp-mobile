@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { listSessions } from "../api";
 import { age, folderOf, type SessionGroup } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { heldDetail } from "../takeover";
 import { loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
@@ -84,7 +85,7 @@ export function SessionRow({
   const running = session.status === "streaming";
   const waiting = (session.waiting ?? 0) > 0;
   const locked = session.openElsewhere === true;
-  const detail = [folderOf(session.cwd), locked ? t("session.inTerminal") : waiting ? t("session.waiting") : session.model]
+  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : waiting ? t("session.waiting") : session.model]
     .filter(Boolean)
     .join(" · ");
   const when = age(session.updatedAt);

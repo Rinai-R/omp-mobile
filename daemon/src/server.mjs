@@ -19,6 +19,7 @@ import { RpcSession } from "./rpc-session.mjs";
 import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
 import { listOmpSessions, promptTitle, sessionOwners } from "./omp-sessions.mjs";
+import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
@@ -73,19 +74,29 @@ export function promptImages(value) {
 
 /**
  * What this daemon supports beyond protocol 1, for an app to offer only what
- * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`.
+ * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`;
+ * `takeover`: `POST /sessions/:id/takeover` continues a session another omp process holds.
  */
-const FEATURES = ["prompt-images"];
+const FEATURES = ["prompt-images", "takeover"];
+/** Who a phone continues a session on, as the terminal it leaves is told. */
+const DEFAULT_DEVICE = "OMP Mobile";
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
 const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
-/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, waiting?: number}} SessionSummary */
+/** @typedef {{pid: number, busy: boolean, terminal: boolean}} SessionOwner */
+/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, owner?: SessionOwner, waiting?: number}} SessionSummary */
 
-/** An error with the HTTP status it answers. */
-function httpError(status, message) {
-  return Object.assign(new Error(message), { status });
+/** An error with the HTTP status it answers, and any detail its JSON answer carries. */
+function httpError(status, message, detail = {}) {
+  return Object.assign(new Error(message), { status, detail });
+}
+
+/** The JSON answer for a failed request: the reason and the error's detail (a 409's `owner`). */
+function errorBody(error) {
+  const detail = error !== null && typeof error === "object" && typeof error.detail === "object" ? error.detail : {};
+  return { error: error instanceof Error ? error.message : String(error), ...detail };
 }
 
 function parseArgs(argv) {
@@ -511,6 +522,8 @@ class Daemon {
     this.ompSessions = new Map();
     /** Resumes in flight, so two opens of one session start one process. @type {Map<string, Promise<SessionEntry>>} */
     this.starting = new Map();
+    /** Takeovers in flight, so two phones asking at once ask the owner once. @type {Map<string, Promise<object>>} */
+    this.takingOver = new Map();
     this.server = createServer((req, res) => void this.admitHttp(req, res));
     this.wsServer = new WebSocketServer({ noServer: true });
     this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
@@ -624,6 +637,13 @@ class Daemon {
         sendJson(res, 201, { session: entry.summary() });
         return;
       }
+      const takeover = /^\/sessions\/([^/]+)\/takeover$/.exec(url.pathname);
+      if (takeover !== null && req.method === "POST") {
+        const body = await readBody(req);
+        const device = typeof body.device === "string" && body.device.trim() !== "" ? body.device.trim().slice(0, 60) : DEFAULT_DEVICE;
+        sendJson(res, 200, await this.takeOver(decodeURIComponent(takeover[1]), device));
+        return;
+      }
       const match = /^\/sessions\/([^/]+)$/.exec(url.pathname);
       if (match !== null) {
         const id = decodeURIComponent(match[1]);
@@ -648,7 +668,7 @@ class Daemon {
       const status = typeof error?.status === "number" ? error.status : 500;
       // A refusal the API defines (404, 409, 410) is an answer; anything else is a failure worth keeping.
       if (status >= 500) this.log(error);
-      sendJson(res, status, { error: error instanceof Error ? error.message : String(error) });
+      sendJson(res, status, errorBody(error));
     }
   }
 
@@ -672,10 +692,24 @@ class Daemon {
     const others = found
       .filter((session) => !known.has(session.id))
       .map((session) => ({ ...session, status: "idle", origin: "omp" }));
-    const marked = [...dormant, ...others].map((session) =>
-      owners?.has(session.id) === true ? { ...session, openElsewhere: true } : session,
+    const marked = await Promise.all(
+      [...dormant, ...others].map(async (session) => {
+        const pid = owners?.get(session.id);
+        if (pid === undefined) return session;
+        return { ...session, openElsewhere: true, owner: await this.ownerOf(pid, session.sessionFile) };
+      }),
     );
     return [...live, ...marked];
+  }
+
+  /**
+   * What the phone is told about the process holding a session: whether it is
+   * mid-turn (by the session file's last message) and runs in a terminal.
+   * @returns {Promise<SessionSummary["owner"]>}
+   */
+  async ownerOf(pid, sessionFile) {
+    const info = await processInfo(pid);
+    return { pid, busy: typeof sessionFile === "string" && sessionBusy(sessionFile), terminal: info?.tty !== undefined };
   }
 
   /** Which sessions some omp process holds open (`undefined`: cannot tell). */
@@ -721,7 +755,9 @@ class Daemon {
     // stays with the process that has it (a terminal) until that one exits.
     const owner = (await this.owners())?.get(id);
     if (owner !== undefined) {
-      throw httpError(409, `This session is open in another omp process (pid ${owner}). Close it there to continue here.`);
+      throw httpError(409, `This session is open in another omp process (pid ${owner}). Close it there to continue here.`, {
+        owner: await this.ownerOf(owner, stored.sessionFile),
+      });
     }
     const rpc = new RpcSession({
       cwd: stored.cwd,
@@ -748,6 +784,55 @@ class Daemon {
       rpc.close();
       throw error;
     }
+  }
+
+  /**
+   * Continue a session another omp process holds: ask that process to leave
+   * (see `takeover.mjs`), then open the session here. Concurrent takeovers of
+   * one session share one attempt.
+   * @param {string} id
+   * @param {string} device Who continues it, as the terminal is told.
+   */
+  takeOver(id, device) {
+    let running = this.takingOver.get(id);
+    if (running === undefined) {
+      running = this.runTakeover(id, device).finally(() => this.takingOver.delete(id));
+      this.takingOver.set(id, running);
+    }
+    return running;
+  }
+
+  async runTakeover(id, device) {
+    const live = this.sessions.get(id);
+    if (live !== undefined && !live.closed) return { ...live.snapshot(), takeover: { pid: null, via: "live", waitedMs: 0, busy: false, forks: [] } };
+    // The phone may take over a session listed before this daemon started.
+    if (!this.registry.has(id) && !this.ompSessions.has(id)) await this.listSessions();
+    const stored = this.registry.get(id) ?? this.ompSessions.get(id);
+    if (stored === undefined || typeof stored.sessionFile !== "string") throw httpError(404, "unknown session");
+    if (!existsSync(stored.sessionFile)) throw httpError(410, "session file is gone");
+    const owners = await this.owners();
+    if (owners === undefined) throw httpError(503, "Cannot tell which process holds this session (lsof is not available).");
+    const pid = owners.get(id);
+    let outcome = { pid: null, via: "free", waitedMs: 0, busy: false, forks: [] };
+    if (pid !== undefined) {
+      const info = await processInfo(pid);
+      if (info !== undefined && !isOmpCommand(info.command)) {
+        throw httpError(409, `The process holding this session (pid ${pid}) is not omp; it is left alone.`);
+      }
+      const busy = sessionBusy(stored.sessionFile);
+      const since = Date.now();
+      const left = await askOwnerToLeave({ pid, sessionId: id, sessionFile: stored.sessionFile, device, timings: this.options.takeoverTimings });
+      // The kernel drops the lock with the process; give a slow exit a moment.
+      const deadline = Date.now() + 3_000;
+      while ((await this.owners())?.get(id) === pid && Date.now() < deadline) await new Promise((wait) => setTimeout(wait, 100));
+      // Whoever looks at the terminal sees why omp closed.
+      if (info?.tty !== undefined) tellTerminal(info.tty, takeoverFarewell(device));
+      const forks = forksOf(dirname(stored.sessionFile), id, since);
+      if (forks.length > 0) this.log(new Error(`taking over ${id} from pid ${pid} left forked session files: ${forks.join(", ")}`));
+      outcome = { pid, via: left.via, waitedMs: left.waitedMs, busy, forks };
+    }
+    const entry = await this.ensureLive(id);
+    return { ...entry.snapshot(), takeover: outcome };
   }
 
   async createSession(cwd) {
@@ -808,7 +893,7 @@ class Daemon {
         // the handshake instead, say why the session cannot open, and close: the app
         // shows the reason and stops retrying what a retry cannot fix.
         this.wsServer.handleUpgrade(req, socket, head, (ws) => {
-          ws.send(JSON.stringify({ type: "open_failed", status, error: error instanceof Error ? error.message : String(error) }));
+          ws.send(JSON.stringify({ type: "open_failed", status, ...errorBody(error) }));
           ws.close(OPEN_FAILED_CLOSE_CODE, "session did not open");
         });
       });
