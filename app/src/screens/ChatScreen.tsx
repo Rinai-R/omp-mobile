@@ -471,7 +471,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             style={failure !== null ? styles.listDim : undefined}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-            maintainVisibleContentPosition={{ minIndexForVisible: 1, autoscrollToTopThreshold: NEAR_BOTTOM }}
+            // At the bottom the inverted list keeps the newest row pinned while it streams and grows.
+            // Scrolled up, the rows in view stay put while new ones arrive below.
+            maintainVisibleContentPosition={away ? { minIndexForVisible: 0 } : undefined}
             initialNumToRender={14}
             windowSize={11}
           />
