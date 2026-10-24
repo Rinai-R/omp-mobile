@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Easing, useColorScheme, type ColorSchemeName, type FontVariant } from "react-native";
+import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
 
 /**
  * OMP's design tokens, as omp.sh and my.omp.sh resolve them: near-black
@@ -122,12 +122,9 @@ export function useColors(): Palette {
  * `fontWeight` "400", "500" or "600"; nothing heavier is bundled.
  */
 export const SANS = "Geist";
+/** JetBrains Mono NL, the cut without ligatures: code shows `=>` and `!=` as typed. */
 export const MONO = "JetBrains Mono";
-/**
- * JetBrains Mono's ligatures off (they ride on contextual alternates): code
- * shows `=>` and `!=` as the characters typed and copied.
- */
-export const MONO_PLAIN: FontVariant[] = ["no-contextual", "no-common-ligatures"];
+
 
 /** The topbar height and the minimum touch target. */
 export const HEADER_HEIGHT = 56;
@@ -147,9 +144,9 @@ export const type = {
   bodyMedium: { fontFamily: SANS, fontSize: 15, lineHeight: 21, fontWeight: "500" as const },
   small: { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400" as const },
   /** Metadata: paths, models, times. */
-  mono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, fontWeight: "400" as const, fontVariant: MONO_PLAIN },
+  mono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, fontWeight: "400" as const },
   /** Code and tool output. */
-  code: { fontFamily: MONO, fontSize: 12, lineHeight: 18, fontWeight: "400" as const, fontVariant: MONO_PLAIN },
+  code: { fontFamily: MONO, fontSize: 12, lineHeight: 18, fontWeight: "400" as const },
   /** Uppercase section labels with wide tracking, as omp.sh sets them. */
   label: {
     fontFamily: MONO,

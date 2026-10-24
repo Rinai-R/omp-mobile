@@ -25,7 +25,7 @@ import {
   type Step,
   type ToolKind,
 } from "../rows";
-import { MONO, MONO_PLAIN, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem } from "../types";
 import { BrandMark, Spinner, useEnter, usePulse } from "./brand";
 import {
@@ -493,7 +493,7 @@ function createStyles(c: Palette) {
   } as const;
   const iconTile = { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.well } as const;
   const stepTitle = { fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgMuted } as const;
-  const mono = { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, fontWeight: "400", color: c.fgGhost } as const;
+  const mono = { fontFamily: MONO, fontSize: 11, lineHeight: 15, fontWeight: "400", color: c.fgGhost } as const;
   const notice = {
     flexDirection: "row",
     gap: 8,
@@ -505,7 +505,7 @@ function createStyles(c: Palette) {
     backgroundColor: c.hover,
   } as const;
   const noticeDot = { width: 5, height: 5, borderRadius: 3, marginTop: 6, backgroundColor: c.fgGhost } as const;
-  const noticeText = { flex: 1, fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 17, color: c.fgFaint } as const;
+  const noticeText = { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint } as const;
   const badge = { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center" } as const;
   const actTitle = { flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgMuted } as const;
   return {
@@ -522,7 +522,7 @@ function createStyles(c: Palette) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
     },
-    turnName: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgFaint },
+    turnName: { fontFamily: MONO, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgFaint },
 
     userRow: { flexDirection: "row", justifyContent: "flex-end", paddingLeft: 56, paddingRight: 14, marginTop: 14, marginBottom: 4 },
     bubble: {
@@ -570,13 +570,13 @@ function createStyles(c: Palette) {
     actBadgeErrText: { fontFamily: SANS, fontSize: 11, lineHeight: 14, fontWeight: "600", color: c.err },
     actTitle,
     actTitleLive: { ...actTitle, color: c.fg },
-    actMeta: { flexShrink: 0, maxWidth: "45%", fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, color: c.fgGhost },
+    actMeta: { flexShrink: 0, maxWidth: "45%", fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgGhost },
     actMetaErr: { color: c.err },
     actImages: { paddingHorizontal: 12, paddingBottom: 12 },
     steps: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, paddingVertical: 4 },
     step: { flexDirection: "row", alignItems: "center", gap: 10, height: STEP_HEIGHT, paddingHorizontal: 12 },
     more: { flexDirection: "row", alignItems: "center", gap: 6, height: 36, paddingLeft: 48, paddingRight: 12 },
-    moreText: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, color: c.fgFaint },
+    moreText: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     stepIcon: iconTile,
     stepIconLive: { ...iconTile, backgroundColor: c.accentMuted },
     stepIconErr: { ...iconTile, backgroundColor: c.errSoft },

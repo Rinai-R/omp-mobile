@@ -3,7 +3,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRe
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View, type FontVariant } from "react-native";
 import { parseInline, parseMarkdown, plainText, type Align, type Block, type Inline, type ListItem } from "../markdown";
 import { t } from "../i18n/index.ts";
-import { SANS, MONO, MONO_PLAIN, radius, useColors, useStyles, type Palette } from "../theme";
+import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import { CheckGlyph, CopyGlyph } from "./icons";
 
 /**
@@ -404,7 +404,7 @@ function createStyles(c: Palette, size: number, line: number, quiet: boolean) {
     strike: { textDecorationLine: "line-through", color: c.fgFaint },
     link: { color: c.accent, textDecorationLine: "underline" },
     // Two sizes under the prose and a faint tint: a span, not a block, inside CJK lines.
-    inlineCode: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: size - 2, color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
+    inlineCode: { fontFamily: MONO, fontSize: size - 2, color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
 
     list: { gap: Math.round(6 * k) },
     item: { flexDirection: "row" },
@@ -442,11 +442,11 @@ function createStyles(c: Palette, size: number, line: number, quiet: boolean) {
       paddingRight: 6,
       backgroundColor: c.codeHead,
     },
-    codeLang: { flexShrink: 1, fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, color: c.fgFaint },
+    codeLang: { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     copy: { alignItems: "center", justifyContent: "center", width: 30, height: 26, borderRadius: radius.sm },
     copyPressed: { backgroundColor: c.hover },
     codeScroll: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12 },
-    codeText: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: codeSize, lineHeight: Math.round(codeSize * 1.55), color: quiet ? c.fgMuted : c.fg },
+    codeText: { fontFamily: MONO, fontSize: codeSize, lineHeight: Math.round(codeSize * 1.55), color: quiet ? c.fgMuted : c.fg },
 
     table: { minColumn: 72, maxColumn: 280, charWidth: (size - 2) * 0.6 },
     tableBox: {

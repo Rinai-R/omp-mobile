@@ -86,15 +86,15 @@
                 "fontFamily": "JetBrains Mono",
                 "fontDefinitions": [
                   {
-                    "path": "./assets/fonts/JetBrainsMono-Regular.ttf",
+                    "path": "./assets/fonts/JetBrainsMonoNL-Regular.ttf",
                     "weight": 400
                   },
                   {
-                    "path": "./assets/fonts/JetBrainsMono-Medium.ttf",
+                    "path": "./assets/fonts/JetBrainsMonoNL-Medium.ttf",
                     "weight": 500
                   },
                   {
-                    "path": "./assets/fonts/JetBrainsMono-SemiBold.ttf",
+                    "path": "./assets/fonts/JetBrainsMonoNL-SemiBold.ttf",
                     "weight": 600
                   }
                 ]
@@ -106,9 +106,9 @@
               "./assets/fonts/Geist-Regular.ttf",
               "./assets/fonts/Geist-Medium.ttf",
               "./assets/fonts/Geist-SemiBold.ttf",
-              "./assets/fonts/JetBrainsMono-Regular.ttf",
-              "./assets/fonts/JetBrainsMono-Medium.ttf",
-              "./assets/fonts/JetBrainsMono-SemiBold.ttf"
+              "./assets/fonts/JetBrainsMonoNL-Regular.ttf",
+              "./assets/fonts/JetBrainsMonoNL-Medium.ttf",
+              "./assets/fonts/JetBrainsMonoNL-SemiBold.ttf"
             ]
           }
         }

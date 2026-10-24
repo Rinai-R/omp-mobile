@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-n
 import { diffLines, editInput, editSides, type DiffLine } from "../diff";
 import { resultText } from "../messages";
 import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
-import { MONO, MONO_PLAIN, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
 import { Markdown } from "./Markdown";
@@ -208,9 +208,9 @@ function Block({
 }
 
 function createStyles(c: Palette) {
-  const code = { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 12, lineHeight: 18, color: c.fg } as const;
+  const code = { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.fg } as const;
   const label = {
-    fontFamily: MONO, fontVariant: MONO_PLAIN,
+    fontFamily: MONO,
     fontSize: 10.5,
     lineHeight: 14,
     letterSpacing: 1.2,
@@ -222,7 +222,7 @@ function createStyles(c: Palette) {
     scroll: { gap: 14, paddingBottom: 8 },
     meta: { flexDirection: "row", alignItems: "center", gap: 8 },
     metaIcon: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.well },
-    metaText: { flex: 1, fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
+    metaText: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
     block: { gap: 6 },
     label,
     labelErr: { ...label, color: c.err },
