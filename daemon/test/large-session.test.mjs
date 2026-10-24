@@ -218,7 +218,7 @@ test("a session socket that cannot open says why before it closes", async () => 
     });
     assert.equal(outcome.code, 4000);
     const hello = await (await fetch(`http://127.0.0.1:${port}/hello`)).json();
-    assert.deepEqual(hello.features, ["prompt-images"], "the app offers photos only to a daemon that takes them");
+    assert.deepEqual(hello.features, ["prompt-images", "takeover"], "the app offers only what the daemon does");
     assert.deepEqual(outcome.frames, [{ type: "open_failed", status: 500, error: "fake failure" }]);
   } finally {
     await daemon.close();
