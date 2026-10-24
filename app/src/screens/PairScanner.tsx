@@ -212,10 +212,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
         >
           <CloseGlyph size={16} color={DARK.fg} />
         </Pressable>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>{t("scanner.title")}</Text>
-          <Text style={styles.subtitle}>omp-mobile daemon</Text>
-        </View>
+        <Text style={styles.title}>{t("scanner.title")}</Text>
         <View style={styles.iconSpacer} />
       </View>
       <View style={layout.bottom}>
@@ -226,7 +223,6 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
                 {pairing.error}
               </Text>
             ) : null}
-            <Text style={styles.hint}>{t("scanner.hint")}</Text>
             <Pressable onPress={onManual} style={styles.ghost} accessibilityRole="button">
               <KeyboardGlyph color={DARK.fgMuted} />
               <Text style={styles.ghostText}>{t("machines.enterAddress")}</Text>
@@ -359,9 +355,7 @@ const styles = StyleSheet.create({
     borderColor: DARK.borderStrong,
   },
   iconSpacer: { width: 36 },
-  titleBlock: { alignItems: "center", gap: 1 },
   title: { fontFamily: SANS, color: DARK.fg, fontSize: 15, lineHeight: 20, fontWeight: "600", letterSpacing: -0.15 },
-  subtitle: { color: DARK.fgFaint, fontFamily: MONO, fontSize: 11, lineHeight: 15 },
   bottom: {
     position: "absolute",
     left: 0,
@@ -375,7 +369,6 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: DARK.edgeTop,
   },
-  hint: { fontFamily: SANS, color: DARK.fgMuted, fontSize: 14, lineHeight: 21, textAlign: "center", maxWidth: 340 },
   error: {
     alignSelf: "stretch",
     color: DARK.err,

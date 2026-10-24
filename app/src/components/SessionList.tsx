@@ -85,7 +85,8 @@ export function SessionRow({
   const running = session.status === "streaming";
   const waiting = (session.waiting ?? 0) > 0;
   const locked = session.openElsewhere === true;
-  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : waiting ? t("session.waiting") : session.model]
+  // A waiting session says so in its group and its trailing "answer"; its detail stays the folder and the model.
+  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : session.model]
     .filter(Boolean)
     .join(" · ");
   const when = age(session.updatedAt);

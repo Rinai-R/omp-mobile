@@ -1,14 +1,13 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createSession, deleteSession } from "../api";
 import { GradientFill, LiveDot, PulseDot, Wordmark } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
 import { SessionGroups, useMachineSessions } from "../components/SessionList";
 import { displayName } from "../machines";
-import { Banner, Button, Field, IconButton, Sheet } from "../components/ui";
+import { Banner, Button, ConfirmSheet, Field, IconButton, Sheet } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
-import { hostOf } from "../machines";
 import { attentionCount, folderOf, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { dropTranscript } from "../transcripts";
@@ -27,13 +26,6 @@ interface Props {
   newRequest: number;
 }
 
-function osName(os: string): string {
-  if (os === "darwin") return "macOS";
-  if (os === "win32") return "Windows";
-  if (os === "linux") return "Linux";
-  return os;
-}
-
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
 export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, onRetry, newRequest }: Props): ReactNode {
   const styles = useStyles(createStyles);
@@ -44,6 +36,9 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
   const [cwd, setCwd] = useState("");
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  /** The session whose Close is being confirmed, and what the last close failed with. */
+  const [closing, setClosing] = useState<SessionSummary | null>(null);
+  const [closeError, setCloseError] = useState<string | null>(null);
   // Starts at 0, not at newRequest: a home opened with a request (New from the switcher) opens the sheet at once.
   const [lastRequest, setLastRequest] = useState(0);
   if (newRequest !== lastRequest) {
@@ -69,11 +64,12 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
 
   const reachable = sessions !== undefined && error === null;
   const down = probe?.state === "unreachable" && !reachable;
+  // The card names the computer; a second line appears only for state worth reading: why it is down, what runs.
   const detail = down
     ? t("home.unreachable", { reason: reasonText(probe.reason) })
-    : [osName(machine.os), hostOf(machine.url), counts.running > 0 ? t("common.running", { count: counts.running }) : undefined]
-        .filter(Boolean)
-        .join(" · ");
+    : counts.running > 0
+      ? t("common.running", { count: counts.running })
+      : undefined;
 
   const create = useCallback(async () => {
     setBusy(true);
@@ -90,24 +86,20 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
     }
   }, [cwd, machine, onOpen, setSessions]);
 
-  const confirmDelete = useCallback(
+  const confirmDelete = useCallback((session: SessionSummary) => {
+    if (session.origin === "daemon") setClosing(session);
+  }, []);
+  const closeSession = useCallback(
     (session: SessionSummary) => {
-      if (session.origin !== "daemon") return;
-      Alert.alert(t("home.close.title", { title: session.title }), t("home.close.body"), [
-        { text: t("common.cancel"), style: "cancel" },
-        {
-          text: t("home.close.action"),
-          style: "destructive",
-          onPress: () => {
-            void deleteSession(machine, session.id)
-              .then(() => {
-                dropTranscript(machine.id, session.id);
-                setSessions((current) => (current ?? []).filter((item) => item.id !== session.id));
-              })
-              .catch((cause: unknown) => Alert.alert(t("home.close.failed"), cause instanceof Error ? cause.message : String(cause)));
-          },
-        },
-      ]);
+      setCloseError(null);
+      void deleteSession(machine, session.id)
+        .then(() => {
+          dropTranscript(machine.id, session.id);
+          setSessions((current) => (current ?? []).filter((item) => item.id !== session.id));
+        })
+        .catch((cause: unknown) =>
+          setCloseError(t("home.close.failed", { error: cause instanceof Error ? cause.message : String(cause) })),
+        );
     },
     [machine, setSessions],
   );
@@ -148,7 +140,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           onPress={onPickMachine}
           style={({ pressed }) => [styles.machine, pressed && styles.machinePressed]}
           accessibilityRole="button"
-          accessibilityLabel={t("home.machineA11y", { name: machine.name, detail })}
+          accessibilityLabel={t("home.machineA11y", { name: displayName(machine), detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
         >
           <View style={styles.machineTile}>
             <ComputerGlyph size={18} color={down ? colors.fgGhost : colors.fgMuted} />
@@ -157,9 +149,11 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
             <Text style={styles.machineName} numberOfLines={1}>
               {displayName(machine)}
             </Text>
-            <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>
-              {detail}
-            </Text>
+            {detail !== undefined ? (
+              <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>
+                {detail}
+              </Text>
+            ) : null}
           </View>
           {down ? (
             <LiveDot color={colors.err} size={8} />
@@ -175,6 +169,12 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           ) : null}
           <ChevronDownGlyph size={15} color={colors.fgGhost} />
         </Pressable>
+
+        {closeError !== null ? (
+          <View style={styles.bannerWrap}>
+            <Banner text={closeError} onPress={() => setCloseError(null)} />
+          </View>
+        ) : null}
 
         {error !== null && sessions !== undefined ? (
           <View style={styles.bannerWrap}>
@@ -204,7 +204,6 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
               <ChatGlyph size={22} color={colors.fgMuted} />
             </View>
             <Text style={styles.emptyTitle}>{t("home.empty.title")}</Text>
-            <Text style={styles.emptyBody}>{t("home.empty.body", { name: displayName(machine) })}</Text>
           </View>
         ) : (
           <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={confirmDelete} />
@@ -223,7 +222,6 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
       </Pressable>
 
       <Sheet visible={creating} title={t("home.new")} onClose={() => setCreating(false)}>
-        <Text style={styles.hint}>{t("home.newSheet.hint", { name: displayName(machine) })}</Text>
         <Field label={t("home.newSheet.cwd")} value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
         {recent.length > 0 ? (
           <View style={styles.recent}>
@@ -245,6 +243,18 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
         {createError !== null ? <Text style={styles.error}>{createError}</Text> : null}
         <Button label={t("home.newSheet.start")} onPress={() => void create()} busy={busy} />
       </Sheet>
+
+      <ConfirmSheet
+        visible={closing !== null}
+        title={t("home.close.title")}
+        body={t("home.close.body")}
+        action={t("home.close.action")}
+        danger
+        onConfirm={() => {
+          if (closing !== null) closeSession(closing);
+        }}
+        onClose={() => setClosing(null)}
+      />
     </View>
   );
 }
@@ -322,7 +332,6 @@ function createStyles(c: Palette) {
     },
     fabPressed: { transform: [{ scale: 0.97 }] },
     fabText: { fontFamily: SANS, fontSize: 15.5, lineHeight: 20, fontWeight: "600", color: "#ffffff" },
-    hint: { fontFamily: SANS, fontSize: 13.5, lineHeight: 19, color: c.fgFaint, marginHorizontal: 2 },
     recent: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: -4 },
     recentChip: chip,
     recentChipOn: { ...chip, borderColor: c.accent, backgroundColor: c.accentMuted },

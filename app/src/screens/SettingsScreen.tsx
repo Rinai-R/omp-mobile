@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { ScrollView, Switch, View } from "react-native";
+import { ScrollView, Switch, Text, View } from "react-native";
 import { CheckGlyph } from "../components/icons";
 import { Button, Group, Header, Row, SectionHeader } from "../components/ui";
-import { t, type Key, type LanguagePreference } from "../i18n/index.ts";
-import { useColors, useStyles, type Palette } from "../theme";
+import { t, type LanguagePreference } from "../i18n/index.ts";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 
 /**
  * Background notifications as the phone allows them: on, off, refused by the
@@ -23,13 +23,6 @@ interface Props {
   onBack: () => void;
   version: string;
 }
-
-const DETAIL: Record<NotificationState, Key> = {
-  on: "settings.notifications.on",
-  off: "settings.notifications.off",
-  denied: "settings.notifications.denied",
-  unsupported: "settings.notifications.unsupported",
-};
 
 /** Each language under its own name, the same in every language. */
 const LANGUAGE_NAMES = { en: "English", "zh-CN": "中文" } as const;
@@ -53,11 +46,11 @@ export function SettingsScreen({
     <View style={styles.root}>
       <Header title={t("settings.title")} onBack={onBack} />
       <ScrollView contentContainerStyle={styles.content}>
-        <SectionHeader title={t("settings.notifications.section")} />
+        <View style={styles.first} />
         <Group>
           <Row
             title={t("settings.notifications.title")}
-            detail={t(DETAIL[notifications])}
+            detail={notifications === "unsupported" ? t("settings.notifications.unsupported") : undefined}
             last={notifications !== "denied" && !showBattery}
             trailing={
               <Switch
@@ -78,11 +71,7 @@ export function SettingsScreen({
           ) : null}
           {showBattery ? (
             <>
-              <Row
-                title={t("settings.battery.title")}
-                detail={t("settings.battery.detail")}
-                last
-              />
+              <Row title={t("settings.battery.title")} last />
               <View style={styles.action}>
                 <Button label={t("settings.battery.fix")} kind="plain" onPress={onFixBattery} />
               </View>
@@ -105,10 +94,9 @@ export function SettingsScreen({
           ))}
         </Group>
 
-        <SectionHeader title={t("settings.about.section")} />
+        <View style={styles.gap} />
         <Group>
-          <Row title={t("settings.about.app")} detail={t("settings.about.detail")} />
-          <Row title={t("settings.about.version")} detail={version} mono last />
+          <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last />
         </Group>
       </ScrollView>
     </View>
@@ -120,5 +108,8 @@ function createStyles(c: Palette) {
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
     action: { paddingHorizontal: 12, paddingBottom: 12 },
+    first: { height: 16 },
+    gap: { height: 24 },
+    version: { fontFamily: MONO, fontSize: 12, lineHeight: 16, color: c.fgFaint },
   } as const;
 }

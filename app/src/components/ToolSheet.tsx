@@ -105,7 +105,8 @@ export function ToolSheet({
             </Text>
           </View>
           {command !== undefined ? (
-            <Block label={t("tool.command")} wrap>
+            // The `$` says it is the command: no label over it, nor over the output that follows it.
+            <Block wrap>
               <Text style={styles.code} selectable>
                 <Text style={styles.prompt}>$ </Text>
                 {command}
@@ -154,7 +155,9 @@ export function ToolSheet({
             </View>
           ) : null}
           {text !== undefined && text.trim() !== "" ? (
-            <Block label={tool.isError === true ? t("tool.error") : t("tool.output")} error={tool.isError === true} wrap={tool.isError === true}>
+            <Block
+              label={tool.isError === true ? t("tool.error") : command !== undefined ? undefined : t("tool.output")}
+              error={tool.isError === true} wrap={tool.isError === true}>
               <Text style={tool.isError === true ? styles.codeErr : styles.code} selectable>
                 {cut ? `${text.slice(0, OUTPUT_LIMIT)}\n…` : text}
               </Text>
@@ -178,14 +181,14 @@ function clip(text: string): string {
   return text.length > OUTPUT_LIMIT ? `${text.slice(0, OUTPUT_LIMIT)}\n…` : text;
 }
 
-/** A labelled mono block; `wrap` breaks long lines (commands, errors), else it scrolls sideways (code, diffs). */
+/** A mono block, labelled unless its content says what it is; `wrap` breaks long lines (commands, errors), else it scrolls sideways (code, diffs). */
 function Block({
   label,
   error = false,
   wrap = false,
   children,
 }: {
-  label: string;
+  label?: string;
   error?: boolean;
   wrap?: boolean;
   children: ReactNode;
@@ -193,9 +196,11 @@ function Block({
   const styles = useStyles(createStyles);
   return (
     <View style={styles.block}>
-      <Text style={error ? styles.labelErr : styles.label} numberOfLines={1}>
-        {label}
-      </Text>
+      {label !== undefined ? (
+        <Text style={error ? styles.labelErr : styles.label} numberOfLines={1}>
+          {label}
+        </Text>
+      ) : null}
       {wrap ? (
         <View style={[styles.pre, styles.preInner]}>{children}</View>
       ) : (
