@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
+import { Easing, useColorScheme, type ColorSchemeName, type FontVariant } from "react-native";
 
 /**
  * OMP's design tokens, as omp.sh and my.omp.sh resolve them: near-black
@@ -7,7 +7,8 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  * `panel`, `raised` and `overlay`; `inset` sits below them for code and tool
  * output, `well` is the fill of icon tiles and inputs. The brand gradient runs
  * magenta → violet → cyan (`accentA` → `accentV` → `accentB`) and is used
- * sparingly; `accent` is the solid magenta.
+ * sparingly; `accent` is the solid magenta. `codeBg`, `codeHead` and
+ * `inlineCode` tint code in replies: a block, its header, a span in prose.
  */
 export function palette(scheme: ColorSchemeName) {
   return scheme === "light"
@@ -20,6 +21,9 @@ export function palette(scheme: ColorSchemeName) {
         overlay: "#ffffff",
         well: "#f0f0f2",
         userBubble: "#ececf0",
+        codeBg: "#f4f4f6",
+        codeHead: "#ebebef",
+        inlineCode: "#00000009",
         hover: "#00000008",
         selected: "#0000000f",
         fg: "#111114",
@@ -58,6 +62,9 @@ export function palette(scheme: ColorSchemeName) {
         overlay: "#0f0f12",
         well: "#1a1a1f",
         userBubble: "#17171c",
+        codeBg: "#0e0e11",
+        codeHead: "#16161b",
+        inlineCode: "#ffffff10",
         hover: "#ffffff0a",
         selected: "#ffffff14",
         fg: "#f5f5f5",
@@ -116,6 +123,11 @@ export function useColors(): Palette {
  */
 export const SANS = "Geist";
 export const MONO = "JetBrains Mono";
+/**
+ * JetBrains Mono's ligatures off (they ride on contextual alternates): code
+ * shows `=>` and `!=` as the characters typed and copied.
+ */
+export const MONO_PLAIN: FontVariant[] = ["no-contextual", "no-common-ligatures"];
 
 /** The topbar height and the minimum touch target. */
 export const HEADER_HEIGHT = 56;
@@ -135,9 +147,9 @@ export const type = {
   bodyMedium: { fontFamily: SANS, fontSize: 15, lineHeight: 21, fontWeight: "500" as const },
   small: { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400" as const },
   /** Metadata: paths, models, times. */
-  mono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, fontWeight: "400" as const },
+  mono: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, fontWeight: "400" as const, fontVariant: MONO_PLAIN },
   /** Code and tool output. */
-  code: { fontFamily: MONO, fontSize: 12, lineHeight: 18, fontWeight: "400" as const },
+  code: { fontFamily: MONO, fontSize: 12, lineHeight: 18, fontWeight: "400" as const, fontVariant: MONO_PLAIN },
   /** Uppercase section labels with wide tracking, as omp.sh sets them. */
   label: {
     fontFamily: MONO,

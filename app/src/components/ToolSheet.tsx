@@ -2,10 +2,11 @@ import { useMemo, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { diffLines, editInput, editSides, type DiffLine } from "../diff";
 import { resultText } from "../messages";
-import { stepStat, stepTarget, stepTitle, toolKind, type Step } from "../rows";
-import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
+import { MONO, MONO_PLAIN, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
+import { Markdown } from "./Markdown";
 import { KindGlyph, Thumbs } from "./Transcript";
 import { Sheet } from "./ui";
 
@@ -72,7 +73,10 @@ export function ToolSheet({
   const content = useMemo(() => {
     if (step === null) return null;
     if (step.kind === "thought") {
-      return { title: t("transcript.thought"), body: <Text style={styles.prose} selectable>{(step.item.thinking ?? "").trim()}</Text> };
+      return {
+        title: thoughtLabel(step.item.thinkingMs),
+        body: <Markdown text={(step.item.thinking ?? "").trim()} variant="thought" />,
+      };
     }
     const tool = step.tool;
     const target = stepTarget(tool, cwd);
@@ -204,9 +208,9 @@ function Block({
 }
 
 function createStyles(c: Palette) {
-  const code = { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.fg } as const;
+  const code = { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 12, lineHeight: 18, color: c.fg } as const;
   const label = {
-    fontFamily: MONO,
+    fontFamily: MONO, fontVariant: MONO_PLAIN,
     fontSize: 10.5,
     lineHeight: 14,
     letterSpacing: 1.2,
@@ -218,7 +222,7 @@ function createStyles(c: Palette) {
     scroll: { gap: 14, paddingBottom: 8 },
     meta: { flexDirection: "row", alignItems: "center", gap: 8 },
     metaIcon: { width: 24, height: 24, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.well },
-    metaText: { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
+    metaText: { flex: 1, fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
     block: { gap: 6 },
     label,
     labelErr: { ...label, color: c.err },
@@ -236,6 +240,5 @@ function createStyles(c: Palette) {
     remove: { ...code, color: c.err },
     same: { ...code, color: c.fgFaint },
     images: { marginTop: 2 },
-    prose: { fontFamily: SANS, fontSize: 14, lineHeight: 22, color: c.fgMuted },
   } as const;
 }

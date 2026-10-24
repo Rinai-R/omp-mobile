@@ -136,3 +136,17 @@ test("the live step is the last running call", () => {
   assert.equal(toolKind("history_recall_search"), "search");
   assert.equal(toolKind("hub"), "agent");
 });
+
+test("a thought's row names how long it ran, in either language", async () => {
+  const { setLanguage } = await import("../src/i18n/index.ts");
+  const { thoughtLabel } = await import("../src/rows.ts");
+  setLanguage("en");
+  assert.equal(thoughtLabel(undefined), "Thought");
+  assert.equal(thoughtLabel(400), "Thought for 1s");
+  assert.equal(thoughtLabel(12_300), "Thought for 12s");
+  assert.equal(thoughtLabel(83_000), "Thought for 1m 23s");
+  setLanguage("zh-CN");
+  assert.equal(thoughtLabel(12_300), "思考了 12 秒");
+  assert.equal(thoughtLabel(83_000), "思考了 1 分 23 秒");
+  setLanguage("en");
+});

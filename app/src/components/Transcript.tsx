@@ -1,14 +1,12 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Animated,
-  FlatList,
   Image,
   Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
   type PressableStateCallbackType,
 } from "react-native";
 import { imageUri } from "../media";
@@ -20,13 +18,14 @@ import {
   stepStat,
   stepTarget,
   stepTitle,
+  thoughtLabel,
   toolCount,
   toolKind,
   type Row,
   type Step,
   type ToolKind,
 } from "../rows";
-import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, MONO_PLAIN, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem } from "../types";
 import { BrandMark, Spinner, useEnter, usePulse } from "./brand";
 import {
@@ -44,9 +43,9 @@ import {
   ToolGlyph,
 } from "./icons";
 import { Markdown } from "./Markdown";
-import { Disclosure, Sheet } from "./ui";
+import { Disclosure } from "./ui";
 
-/** Steps an open card lists inline; longer stretches show the newest ones and open the rest in a sheet. */
+/** Steps an open card lists at first; longer stretches show the newest ones until "Show all" lists every one. */
 const INLINE_STEPS = 8;
 
 /**
@@ -221,15 +220,15 @@ function Reply({ item, machine }: { item: MessageItem; machine: Machine }): Reac
   const hasText = item.text.trim() !== "";
   return (
     <View style={styles.reply}>
-      {thinking !== null ? <Thought text={thinking} active={streaming && !hasText} /> : null}
+      {thinking !== null ? <Thought text={thinking} active={streaming && !hasText} ms={item.thinkingMs} /> : null}
       <Thumbs parts={item.images} machine={machine} />
       {hasText ? <Markdown text={item.text} caret={streaming ? <Caret /> : undefined} /> : null}
     </View>
   );
 }
 
-/** "Thinking…" while it streams, "Thought" after; opens onto the text. */
-function Thought({ text, active }: { text: string; active: boolean }): ReactNode {
+/** "Thinking…" while it streams, "Thought for 12s" after; opens inline onto the thinking. */
+function Thought({ text, active, ms }: { text: string; active: boolean; ms: number | undefined }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
@@ -245,14 +244,16 @@ function Thought({ text, active }: { text: string; active: boolean }): ReactNode
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
       >
-        <SparkGlyph size={13} color={colors.fgFaint} />
-        <Animated.Text style={[styles.thoughtLabel, { opacity }]}>{active ? t("transcript.thinking") : t("transcript.thought")}</Animated.Text>
+        <SparkGlyph size={13} color={active ? colors.accent : colors.fgFaint} />
+        <Animated.Text style={[styles.thoughtLabel, { opacity }]}>
+          {active ? t("transcript.thinking") : thoughtLabel(ms)}
+        </Animated.Text>
         <Disclosure open={open} size={12} />
       </Pressable>
       {open ? (
-        <Text style={styles.thoughtText} selectable>
-          {text.trim()}
-        </Text>
+        <View style={styles.thoughtBody}>
+          <Markdown text={text.trim()} variant="thought" />
+        </View>
       ) : null}
     </View>
   );
@@ -308,14 +309,17 @@ function ActivityCard({
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
-  /** null follows the card's state: open while it runs, closed once done. */
+  /**
+   * null follows the card: open while it runs, and still open after a run
+   * watched here, so what streamed does not vanish when the turn ends. A card
+   * loaded with the transcript starts closed, on its summary.
+   */
   const [chosen, setChosen] = useState<boolean | null>(null);
-  const open = chosen ?? row.running;
+  const [watched, setWatched] = useState(row.running);
+  if (row.running && !watched) setWatched(true);
+  const open = chosen ?? (row.running || watched);
   const [all, setAll] = useState(false);
-  // Mounted from the first opening on (it keeps its closing slide), not for every card in a long transcript.
-  const [allMounted, setAllMounted] = useState(false);
-  if (all && !allMounted) setAllMounted(true);
-  const toggle = useCallback(() => setChosen((value) => !(value ?? row.running)), [row.running]);
+  const toggle = useCallback(() => setChosen((value) => !(value ?? (row.running || watched))), [row.running, watched]);
   const pulse = usePulse(row.running, 1600);
   const titleOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.55] });
   const tools = row.steps.filter((value): value is Extract<Step, { kind: "tool" }> => value.kind === "tool").map((value) => value.tool);
@@ -377,22 +381,19 @@ function ActivityCard({
         <View style={styles.steps}>
           {row.steps.length > INLINE_STEPS ? (
             <Pressable
-              onPress={() => setAll(true)}
+              onPress={() => setAll((value) => !value)}
               style={({ pressed }) => [styles.more, pressed && styles.pressed]}
               accessibilityRole="button"
+              accessibilityState={{ expanded: all }}
             >
-              <Text style={styles.moreText}>
-                {t("transcript.earlier", { count: row.steps.length - INLINE_STEPS })}
-              </Text>
+              <Text style={styles.moreText}>{all ? t("transcript.showFewer") : t("transcript.showAll", { count: row.steps.length })}</Text>
+              <Disclosure open={all} size={11} />
             </Pressable>
           ) : null}
-          {row.steps.slice(-INLINE_STEPS).map((value) => (
+          {(all ? row.steps : row.steps.slice(-INLINE_STEPS)).map((value) => (
             <StepRow key={stepKey(value)} step={value} cwd={cwd} onOpen={onOpenStep} />
           ))}
         </View>
-      ) : null}
-      {allMounted ? (
-        <AllSteps visible={all} steps={row.steps} cwd={cwd} onOpenStep={onOpenStep} onClose={() => setAll(false)} />
       ) : null}
       {images.length > 0 ? (
         <View style={styles.actImages}>
@@ -407,40 +408,7 @@ function stepKey(value: Step): string {
   return value.kind === "tool" ? value.tool.id : value.item.id;
 }
 
-/** Every step of a long stretch, newest last, in a virtualized list. */
-function AllSteps({
-  visible,
-  steps,
-  cwd,
-  onOpenStep,
-  onClose,
-}: {
-  visible: boolean;
-  steps: readonly Step[];
-  cwd: string;
-  onOpenStep: (step: Step) => void;
-  onClose: () => void;
-}): ReactNode {
-  const { height } = useWindowDimensions();
-  const count = toolCount(steps);
-  return (
-    <Sheet visible={visible} title={t("transcript.steps", { count })} onClose={onClose} scroll={false}>
-      {visible ? (
-        <FlatList
-          style={{ maxHeight: height * 0.72 }}
-          data={steps}
-          keyExtractor={stepKey}
-          renderItem={({ item }) => <StepRow step={item} cwd={cwd} onOpen={onOpenStep} />}
-          initialScrollIndex={Math.max(0, steps.length - 1)}
-          getItemLayout={(_, index) => ({ length: STEP_HEIGHT, offset: STEP_HEIGHT * index, index })}
-          initialNumToRender={20}
-        />
-      ) : null}
-    </Sheet>
-  );
-}
-
-/** A step row's fixed height, so long lists can jump to their end. */
+/** A step row's height. */
 const STEP_HEIGHT = 50;
 
 function StepRow({ step, cwd, onOpen }: { step: Step; cwd: string; onOpen: (step: Step) => void }): ReactNode {
@@ -456,10 +424,7 @@ function StepRow({ step, cwd, onOpen }: { step: Step; cwd: string; onOpen: (step
         </View>
         <View style={styles.stepText}>
           <Text style={styles.stepTitleQuiet} numberOfLines={1}>
-            {step.item.streaming === true ? t("transcript.thinking") : t("transcript.thought")}
-          </Text>
-          <Text style={styles.stepTarget} numberOfLines={1}>
-            {(step.item.thinking ?? "").replace(/\s+/g, " ").trim()}
+            {step.item.streaming === true ? t("transcript.thinking") : thoughtLabel(step.item.thinkingMs)}
           </Text>
         </View>
       </Pressable>
@@ -503,7 +468,7 @@ function StepRow({ step, cwd, onOpen }: { step: Step; cwd: string; onOpen: (step
 function NoticeLine({ item }: { item: NoticeItem }): ReactNode {
   const styles = useStyles(createStyles);
   return (
-    <View style={styles.notice}>
+    <View style={item.level === "error" ? styles.noticeErr : item.level === "warning" ? styles.noticeWarn : styles.notice}>
       <View style={item.level === "error" ? styles.noticeDotErr : item.level === "warning" ? styles.noticeDotWarn : styles.noticeDot} />
       <Text
         style={item.level === "error" ? styles.noticeTextErr : item.level === "warning" ? styles.noticeTextWarn : styles.noticeText}
@@ -528,9 +493,19 @@ function createStyles(c: Palette) {
   } as const;
   const iconTile = { width: 26, height: 26, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.well } as const;
   const stepTitle = { fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgMuted } as const;
-  const mono = { fontFamily: MONO, fontSize: 11, lineHeight: 15, fontWeight: "400", color: c.fgGhost } as const;
+  const mono = { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, fontWeight: "400", color: c.fgGhost } as const;
+  const notice = {
+    flexDirection: "row",
+    gap: 8,
+    marginHorizontal: 16,
+    marginVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.md,
+    backgroundColor: c.hover,
+  } as const;
   const noticeDot = { width: 5, height: 5, borderRadius: 3, marginTop: 6, backgroundColor: c.fgGhost } as const;
-  const noticeText = { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint } as const;
+  const noticeText = { flex: 1, fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 17, color: c.fgFaint } as const;
   const badge = { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center" } as const;
   const actTitle = { flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgMuted } as const;
   return {
@@ -547,7 +522,7 @@ function createStyles(c: Palette) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
     },
-    turnName: { fontFamily: MONO, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgFaint },
+    turnName: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgFaint },
 
     userRow: { flexDirection: "row", justifyContent: "flex-end", paddingLeft: 56, paddingRight: 14, marginTop: 14, marginBottom: 4 },
     bubble: {
@@ -561,22 +536,14 @@ function createStyles(c: Palette) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
     },
-    bubbleText: { fontFamily: SANS, fontSize: 15, lineHeight: 22, fontWeight: "400", color: c.fg },
+    bubbleText: { fontFamily: SANS, fontSize: 16, lineHeight: 24, fontWeight: "400", color: c.fg },
 
-    reply: { paddingHorizontal: 16, gap: 8, marginBottom: 8 },
+    reply: { paddingHorizontal: 18, gap: 10, marginBottom: 10 },
     caret: { fontFamily: SANS, color: c.accent },
     thought: { gap: 6 },
     thoughtHead: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingVertical: 2 },
-    thoughtLabel: { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400", color: c.fgFaint },
-    thoughtText: {
-      fontFamily: SANS,
-      fontSize: 13,
-      lineHeight: 20,
-      color: c.fgFaint,
-      borderLeftWidth: 2,
-      borderLeftColor: c.border,
-      paddingLeft: 12,
-    },
+    thoughtLabel: { fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgFaint },
+    thoughtBody: { borderLeftWidth: 2, borderLeftColor: c.borderStrong, paddingLeft: 12, marginLeft: 6, paddingVertical: 2 },
 
     thumbs: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
     thumb: { borderRadius: 12, backgroundColor: c.inset },
@@ -603,13 +570,13 @@ function createStyles(c: Palette) {
     actBadgeErrText: { fontFamily: SANS, fontSize: 11, lineHeight: 14, fontWeight: "600", color: c.err },
     actTitle,
     actTitleLive: { ...actTitle, color: c.fg },
-    actMeta: { flexShrink: 0, maxWidth: "45%", fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgGhost },
+    actMeta: { flexShrink: 0, maxWidth: "45%", fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, color: c.fgGhost },
     actMetaErr: { color: c.err },
     actImages: { paddingHorizontal: 12, paddingBottom: 12 },
     steps: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, paddingVertical: 4 },
     step: { flexDirection: "row", alignItems: "center", gap: 10, height: STEP_HEIGHT, paddingHorizontal: 12 },
-    more: { height: 36, justifyContent: "center", paddingHorizontal: 48 },
-    moreText: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
+    more: { flexDirection: "row", alignItems: "center", gap: 6, height: 36, paddingLeft: 48, paddingRight: 12 },
+    moreText: { fontFamily: MONO, fontVariant: MONO_PLAIN, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     stepIcon: iconTile,
     stepIconLive: { ...iconTile, backgroundColor: c.accentMuted },
     stepIconErr: { ...iconTile, backgroundColor: c.errSoft },
@@ -623,7 +590,9 @@ function createStyles(c: Palette) {
     statAdd: { color: c.ok },
     statRemove: { color: c.err },
 
-    notice: { flexDirection: "row", gap: 8, paddingHorizontal: 20, paddingVertical: 6 },
+    notice,
+    noticeWarn: { ...notice, backgroundColor: c.warnSoft },
+    noticeErr: { ...notice, backgroundColor: c.errSoft },
     noticeDot,
     noticeDotWarn: { ...noticeDot, backgroundColor: c.warn },
     noticeDotErr: { ...noticeDot, backgroundColor: c.err },

@@ -6,11 +6,23 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 - The app speaks Chinese and English. It follows the phone's language (any Chinese → Simplified Chinese, anything else → English); Settings → Language overrides it (System / 中文 / English), and the switch applies at once. Screens, sheets, empty states, the app's own errors, accessibility labels, relative times and the notifications the app posts are translated; what OMP and the computer send (model names, tool output, their errors) is shown as it is (#26).
 - Take over a session that omp in a terminal on the computer has open. OMP lets one process write a session, and a second one would save to a new file, so the two cannot share it; instead the chat offers **Take over**, says when the terminal is mid-turn, and after you confirm the daemon asks that omp to close (through the omp-mobile plugin if it is loaded there, else with `SIGINT`, then `SIGTERM`, never `SIGKILL`), tells the terminal where the session went, and opens it here with nothing lost or forked. New route `POST /sessions/:id/takeover`; held sessions name their `owner` (#28).
+- Replies read better on a phone: 16/26 body text that keeps mixed Chinese and English comfortable, a clearer heading scale, and spacing tuned between paragraphs, lists, code and tables (#27).
+- Fuller Markdown in replies: nested bullet and numbered lists (numbered lists keep their start), task lists, nested block quotes, ~~strikethrough~~, bare and `<…>` links, images as links, escapes, and tables whose columns size to their text and scroll sideways (#27).
+- Code blocks show their language and a copy button, scroll sideways, and render while the closing fence is still streaming. Code no longer turns `=>` or `!=` into ligatures (#27).
+- Thinking no longer disappears when a message ends or a chat is reopened. A reply's thinking folds into a "Thought for 12s" row that opens inline; thoughts between tool calls stay in their activity card (#27).
+- An activity card watched while it ran stays open after the turn ends, and "Show all" lists every step inline; tap a step for its details as before (#27).
+- Larger user bubbles and softer notices in the transcript (#27).
 
 ### 中文
 
 - App 支持中文和英文。默认跟随手机语言（任何中文 → 简体中文，其他 → 英文）；可在“设置 → 语言”中改为 跟随系统 / 中文 / English，切换后立即生效。界面、面板、空状态、App 自己的错误提示、无障碍标签、相对时间以及 App 发出的通知都已翻译；OMP 和电脑发来的内容（模型名、工具输出、它们的错误信息）保持原样（#26）。
 - 可以接管电脑终端里 omp 正打开着的会话。OMP 只允许一个进程写一个会话，第二个进程会另存为新文件，所以两边无法同时打开；对话页改为提供 **接管**，并提示终端是否正在执行一轮对话。确认后 daemon 请那个 omp 关闭（若它加载了 omp-mobile 插件则由插件关闭，否则依次发送 `SIGINT`、`SIGTERM`，从不 `SIGKILL`），在终端里说明会话去了哪里，再在手机上打开，记录不丢失也不分叉。新增 `POST /sessions/:id/takeover`；被占用的会话会给出 `owner`（#28）。
+- 回复在手机上更好读：正文 16/26，中英文混排更舒服；标题层级更清楚；段落、列表、代码和表格之间的间距重新调过（#27）。
+- 回复支持更完整的 Markdown：多级无序/有序列表（有序列表保留起始编号）、任务列表、多级引用、~~删除线~~、裸链接和 `<…>` 链接、图片显示为链接、转义字符；表格列宽随内容调整，可横向滚动（#27）。
+- 代码块显示语言和复制按钮，可横向滚动；结尾的 ``` 还没输出时也能正常显示。代码中的 `=>`、`!=` 不再显示为连字（#27）。
+- 消息结束或重新打开对话后，思考内容不再消失。回复的思考折叠为一行“思考了 12 秒”，点开即在原处展开；工具调用之间的思考留在所属的活动卡片里（#27）。
+- 运行时看着的活动卡片在这一轮结束后保持展开，“显示全部”会在卡片内列出所有步骤；点某一步仍可查看详情（#27）。
+- 对话中用户气泡字号更大，提示条更柔和（#27）。
 
 ## v0.3.0
 
