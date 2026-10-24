@@ -5,6 +5,9 @@
 import type { Key, Message } from "./en.ts";
 
 export const zhCN: Record<Key, Message> = {
+  // Short labels set in the mono face (counts, ages) drop the space between number and
+  // character, which the mono face would draw as wide as a letter.
+
   // Shared
   "common.listSeparator": "，",
   "common.pair": "{label}，{value}",
@@ -17,7 +20,7 @@ export const zhCN: Record<Key, Message> = {
   "common.session": "会话",
   "common.open": "打开",
   "common.remove": "移除",
-  "common.running": "{count} 个运行中",
+  "common.running": "{count}个运行中",
   "brand.working": "OMP 正在工作",
 
   // Settings
@@ -99,7 +102,7 @@ export const zhCN: Record<Key, Message> = {
   "composer.modelA11y": "模型 {model}。点按更改",
   "composer.modelLevelA11y": "模型 {model}，思考等级 {level}。点按更改",
   "composer.contextA11y": "上下文已用 {percent}%",
-  "composer.queued": "{count} 条排队中",
+  "composer.queued": "{count}条排队中",
 
   // OMP's questions
   "approval.waiting": "omp 在等你回复",
@@ -133,7 +136,7 @@ export const zhCN: Record<Key, Message> = {
   "machines.scan": "扫码配对",
   "machines.enterAddress": "手动输入地址",
   "machines.footnote": "长按电脑可查看详情。",
-  "machines.online": "{online}/{total} 在线",
+  "machines.online": "{online}/{total}在线",
   "machines.remove.title": "要从这台手机移除 {name} 吗？",
   "machines.remove.body": "电脑上的 daemon 和正在运行的会话都会保留。",
   "machines.addSheet.title": "添加电脑",
@@ -144,7 +147,7 @@ export const zhCN: Record<Key, Message> = {
   "machines.addSheet.token": "Token",
   "machines.addSheet.tokenPlaceholder": "daemon token",
   "machines.addSheet.connect": "连接",
-  "machine.sessionsRunning": "{count} · {running} 个运行中",
+  "machine.sessionsRunning": "{count} · {running}个运行中",
   "machine.linkA11y": "Tailscale，{link}",
   "machine.name": "在这台手机上的名称",
   "machine.saveName": "保存名称",
@@ -165,14 +168,14 @@ export const zhCN: Record<Key, Message> = {
   "probe.network": "无法连接",
   "probe.checking": "检查中…",
   "probe.noSessions": "没有会话",
-  "probe.sessions": "{count} 个会话",
+  "probe.sessions": "{count}个会话",
   "probe.seen": "{reason} · {ago}在线",
   "probe.online": "在线 · {ms} ms",
   "probe.unreachable": "离线：{reason}",
   "ago.now": "刚刚",
-  "ago.minutes": "{count} 分钟前",
-  "ago.hours": "{count} 小时前",
-  "ago.days": "{count} 天前",
+  "ago.minutes": "{count}分钟前",
+  "ago.hours": "{count}小时前",
+  "ago.days": "{count}天前",
   "pairing.notPairing": "这不是 OMP 配对码。请扫描 omp-mobile daemon 打印的二维码。",
   "pairing.badAddress": "这个配对码里没有有效的 daemon 地址。",
   "pairing.notTailnet": "{host} 不在你的 tailnet 中。启动 daemon 时请用 --host 指定这台电脑的 Tailscale IP。",
@@ -201,9 +204,9 @@ export const zhCN: Record<Key, Message> = {
   "group.earlier": "更早",
   "group.terminal": "来自终端",
   "age.now": "刚刚",
-  "age.minutes": "{count} 分钟",
-  "age.hours": "{count} 小时",
-  "age.days": "{count} 天",
+  "age.minutes": "{count}分钟",
+  "age.hours": "{count}小时",
+  "age.days": "{count}天",
   "age.months": "1月 2月 3月 4月 5月 6月 7月 8月 9月 10月 11月 12月",
   "age.date": "{month}{day}日",
   "session.inTerminal": "已在终端中打开",
@@ -245,8 +248,8 @@ export const zhCN: Record<Key, Message> = {
   "transcript.thinking": "思考中…",
   "transcript.thought": "思考过程",
   "transcript.working": "工作中…",
-  "transcript.steps": "{count} 步",
-  "transcript.failed": "{count} 步失败 · ",
+  "transcript.steps": "{count}步",
+  "transcript.failed": "{count}步失败 · ",
   "transcript.earlier": "之前还有 {count} 步 · 全部显示",
   "step.status.running": "运行中",
   "step.status.done": "完成",

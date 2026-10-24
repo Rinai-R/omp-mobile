@@ -54,8 +54,8 @@ test("interpolation and plurals", () => {
   assert.equal(translate("en", "probe.sessions", { count: 1 }), "1 session");
   assert.equal(translate("en", "probe.sessions", { count: 0 }), "0 sessions");
   assert.equal(translate("en", "probe.sessions", { count: 5 }), "5 sessions");
-  assert.equal(translate("zh-CN", "probe.sessions", { count: 1 }), "1 个会话");
-  assert.equal(translate("zh-CN", "probe.sessions", { count: 5 }), "5 个会话");
+  assert.equal(translate("zh-CN", "probe.sessions", { count: 1 }), "1个会话");
+  assert.equal(translate("zh-CN", "probe.sessions", { count: 5 }), "5个会话");
   assert.equal(translate("en", "home.cantReach", { name: "mac" }), "Can't reach mac");
   assert.equal(translate("zh-CN", "home.cantReach", { name: "mac" }), "连不上 mac");
   // A missing value leaves its placeholder visible rather than printing "undefined".
@@ -91,7 +91,7 @@ test("switching the language tells subscribers and changes composed text", () =>
     const run = (id) => ({ kind: "tool", tool: { kind: "tool", id, name: "bash", args: { command: "ls" }, status: "done" } });
     assert.equal(activitySummary([run("a"), run("b"), read("c", "/a"), read("d", "/b")]), "运行了 2 条命令，读取 2 个");
     const now = new Date(2026, 9, 24, 12).getTime();
-    assert.equal(age(now - 5 * 60_000, now), "5 分钟");
+    assert.equal(age(now - 5 * 60_000, now), "5分钟");
     assert.equal(age(new Date(2026, 8, 3).getTime(), now), "9月3日");
     setLanguage("zh-CN");
     assert.equal(calls, 1, "the same language again is not a change");
