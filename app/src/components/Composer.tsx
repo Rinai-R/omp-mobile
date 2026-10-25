@@ -171,20 +171,28 @@ export function Composer({
           hitSlop={6}
         >
           <BrandMark size={10} />
-          <Text style={styles.chipStrong} numberOfLines={1}>
+          <Text style={styles.chipStrong} numberOfLines={1} maxFontSizeMultiplier={1.2}>
             {model}
           </Text>
-          {level !== undefined ? <Text style={styles.chipText}>· {level}</Text> : null}
+          {level !== undefined ? (
+            <Text style={styles.chipLevel} maxFontSizeMultiplier={1.2}>
+              · {level}
+            </Text>
+          ) : null}
         </Pressable>
         {contextPercent !== undefined ? (
           <View style={styles.chip} accessible accessibilityLabel={t("composer.contextA11y", { percent: Math.round(contextPercent) })}>
             <Ring percent={contextPercent} />
-            <Text style={styles.chipText}>{Math.round(contextPercent)}%</Text>
+            <Text style={styles.chipText} maxFontSizeMultiplier={1.2}>
+              {Math.round(contextPercent)}%
+            </Text>
           </View>
         ) : null}
         {queued > 0 ? (
           <View style={styles.chip}>
-            <Text style={styles.chipWarn}>{t("composer.queued", { count: queued })}</Text>
+            <Text style={styles.chipWarn} maxFontSizeMultiplier={1.2}>
+              {t("composer.queued", { count: queued })}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -245,8 +253,10 @@ function createStyles(c: Palette) {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    height: 26,
-    maxWidth: "62%",
+    // Grows with the system font size; the model chip may take most of the row.
+    minHeight: 26,
+    paddingVertical: 3,
+    maxWidth: "78%",
     paddingHorizontal: 10,
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
@@ -325,11 +335,13 @@ function createStyles(c: Palette) {
     menuItemPressed: { backgroundColor: c.hover },
     menuText: { fontFamily: SANS, fontSize: 15, lineHeight: 20, color: c.fg },
     menuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginHorizontal: 12 },
-    meta: { flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 8, paddingHorizontal: 2 },
+    meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingTop: 8, paddingHorizontal: 2 },
     chip,
     chipPressed: { backgroundColor: c.hover },
     chipStrong: { ...chipText, flexShrink: 1, color: c.fgMuted },
     chipText,
+    // The level never gives way to the model's name.
+    chipLevel: { ...chipText, flexShrink: 0 },
     chipWarn: { ...chipText, color: c.warn },
   } as const;
 }
