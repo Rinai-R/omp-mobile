@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyEvent, snapshotItems, toolSummary } from "../src/messages.ts";
+import { readFileSync } from "node:fs";
+import { applyEvent, snapshotItems, textOf, toolSummary } from "../src/messages.ts";
 
 const user = { role: "user", content: [{ type: "text", text: "List the files" }] };
 const toolTurn = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }] };
@@ -272,4 +273,64 @@ test("messages keep their times, and a turn's end on an error or a stop", () => 
   assert.equal(live.length, 1);
   assert.equal(live[0].stop, "aborted");
   assert.equal(typeof live[0].endedAt, "number");
+});
+
+// Real events from omp 18.12 (`--mode rpc-ui`, one plain reply): the message of
+// `message_start` and of each update is cumulative but written out late, so it
+// already holds words whose deltas follow.
+const captured = JSON.parse(readFileSync(new URL("./fixtures/stream-omp18.json", import.meta.url), "utf8"));
+const finalText = textOf(captured.findLast((event) => event.type === "message_end").message.content);
+
+test("streamed text is never doubled when message_start already carries it (omp 18 capture)", () => {
+  let items = [];
+  for (const event of captured) {
+    if (event.type === "message_end" && event.message.role === "assistant") break;
+    items = applyEvent(items, event);
+    const open = items.find((item) => item.kind === "message" && item.role === "assistant");
+    if (open === undefined) continue;
+    // Whatever shows mid-stream is a prefix of the final reply.
+    assert.ok(finalText.startsWith(open.text), `mid-stream text is not a prefix: ${JSON.stringify(open.text)}`);
+  }
+});
+
+test("the same capture without content on the updates still shows each word once", () => {
+  let items = [];
+  const texts = [];
+  for (const event of captured) {
+    const stripped = event.type === "message_update" ? { ...event, message: { role: "assistant" } } : event;
+    if (stripped.type === "message_end" && stripped.message.role === "assistant") break;
+    items = applyEvent(items, stripped);
+    const open = items.find((item) => item.kind === "message" && item.role === "assistant");
+    if (open !== undefined) texts.push(open.text);
+  }
+  for (const text of texts) assert.ok(finalText.startsWith(text), JSON.stringify(text));
+  assert.equal(texts.at(-1), finalText);
+});
+
+test("deltas still build the text when message_start carries none", () => {
+  let items = [];
+  items = applyEvent(items, { type: "message_start", message: { role: "assistant", content: [] } });
+  for (const delta of ["one", " two", " three"]) {
+    items = applyEvent(items, { type: "message_update", message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "text_delta", delta } });
+  }
+  assert.equal(items[0].text, "one two three");
+});
+
+test("content that lags behind the deltas does not cut the text back", () => {
+  let items = applyEvent([], { type: "message_start", message: { role: "assistant", content: [] } });
+  const lagging = (text) => ({ role: "assistant", content: [{ type: "text", text }] });
+  items = applyEvent(items, { type: "message_update", message: lagging(""), assistantMessageEvent: { type: "text_delta", delta: "one" } });
+  items = applyEvent(items, { type: "message_update", message: lagging("one"), assistantMessageEvent: { type: "text_delta", delta: " two" } });
+  assert.equal(items[0].text, "one two");
+});
+
+test("thinking deltas are not doubled either", () => {
+  const ahead = { role: "assistant", content: [{ type: "thinking", thinking: "Let me count" }] };
+  let items = applyEvent([], { type: "message_start", message: ahead });
+  for (const delta of ["Let", " me", " count"]) {
+    items = applyEvent(items, { type: "message_update", message: ahead, assistantMessageEvent: { type: "thinking_delta", delta } });
+  }
+  assert.equal(items[0].thinking, "Let me count");
+  items = applyEvent(items, { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "." } });
+  assert.equal(items[0].thinking, "Let me count.");
 });

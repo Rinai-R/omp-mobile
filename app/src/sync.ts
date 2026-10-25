@@ -1,6 +1,6 @@
 import { daemonFeatures, fetchTranscript, knownFeatures } from "./api";
-import { currentTo, heldOfEntry, mergeTranscript, syncQueue, type CachedTranscript } from "./cache";
-import { cachedEntries, cachedEntry, loadCached, saveCached, touchCached } from "./transcripts";
+import { currentTo, heldOfEntry, mergeTranscript, startOf, syncQueue } from "./cache";
+import { cachedEntries, cachedEntry, loadTail, saveCached, sweepCache, touchCached } from "./transcripts";
 import type { Machine, SessionSummary } from "./types";
 
 /**
@@ -39,9 +39,18 @@ export async function syncs(machine: Machine): Promise<boolean> {
 
 export type RefreshOutcome = "saved" | "current" | "missing" | "unsupported" | "invalid";
 
+/** The chat on screen: it keeps its own copy current, so a pass leaves it alone. */
+let onScreen = { machineId: "", sessionId: "" };
+
+/** A chat opened (or, with empty ids, closed): the background pass skips its session meanwhile. */
+export function setSyncOnScreen(machineId: string, sessionId: string): void {
+  onScreen = { machineId, sessionId };
+}
+
 /**
  * Bring one session's copy up to date from the daemon. `listed` is the
- * session's `updatedAt` as the list showed it, when known.
+ * session's `updatedAt` as the list showed it, when known. A delta is
+ * appended to the copy without reading it back.
  */
 export function refreshTranscript(machine: Machine, sessionId: string, listed?: number): Promise<RefreshOutcome> {
   return serial(async () => {
@@ -54,26 +63,37 @@ export function refreshTranscript(machine: Machine, sessionId: string, listed?: 
       return "missing";
     }
     missesOf(machine).delete(sessionId);
-    let copy: CachedTranscript | undefined;
-    if ((answer.from ?? 0) > 0) copy = await loadCached(machine.id, sessionId);
-    let merged = mergeTranscript(copy?.messages ?? [], held, answer);
-    if (merged === undefined) {
+    const from = answer.from ?? 0;
+    if (from > 0 && held !== undefined) {
+      // A delta: it must continue the copy exactly where the index says the copy ends.
+      const fits = from === held.since && Array.isArray(answer.messages) && (answer.total === undefined || answer.total === from + answer.messages.length);
+      if (fits) {
+        const updatedAt = currentTo(answer.session?.updatedAt, listed);
+        if (answer.messages.length === 0) {
+          const tail = await loadTail(machine.id, sessionId);
+          if (tail !== undefined && JSON.stringify(tail.state) === JSON.stringify(answer.state ?? null)) {
+            touchCached(machine.id, sessionId, updatedAt);
+            return "current";
+          }
+        }
+        const saved = await saveCached(machine.id, sessionId, { updatedAt, session: answer.session, state: answer.state ?? null, messages: answer.messages, from });
+        return saved ? "saved" : "current";
+      }
       // The answer does not fit the copy (the copy changed, or was damaged): take the whole transcript.
       answer = await fetchTranscript(machine, sessionId, undefined);
       if (answer === null) return "missing";
-      copy = undefined;
-      merged = mergeTranscript([], undefined, answer);
-      if (merged === undefined) return "invalid";
     }
+    if (startOf(answer) > 0) {
+      // Past the daemon's message cap it holds only the session's end: no copy from its start to keep.
+      // Not asked again for a while, rather than every pass for megabytes it cannot save.
+      missesOf(machine).set(sessionId, Date.now());
+      return "invalid";
+    }
+    const merged = mergeTranscript([], undefined, answer);
+    if (merged === undefined) return "invalid";
     const updatedAt = currentTo(answer.session?.updatedAt, listed);
-    const nothingNew =
-      copy !== undefined && (answer.from ?? 0) > 0 && answer.messages.length === 0 && JSON.stringify(copy.state) === JSON.stringify(answer.state);
-    if (nothingNew) {
-      touchCached(machine.id, sessionId, updatedAt);
-      return "current";
-    }
-    saveCached(machine.id, sessionId, { updatedAt, session: answer.session, state: answer.state ?? null, messages: merged });
-    return "saved";
+    const saved = await saveCached(machine.id, sessionId, { updatedAt, session: answer.session, state: answer.state ?? null, messages: merged });
+    return saved ? "saved" : "current";
   });
 }
 
@@ -101,8 +121,11 @@ export async function syncSessions(machine: Machine, sessions: readonly SessionS
       const { sessions: list, current: still } = next;
       pass.pending = undefined;
       if (still() && (await syncs(machine))) {
-        for (const session of syncQueue(list, cachedEntries(machine.id), missesOf(machine), Date.now())) {
+        const skip = () => (onScreen.machineId === machine.id ? onScreen.sessionId : undefined);
+        for (const session of syncQueue(list, cachedEntries(machine.id), missesOf(machine), Date.now(), skip())) {
           if (!still()) break;
+          // Opened while the pass ran.
+          if (session.id === skip()) continue;
           try {
             await refreshTranscript(machine, session.id, session.updatedAt);
           } catch {
@@ -112,6 +135,8 @@ export async function syncSessions(machine: Machine, sessions: readonly SessionS
       }
       next = pass.pending;
     }
+    // A long-lived app is not relaunched to expire copies: drop them after each pass.
+    sweepCache();
   } finally {
     passes.delete(machine.id);
   }

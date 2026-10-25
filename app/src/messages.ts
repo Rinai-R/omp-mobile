@@ -238,6 +238,21 @@ function openIndex(items: ChatItem[], message: AgentMessage | undefined): number
   return -1;
 }
 
+/**
+ * What an open message shows after an update. OMP's events carry the message
+ * as it was when the event was written out, which can be ahead of the deltas
+ * (`message_start` of omp 18 already holds the first words, then their deltas
+ * follow) or behind them. `streamed` is what the deltas add up to, `shown`
+ * the latest whole text known (this event's content, else what was shown):
+ * when one extends the other the longer wins, so nothing is counted twice;
+ * when they disagree the event's own content wins, else the deltas.
+ */
+export function settleStream(streamed: string, shown: string, fromEvent: boolean): string {
+  if (streamed.startsWith(shown)) return streamed;
+  if (shown.startsWith(streamed)) return shown;
+  return fromEvent ? shown : streamed;
+}
+
 /** An assistant message with neither text nor thinking: a turn that only called tools. */
 function blank(item: MessageItem): boolean {
   return item.role === "assistant" && item.text.trim() === "" && (item.thinking ?? "").trim() === "";
@@ -274,8 +289,19 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     const at = openIndex(items, message);
     if (at === -1) return items;
     const now = Date.now();
+    // The message's content as this event carries it: cumulative, but written out late or early.
+    const content = message?.content;
+    const hasContent = typeof content === "string" || Array.isArray(content);
     return items.map((entry, index) => {
       if (index !== at || entry.kind !== "message") return entry;
+      const streamed = {
+        text: (entry.streamed?.text ?? "") + (delta.text ?? ""),
+        thinking: (entry.streamed?.thinking ?? "") + (delta.thinking ?? ""),
+      };
+      const wholeText = hasContent ? textOf(content) : entry.text;
+      const wholeThinking = (hasContent ? thinkingOf(content) : undefined) ?? entry.thinking ?? "";
+      const text = settleStream(streamed.text, wholeText, hasContent);
+      const thinking = settleStream(streamed.thinking, wholeThinking, hasContent && thinkingOf(content) !== undefined);
       const thinkingStartedAt = entry.thinkingStartedAt ?? (delta.thinking !== undefined ? now : undefined);
       // Thinking ends where the answer starts.
       const thinkingMs =
@@ -283,8 +309,9 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
         (delta.text !== undefined && delta.text !== "" && thinkingStartedAt !== undefined ? now - thinkingStartedAt : undefined);
       return {
         ...entry,
-        text: entry.text + (delta.text ?? ""),
-        thinking: delta.thinking === undefined ? entry.thinking : (entry.thinking ?? "") + delta.thinking,
+        text,
+        thinking: thinking === "" ? entry.thinking : thinking,
+        streamed,
         thinkingStartedAt,
         thinkingMs,
         streaming: true,

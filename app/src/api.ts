@@ -1,5 +1,6 @@
 import type { Hello, Machine, SessionOwner, SessionSummary, ServerMessage, Transcript } from "./types";
 import { heldQuery, type Held } from "./cache.ts";
+import { fetchSessions } from "./sessionsFetch.ts";
 import { t } from "./i18n/index.ts";
 import { ownerOf } from "./takeover.ts";
 
@@ -126,8 +127,10 @@ export async function pairMachine(url: string, token: string, machines: readonly
 }
 
 export async function listSessions(machine: Machine): Promise<SessionSummary[]> {
-  const data = await request<{ sessions: SessionSummary[] }>(machine, "/sessions");
-  return data.sessions;
+  // Shared with a probe of the same computer in flight (see `sessionsFetch.ts`).
+  const answer = await fetchSessions(machine.url, machine.token);
+  if (!answer.ok) throw new HttpError(answer.status, errorText(answer.text) || `HTTP ${answer.status}`, ownerOf(errorField(answer.text, "owner")));
+  return (JSON.parse(answer.text) as { sessions: SessionSummary[] }).sessions;
 }
 
 export async function createSession(machine: Machine, cwd?: string): Promise<SessionSummary> {

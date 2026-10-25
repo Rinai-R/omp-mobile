@@ -4,6 +4,9 @@
  *
  * Only type imports here: node:test loads this file directly.
  */
+import { hostOf } from "./machines.ts";
+import { isTailnetHost } from "./pairing.ts";
+import { fetchSessions } from "./sessionsFetch.ts";
 import type { Machine, SessionSummary } from "./types";
 import { t } from "./i18n/index.ts";
 
@@ -59,6 +62,29 @@ async function get(url: string, timeoutMs: number, headers?: Record<string, stri
   }
 }
 
+/** A shared request, given up on (not aborted: another caller may still want it) after `timeoutMs`. */
+async function within<T>(request: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new ProbeFailure("timeout")), timeoutMs);
+  });
+  try {
+    return await Promise.race([request, timeout]);
+  } catch (cause) {
+    throw cause instanceof ProbeFailure ? cause : new ProbeFailure("network");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new ProbeFailure("not-omp");
+  }
+}
+
 async function json(response: Response): Promise<unknown> {
   try {
     return (await response.json()) as unknown;
@@ -97,12 +123,11 @@ export async function probeMachine(
     const hello = await json(helloResponse);
     if (!isHello(hello)) throw new ProbeFailure("not-omp");
 
-    const sessionsResponse = await get(`${machine.url}/sessions`, timeoutMs, {
-      authorization: `Bearer ${machine.token}`,
-    });
-    if (sessionsResponse.status === 401 || sessionsResponse.status === 403) throw new ProbeFailure("unauthorized");
-    if (!sessionsResponse.ok) throw new ProbeFailure("not-omp");
-    const sessions = sessionsOf(await json(sessionsResponse));
+    // Shared with the home's own list request when both ask at once.
+    const sessionsAnswer = await within(fetchSessions(machine.url, machine.token), timeoutMs);
+    if (sessionsAnswer.status === 401 || sessionsAnswer.status === 403) throw new ProbeFailure("unauthorized");
+    if (!sessionsAnswer.ok) throw new ProbeFailure("not-omp");
+    const sessions = sessionsOf(parseJson(sessionsAnswer.text));
     if (sessions === null) throw new ProbeFailure("not-omp");
 
     return {
@@ -166,14 +191,26 @@ export function summaryOf(
   probe: Probe | undefined,
   lastSeen: number | undefined,
   now: number,
+  /** The machine's address: what the link is called (Tailscale, or a LAN address). */
+  url?: string,
 ): { dot: Dot; text: string } {
   if (probe === undefined) return { dot: "checking", text: t("probe.checking") };
-  if (probe.state === "online") return { dot: "online", text: `Tailscale · ${sessionsText(probe)}` };
+  if (probe.state === "online") return { dot: "online", text: `${linkName(url)} · ${sessionsText(probe)}` };
   const reason = reasonText(probe.reason);
   return {
     dot: "down",
     text: lastSeen === undefined ? reason : t("probe.seen", { reason, ago: agoText(lastSeen, now) }),
   };
+}
+
+/**
+ * What the phone reaches a machine over, by its address: "Tailscale" for a
+ * tailnet address, else "LAN" (an emulator's 10.0.2.2, a home network's 192.168.x).
+ * Unknown (no address): Tailscale, the one link the app is meant for.
+ */
+export function linkName(url: string | undefined): string {
+  if (url === undefined || isTailnetHost(hostOf(url).toLowerCase())) return "Tailscale";
+  return t("link.lan");
 }
 
 /** The sheet's link line: "Online · 34 ms", "Unreachable: No reply", or "Checking…". */

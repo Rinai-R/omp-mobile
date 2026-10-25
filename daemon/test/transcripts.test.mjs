@@ -64,7 +64,7 @@ test("the store serves a transcript while its session file is unchanged", () => 
   assert.equal(saved.state.isStreaming, false, "no omp runs for a saved transcript");
   assert.equal(saved.session.status, "idle");
   assert.equal(saved.session.waiting, 0);
-  assert.ok(saved.session.updatedAt >= saved.file.mtimeMs, "dated at least by its file");
+  assert.equal(saved.session.updatedAt, 5, "dated by its last activity, not by the file omp rewrote on exit");
   assert.equal(store.read("s1", undefined)?.id, "s1", "the record's own file is checked when the caller knows none");
   assert.equal(store.read("s1", join(dir, "other.jsonl")), undefined, "known by another file now");
   assert.equal(store.read("other", file), undefined);
@@ -260,7 +260,9 @@ test("stopping the daemon saves the transcripts of its live sessions; the next s
   const dir = mkdtempSync(join(tmpdir(), "omp-mobile-shutdown-"));
   const token = "shutdown-token-0123456789";
   const first = await liveDaemon(dir, token);
-  await addSession(first.daemon, dir, "s1", messages);
+  // Used a minute ago: kept (a session is dated by its messages, and these are recent).
+  const recent = messages.map((message, index) => ({ ...message, timestamp: Date.now() - 60_000 + index }));
+  await addSession(first.daemon, dir, "s1", recent);
   await first.daemon.close();
   assert.ok(existsSync(first.daemon.transcripts.path("s1")));
 

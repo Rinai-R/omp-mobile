@@ -1,9 +1,14 @@
 import { Directory, File, Paths } from "expo-file-system";
+import { moveAsync, writeAsStringAsync } from "expo-file-system/legacy";
 import {
+  appendAt,
   cacheName,
+  copyLines,
   expired,
+  extendTail,
   fingerprint,
   parseCached,
+  parseCopyLines,
   parseIndex,
   parseTail,
   replaces,
@@ -17,12 +22,14 @@ import type { AgentMessage, SessionState, SessionSummary } from "./types";
 
 /**
  * What the phone remembers of each machine between launches: a copy of every
- * session active in the last 24 hours (the daemon's slim messages, state and
- * summary, `c-*.json`), the end of each copy (`h-*.json`, a chat's first paint,
- * small whatever the session's size), an index of those copies (`index.json`: how current
- * each is, what it holds, when it was viewed), and the last session list
- * (`s-*.json`). A chat opens from its copy at once, offline too, and asks the
- * daemon only for what is new. Every write is best effort and every read
+ * session active in the last 24 hours (the daemon's slim messages, one per
+ * line, `c-*.jsonl`: a delta is appended, the copy is not rewritten), the end
+ * of each copy with its summary and state (`h-*.json`, a chat's first paint,
+ * small whatever the session's size), an index of those copies (`index.json`:
+ * how current each is, what it holds, when it was viewed), and the last
+ * session list (`s-*.json`). A chat opens from its copy at once, offline too,
+ * and asks the daemon only for what is new. Files are written off the JS
+ * thread, one save at a time; every write is best effort and every read
  * survives a damaged file: the daemon still has the transcript.
  */
 const ROOT = new Directory(Paths.document, "transcripts");
@@ -38,12 +45,18 @@ interface SavedSessions {
   sessions: SessionSummary[];
 }
 
-function copyFile(machineId: string, sessionId: string): File {
-  return new File(ROOT, `c-${cacheName(machineId, sessionId)}.json`);
+/** A copy's messages, one per line. */
+function linesFile(name: string): File {
+  return new File(ROOT, `c-${name}.jsonl`);
 }
 
-function tailFile(machineId: string, sessionId: string): File {
-  return new File(ROOT, `h-${cacheName(machineId, sessionId)}.json`);
+/** A copy as earlier versions wrote it: one JSON document, read until the next save replaces it. */
+function legacyFile(name: string): File {
+  return new File(ROOT, `c-${name}.json`);
+}
+
+function tailFile(name: string): File {
+  return new File(ROOT, `h-${name}.json`);
 }
 
 function sessionsFile(machineId: string): File {
@@ -59,21 +72,20 @@ async function readJson(file: File): Promise<unknown> {
   }
 }
 
-/** Write a whole file or leave the old one: a temporary file moved over it. */
-function write(file: File, text: string): void {
+/** Write a whole file or leave the old one: a temporary file, written off the JS thread, moved over it. */
+async function write(file: File, text: string): Promise<void> {
   ROOT.create({ intermediates: true, idempotent: true });
   const temporary = new File(ROOT, `${file.name}.tmp`);
-  temporary.write(text);
-  try {
-    temporary.moveSync(file, { overwrite: true });
-  } catch {
-    file.write(text);
-    try {
-      temporary.delete();
-    } catch {
-      // Already moved.
-    }
-  }
+  await writeAsStringAsync(temporary.uri, text);
+  await moveAsync({ from: temporary.uri, to: file.uri });
+}
+
+/** One save at a time, in order: a save reads what the one before it left. */
+let queue: Promise<unknown> = Promise.resolve();
+function serial<T>(task: () => Promise<T>): Promise<T> {
+  const run = queue.then(task, task);
+  queue = run.catch(() => undefined);
+  return run;
 }
 
 /** The index, read once per launch; keyed by copy file name. */
@@ -92,18 +104,34 @@ function entries(): Map<string, CacheEntry> {
   return index;
 }
 
+/** The index is written after what it names, and at most one write at a time; a later change rewrites it again. */
+let indexWrite: { running: boolean; again: boolean } = { running: false, again: false };
 function saveIndex(): void {
-  try {
-    write(INDEX, JSON.stringify({ v: 2, entries: Object.fromEntries(entries()) }));
-  } catch {
-    // Best effort; a lost index only loses the copies it named.
+  if (indexWrite.running) {
+    indexWrite.again = true;
+    return;
   }
+  indexWrite = { running: true, again: false };
+  void write(INDEX, JSON.stringify({ v: 2, entries: Object.fromEntries(entries()) }))
+    .catch(() => undefined) // Best effort; a lost index only loses the copies it named.
+    .finally(() => {
+      const again = indexWrite.again;
+      indexWrite = { running: false, again: false };
+      if (again) saveIndex();
+    });
+}
+
+/** The copy file name of a cache file (`c-<name>.jsonl`, `c-<name>.json`, `h-<name>.json`), or undefined. */
+function copyName(file: string): string | undefined {
+  const match = /^[ch]-([0-9a-f]{16})\.jsonl?$/.exec(file);
+  return match?.[1];
 }
 
 /**
  * Delete what is no longer kept: copies of sessions quiet for 24 hours,
  * copies the index does not know (damaged index, a crash mid-save), the item
- * caches of earlier versions (`t-*`) and stray temporary files.
+ * caches of earlier versions (`t-*`) and stray temporary files. Runs at
+ * launch and after each background pass.
  */
 function sweep(now = Date.now()): void {
   const known = entries();
@@ -115,16 +143,26 @@ function sweep(now = Date.now()): void {
       if (!(item instanceof File)) continue;
       const name = item.name;
       const old = now - (item.modificationTime ?? 0) > ORPHAN_MS;
+      const copy = copyName(name);
       const stray =
         name.startsWith("t-") ||
         (name.endsWith(".tmp") && old) ||
-        ((name.startsWith("c-") || name.startsWith("h-")) && name.endsWith(".json") && !known.has(name.slice(2, -5)) && old);
+        (copy !== undefined && !known.has(copy) && (old || gone.some((entry) => entry.name === copy)));
       if (stray) item.delete();
     }
   } catch {
-    // Swept next launch.
+    // Swept next time.
   }
   if (gone.length > 0) saveIndex();
+}
+
+/** Drop expired copies now (a long-lived app is not relaunched to sweep). */
+export function sweepCache(): void {
+  try {
+    sweep();
+  } catch {
+    // Next time.
+  }
 }
 
 /** What the index knows of a session's copy, if it is kept. */
@@ -153,8 +191,16 @@ export function cachedEntries(machineId: string): Map<string, CacheEntry> {
 
 /** A session's saved copy, or undefined (none, expired, damaged). */
 export async function loadCached(machineId: string, sessionId: string): Promise<CachedTranscript | undefined> {
-  if (cachedEntry(machineId, sessionId) === undefined) return undefined;
-  return parseCached(await readJson(copyFile(machineId, sessionId)), machineId, sessionId);
+  const entry = cachedEntry(machineId, sessionId);
+  if (entry === undefined) return undefined;
+  const name = cacheName(machineId, sessionId);
+  const lines = linesFile(name);
+  if (!lines.exists) return parseCached(await readJson(legacyFile(name)), machineId, sessionId);
+  const [text, tail] = await Promise.all([lines.text().catch(() => undefined), loadTail(machineId, sessionId)]);
+  if (text === undefined || tail === undefined) return undefined;
+  const messages = parseCopyLines(text, entry);
+  if (messages === undefined) return undefined;
+  return { v: 2, machineId, sessionId, updatedAt: tail.updatedAt, savedAt: tail.savedAt, session: tail.session, state: tail.state, messages };
 }
 
 /**
@@ -164,60 +210,116 @@ export async function loadCached(machineId: string, sessionId: string): Promise<
 export async function loadTail(machineId: string, sessionId: string): Promise<CachedTail | undefined> {
   const entry = cachedEntry(machineId, sessionId);
   if (entry === undefined) return undefined;
-  return parseTail(await readJson(tailFile(machineId, sessionId)), machineId, entry);
+  return parseTail(await readJson(tailFile(cacheName(machineId, sessionId))), machineId, entry);
+}
+
+/** What a save brings: the whole copy (`from` 0), or the messages after the `from` the saved copy holds, ending in `last`. */
+export interface CopyUpdate {
+  updatedAt: number;
+  session: SessionSummary;
+  state: SessionState | null;
+  messages: AgentMessage[];
+  /** Where `messages` start in the transcript; > 0 continues the saved copy, which must hold exactly that many. */
+  from?: number;
 }
 
 /**
  * Save a session's copy, current to `updatedAt` (the daemon's clock). An older
  * copy never replaces a newer one: a chat's snapshot and a background refresh
- * can both be on their way. Answers whether it was saved.
+ * can both be on their way. Only what the saved copy lacks is written when it
+ * continues it (appended to its file); the files are written off the JS
+ * thread. Answers whether it was saved.
  */
 export function saveCached(
   machineId: string,
   sessionId: string,
-  copy: { updatedAt: number; session: SessionSummary; state: SessionState | null; messages: AgentMessage[] },
+  copy: CopyUpdate,
   /** The chat is open: the copy counts as viewed now. */
   viewed = false,
-): boolean {
-  try {
-    const name = cacheName(machineId, sessionId);
-    const existing = entries().get(name);
-    if (!replaces(existing, copy.updatedAt)) return false;
-    const now = Date.now();
-    const record: CachedTranscript = { v: 2, machineId, sessionId, savedAt: now, ...copy };
-    write(copyFile(machineId, sessionId), JSON.stringify(record));
-    const last = fingerprint(copy.messages[copy.messages.length - 1]);
-    const from = tailStart(copy.messages);
-    const tail: CachedTail = {
-      v: 2,
-      machineId,
-      sessionId,
-      updatedAt: copy.updatedAt,
-      savedAt: now,
-      from,
-      count: copy.messages.length,
-      last,
-      session: copy.session,
-      state: copy.state,
-      messages: copy.messages.slice(from),
-    };
-    // Written after the copy and before the index: a tail that does not match the index is not used.
-    write(tailFile(machineId, sessionId), JSON.stringify(tail));
-    entries().set(name, {
-      machineId,
-      sessionId,
-      updatedAt: copy.updatedAt,
-      viewedAt: viewed ? now : (existing?.viewedAt ?? 0),
-      savedAt: now,
-      count: copy.messages.length,
-      last,
-    });
-    saveIndex();
-    return true;
-  } catch {
-    // The cache is an optimization; the daemon still has the transcript.
-    return false;
+): Promise<boolean> {
+  return serial(async () => {
+    try {
+      return await store(machineId, sessionId, copy, viewed);
+    } catch {
+      // The cache is an optimization; the daemon still has the transcript.
+      return false;
+    }
+  });
+}
+
+async function store(machineId: string, sessionId: string, copy: CopyUpdate, viewed: boolean): Promise<boolean> {
+  const name = cacheName(machineId, sessionId);
+  const existing = entries().get(name);
+  if (!replaces(existing, copy.updatedAt)) return false;
+  const from = copy.from ?? 0;
+  if (from > 0 && (existing === undefined || existing.count !== from)) return false;
+  const lines = linesFile(name);
+  const size = lines.exists ? (lines.size ?? undefined) : undefined;
+  let at = appendAt(existing, size, copy.messages, from);
+  let whole = from === 0 ? copy.messages : undefined;
+  if (at === undefined && whole === undefined) {
+    // A delta onto a file the last save did not leave: rewrite it from the saved copy.
+    const saved = await loadCached(machineId, sessionId);
+    if (saved === undefined || saved.messages.length !== from) return false;
+    whole = [...saved.messages, ...copy.messages];
   }
+  const count = from + copy.messages.length;
+  if (count === 0) return false;
+  const last = copy.messages.length > 0 ? fingerprint(copy.messages[copy.messages.length - 1]) : (existing?.last ?? "");
+  ROOT.create({ intermediates: true, idempotent: true });
+  if (at !== undefined) {
+    const added = copy.messages.slice(at);
+    if (added.length > 0) await writeAsStringAsync(lines.uri, copyLines(added), { append: true });
+  } else {
+    await write(lines, copyLines(whole ?? []));
+  }
+  // The tail: from the whole copy when it is here, else the old tail extended by the delta.
+  let end: { from: number; messages: AgentMessage[] } | undefined;
+  if (whole !== undefined) {
+    const start = tailStart(whole);
+    end = { from: start, messages: whole.slice(start) };
+  } else {
+    // `from > 0`: `copy.messages` are the messages after the saved copy, which the old tail ends.
+    const before = await loadTail(machineId, sessionId);
+    if (before !== undefined) end = extendTail(before, copy.messages);
+  }
+  if (end === undefined) {
+    const saved = await loadCached(machineId, sessionId);
+    const all = saved === undefined ? undefined : [...saved.messages, ...copy.messages];
+    if (all === undefined || all.length !== count) return false;
+    const start = tailStart(all);
+    end = { from: start, messages: all.slice(start) };
+  }
+  const now = Date.now();
+  const tail: CachedTail = {
+    v: 2,
+    machineId,
+    sessionId,
+    updatedAt: copy.updatedAt,
+    savedAt: now,
+    from: end.from,
+    count,
+    last,
+    session: copy.session,
+    state: copy.state,
+    messages: end.messages,
+  };
+  // Written after the copy and before the index: a tail that does not match the index is not used.
+  await write(tailFile(name), JSON.stringify(tail));
+  const legacy = legacyFile(name);
+  if (legacy.exists) legacy.delete();
+  entries().set(name, {
+    machineId,
+    sessionId,
+    updatedAt: copy.updatedAt,
+    viewedAt: viewed ? now : (existing?.viewedAt ?? 0),
+    savedAt: now,
+    count,
+    last,
+    bytes: lines.size ?? undefined,
+  });
+  saveIndex();
+  return true;
 }
 
 /** The daemon had nothing newer than the copy: it is current to `updatedAt` now, without rewriting it. */
@@ -250,7 +352,8 @@ export function dropTranscript(machineId: string, sessionId: string): void {
   try {
     entries().delete(cacheName(machineId, sessionId));
     saveIndex();
-    for (const file of [copyFile(machineId, sessionId), tailFile(machineId, sessionId)]) if (file.exists) file.delete();
+    const name = cacheName(machineId, sessionId);
+    for (const file of [linesFile(name), legacyFile(name), tailFile(name)]) if (file.exists) file.delete();
   } catch {
     // Nothing to drop.
   }
@@ -265,12 +368,9 @@ export async function loadSessionList(machineId: string): Promise<SessionSummary
 }
 
 export function saveSessionList(machineId: string, sessions: readonly SessionSummary[]): void {
-  try {
-    const record: SavedSessions = { v: LIST_VERSION, machineId, savedAt: Date.now(), sessions: [...sessions] };
-    write(sessionsFile(machineId), JSON.stringify(record));
-  } catch {
-    // Best effort, as above.
-  }
+  const record: SavedSessions = { v: LIST_VERSION, machineId, savedAt: Date.now(), sessions: [...sessions] };
+  // Best effort, as above.
+  void serial(() => write(sessionsFile(machineId), JSON.stringify(record))).catch(() => undefined);
 }
 
 /** Forget everything saved for a machine removed from the phone. */
@@ -280,7 +380,7 @@ export function dropMachine(machineId: string): void {
     for (const [name, entry] of known) {
       if (entry.machineId !== machineId) continue;
       known.delete(name);
-      for (const file of [new File(ROOT, `c-${name}.json`), new File(ROOT, `h-${name}.json`)]) if (file.exists) file.delete();
+      for (const file of [linesFile(name), legacyFile(name), tailFile(name)]) if (file.exists) file.delete();
     }
     saveIndex();
     const list = sessionsFile(machineId);

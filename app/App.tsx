@@ -8,6 +8,7 @@ import {
   PermissionsAndroid,
   Platform,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
@@ -401,6 +402,7 @@ export default function App(): ReactNode {
         // Another computer's home starts fresh: its list and probe state.
         key={route.machine.id}
         machine={liveMachine(route.machine)}
+        machines={machines}
         probe={probes.get(route.machine.id)}
         onOpen={openChat}
         onPickMachine={() => setMachinePicker(true)}
@@ -452,11 +454,14 @@ export default function App(): ReactNode {
   }
 
   const homeMachine = route.kind === "home" || route.kind === "chat" ? liveMachine(route.machine) : undefined;
+  // The system font size changed (the activity is kept for it, see plugins/withFontScaleChanges.js):
+  // the screens render again so their text is measured at the new size; the route stays.
+  const { fontScale } = useWindowDimensions();
 
   return (
     <SafeAreaProvider>
-      {/* Keyed by the language: every screen and sheet renders again in the new one. */}
-      <Fragment key={language}>
+      {/* Keyed by the language and the font size: every screen and sheet renders again in the new one. */}
+      <Fragment key={`${language}\n${fontScale}`}>
         <StatusBar style={route.kind === "scan" || palette(scheme).dark ? "light" : "dark"} />
         {route.kind === "scan" ? (
           // The camera runs edge to edge; the scanner pads its own bars by the safe area.

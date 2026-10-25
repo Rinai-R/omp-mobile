@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { dotOf, linkText, type Probe } from "../probe";
+import { dotOf, linkName, linkText, type Probe } from "../probe";
 import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
 import { cleanLabel, displayName, shortName } from "../machines";
 import type { Machine } from "../types";
@@ -66,8 +66,8 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
     body = (
       <>
         <View style={styles.group}>
-          <View style={styles.row} accessible accessibilityLabel={t("machine.linkA11y", { link: linkText(probe) })}>
-            <Text style={styles.via}>Tailscale</Text>
+          <View style={styles.row} accessible accessibilityLabel={t("machine.linkA11y", { via: linkName(machine.url), link: linkText(probe) })}>
+            <Text style={styles.via}>{linkName(machine.url)}</Text>
             <StateDot dot={dotOf(probe)} used={used} />
             <Text style={used ? styles.linkUsed : styles.linkState} numberOfLines={1}>
               {linkText(probe)}

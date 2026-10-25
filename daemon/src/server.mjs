@@ -56,6 +56,10 @@ const HEARTBEAT_MS = 20_000;
 /** A live omp nobody has looked at for this long is closed; the next open resumes it. */
 const IDLE_SESSION_MS = 30 * 60_000;
 const REAP_INTERVAL_MS = 60_000;
+/** Messages a live session keeps in memory; older ones leave its front (its `base` counts them). */
+const MAX_LIVE_MESSAGES = 5_000;
+/** Events that are a session being used: a turn and what it streams. State and setting echoes are not. */
+const ACTIVITY_EVENT = /^(agent_|turn_|message_|tool_execution_|auto_compaction_|auto_retry_)/;
 /**
  * The fields of a tool result's `details` the app reads: an edit's diff, a
  * read's line count, a command's run time, a screenshot's file. The rest
@@ -379,6 +383,46 @@ export function pruneBlobCache(blobDir, now = Date.now()) {
   return dropped;
 }
 
+/**
+ * When the messages were last written: the newest timestamp OMP stamped on
+ * them, or undefined when none carries one.
+ * @param {readonly any[]} messages
+ */
+export function lastActivity(messages) {
+  let latest;
+  for (let i = messages.length - 1; i >= 0 && i >= messages.length - 50; i -= 1) {
+    const at = Number(messages[i]?.timestamp);
+    if (Number.isFinite(at) && at > 0 && (latest === undefined || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/**
+ * When a session the daemon knows but has no omp for was last used: what the
+ * registry says, or its file's time when something wrote the file since --
+ * unless the file is exactly as this daemon's own omp left it on exit (omp
+ * rewrites the whole file as it closes; that is not anyone using it).
+ * @param {{updatedAt?: number, closedFile?: {mtimeMs: number, size: number}} | undefined} stored
+ * @param {{updatedAt: number, size?: number} | undefined} scanned
+ */
+export function dormantActivity(stored, scanned) {
+  const known = Number(stored?.updatedAt) || 0;
+  if (scanned === undefined || !(scanned.updatedAt > known)) return known;
+  const closed = stored?.closedFile;
+  if (closed !== undefined && closed !== null && closed.mtimeMs === scanned.updatedAt && closed.size === scanned.size) return known;
+  return scanned.updatedAt;
+}
+
+/** A file's time and size, as `TranscriptStore` checks them; undefined when it cannot be read. */
+function fileState(path) {
+  try {
+    const info = statSync(path);
+    return info.isFile() ? { mtimeMs: info.mtimeMs, size: info.size } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function storedSummary(stored) {
   return {
     id: stored.id,
@@ -506,6 +550,10 @@ class SessionEntry {
     this.id = "";
     this.state = null;
     this.messages = [];
+    /** How many messages left the front of `messages` (the cap): `messages[0]` is the transcript's message `base`. */
+    this.base = 0;
+    /** The session file as this omp left it on exit, so its rewrite is not taken for activity. */
+    this.closedFile = undefined;
     this.createdAt = Date.now();
     this.updatedAt = this.createdAt;
     this.title = cwd.split("/").filter(Boolean).at(-1) ?? "session";
@@ -530,13 +578,19 @@ class SessionEntry {
     this.onClosed = undefined;
   }
 
-  async hydrate() {
+  /**
+   * @param {number} [knownActivity] when the session was last used, as the daemon knew it before this omp
+   */
+  async hydrate(knownActivity) {
     const [state, messages] = await Promise.all([this.rpc.getState(), this.rpc.getMessages()]);
     this.state = state;
     this.messages = Array.isArray(messages.messages) ? messages.messages.map((message) => phoneMessage(message, this.blobDir)) : [];
+    this.base = 0;
     this.id = state.sessionId ?? "";
     this.title = titleOf(this.messages, state, this.cwd);
-    this.updatedAt = Date.now();
+    // Opening a session is not using it: it is as recent as its last message (a new one: now).
+    const known = Math.max(lastActivity(this.messages) ?? 0, Number(knownActivity) || 0);
+    this.updatedAt = known > 0 ? known : Date.now();
     return this;
   }
 
@@ -562,7 +616,7 @@ class SessionEntry {
    * @param {{since: number, last: string}} [held]
    */
   snapshot(held) {
-    return deltaBody({ session: this.summary(), state: this.state, messages: this.messages }, held);
+    return deltaBody({ session: this.summary(), state: this.state, messages: this.messages, base: this.base }, held);
   }
 
   broadcast(payload) {
@@ -576,7 +630,6 @@ class SessionEntry {
   async refreshState() {
     try {
       this.state = await this.rpc.getState();
-      this.updatedAt = Date.now();
       this.broadcast({ type: "state", state: this.state });
     } catch {
       // The process may be exiting; the close event tells clients.
@@ -585,10 +638,15 @@ class SessionEntry {
 
   bind() {
     this.rpc.on("event", (event) => {
-      this.updatedAt = Date.now();
+      if (typeof event?.type === "string" && ACTIVITY_EVENT.test(event.type)) this.updatedAt = Date.now();
       if (event.type === "message_end" && event.message) {
         this.messages.push(phoneMessage(event.message, this.blobDir));
-        if (this.messages.length > 5_000) this.messages.splice(0, this.messages.length - 5_000);
+        if (this.messages.length > MAX_LIVE_MESSAGES) {
+          // Indices stay the transcript's: a phone's `since` still lines up after the front is dropped.
+          const dropped = this.messages.length - MAX_LIVE_MESSAGES;
+          this.messages.splice(0, dropped);
+          this.base += dropped;
+        }
         // The first prompt names a session that was created untitled.
         const title = titleOf(this.messages, this.state, this.cwd);
         if (title !== this.title) {
@@ -861,10 +919,9 @@ class Daemon {
     const others = found
       .filter((session) => !known.has(session.id))
       .map((session) => ({ ...session, status: "idle", origin: "omp" }));
-    // A dormant session is as recent as its file: a terminal omp may have written it since.
+    // A dormant session is as recent as its file when a terminal omp wrote it since, not when our own omp's exit did.
     for (const session of dormant) {
-      const scanned = this.ompSessions.get(session.id);
-      if (scanned !== undefined && scanned.updatedAt > session.updatedAt) session.updatedAt = scanned.updatedAt;
+      session.updatedAt = dormantActivity(this.registry.get(session.id), this.ompSessions.get(session.id));
     }
     const marked = await Promise.all(
       [...dormant, ...others].map(async (session) => {
@@ -941,7 +998,9 @@ class Daemon {
   /** The omp of a session exited: save its transcript and when it was last active. */
   sessionClosed(entry) {
     if (entry.id === "") return;
-    this.transcripts.write(entry.id, { sessionFile: entry.state?.sessionFile, messages: entry.messages, state: entry.state, session: entry.summary() });
+    const sessionFile = entry.state?.sessionFile;
+    entry.closedFile = typeof sessionFile === "string" ? fileState(sessionFile) : undefined;
+    this.transcripts.write(entry.id, { sessionFile, messages: entry.messages, base: entry.base, state: entry.state, session: entry.summary() });
     if (this.registry.has(entry.id)) this.remember(entry);
   }
 
@@ -954,6 +1013,8 @@ class Daemon {
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
       sessionFile: entry.state?.sessionFile,
+      // Set once its omp exited: the file as that omp left it (see `dormantActivity`).
+      ...(entry.closedFile !== undefined ? { closedFile: entry.closedFile } : {}),
     });
     saveRegistry(this.options.registryFile, this.registry);
   }
@@ -1007,8 +1068,10 @@ class Daemon {
       await rpc.start();
       const entry = new SessionEntry(stored.cwd, rpc);
       entry.blobDir = this.blobDir;
-      await entry.hydrate();
+      await entry.hydrate(this.registry.has(id) ? dormantActivity(this.registry.get(id), this.ompSessions.get(id)) : stored.updatedAt);
       entry.id = id;
+      // Idle from now for the reaper, until a phone attaches: its last activity may be long ago.
+      entry.idleSince = Date.now();
       entry.onChange = (changed) => this.remember(changed);
       entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
       entry.onClosed = (closed) => this.sessionClosed(closed);
@@ -1087,6 +1150,7 @@ class Daemon {
       entry.blobDir = this.blobDir;
       await entry.hydrate();
       if (entry.id === "") throw new Error("omp returned no session id");
+      entry.idleSince = Date.now();
       entry.onChange = (changed) => this.remember(changed);
       entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
       entry.onClosed = (closed) => this.sessionClosed(closed);

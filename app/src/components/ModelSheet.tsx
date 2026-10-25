@@ -135,6 +135,7 @@ export function ModelSheet({
             autoCapitalize="none"
             autoCorrect={false}
             editable={models !== null}
+            maxFontSizeMultiplier={1.4}
             style={styles.searchInput}
           />
         </View>
@@ -194,7 +195,9 @@ export function ModelSheet({
 function createStyles(c: Palette) {
   const levelChip = {
     paddingHorizontal: 11,
-    height: 30,
+    paddingVertical: 5,
+    // Grows with the system font size instead of clipping its word.
+    minHeight: 30,
     borderRadius: radius.pill,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
@@ -204,7 +207,7 @@ function createStyles(c: Palette) {
   } as const;
   return {
     sheet: { gap: 12, paddingBottom: 6 },
-    levelBlock: { gap: 8 },
+    levelBlock: { gap: 8, flexShrink: 0 },
     levelLabel: {
       fontFamily: MONO,
       fontSize: 10,
@@ -221,13 +224,15 @@ function createStyles(c: Palette) {
     levelTextOn: { fontFamily: MONO, fontSize: 11.5, lineHeight: 15, color: c.accent },
     pressed: { opacity: 0.8 },
     search: {
+      flexShrink: 0,
       borderRadius: radius.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
       backgroundColor: c.raised,
       paddingHorizontal: 12,
     },
-    searchInput: { fontFamily: SANS, height: 38, fontSize: 14, color: c.fg },
+    // A fixed height cut the placeholder's top off at large text sizes: the field grows with it.
+    searchInput: { fontFamily: SANS, minHeight: 38, paddingVertical: 8, fontSize: 14, lineHeight: 19, color: c.fg },
     error: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.err },
     list: { paddingBottom: 8, gap: 2 },
     loading: { paddingVertical: 16 },

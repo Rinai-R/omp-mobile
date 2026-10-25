@@ -153,3 +153,45 @@ describe("summaryOf", () => {
     assert.equal(linkText(undefined), "Checking…");
   });
 });
+
+describe("one /sessions request at a time", () => {
+  it("a probe and the home's list asked at once share one request", async () => {
+    const { fetchSessions } = await import("../src/sessionsFetch.ts");
+    let release;
+    const calls = stub({
+      "/hello": () => reply(200, HELLO),
+      "/sessions": () => new Promise((resolve) => (release = () => resolve(reply(200, { sessions: [{ id: "a", status: "idle" }] })))),
+    });
+    const probe = probeMachine(MACHINE);
+    const list = (async () => {
+      while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+      return fetchSessions(MACHINE.url, MACHINE.token);
+    })();
+    while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+    await new Promise((wait) => setTimeout(wait, 5));
+    release();
+    assert.equal((await probe).state, "online");
+    assert.equal(JSON.parse((await list).text).sessions.length, 1);
+    assert.equal(calls.filter((call) => call.path === "/sessions").length, 1);
+    // Settled: the next one asks again.
+    release = undefined;
+    const again = fetchSessions(MACHINE.url, MACHINE.token);
+    while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+    release();
+    await again;
+    assert.equal(calls.filter((call) => call.path === "/sessions").length, 2);
+  });
+});
+
+describe("linkName", () => {
+  it("calls a tailnet address Tailscale and any other address LAN", async () => {
+    const { linkName } = await import("../src/probe.ts");
+    assert.equal(linkName("http://100.68.127.23:7390"), "Tailscale");
+    assert.equal(linkName("http://box.tail1234.ts.net:7390"), "Tailscale");
+    assert.equal(linkName("http://10.0.2.2:7395"), "LAN", "the emulator's host");
+    assert.equal(linkName("http://192.168.1.20:7390"), "LAN");
+    assert.equal(linkName(undefined), "Tailscale");
+    const online = { state: "online", latencyMs: 3, sessionCount: 2, running: 0, name: "a", version: "1" };
+    assert.equal(summaryOf(online, undefined, 0, "http://10.0.2.2:7395").text, "LAN · 2 sessions");
+  });
+});

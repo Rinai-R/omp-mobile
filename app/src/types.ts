@@ -127,6 +127,8 @@ export interface MessageItem {
   stop?: "error" | "aborted";
   /** The error an assistant message ended on. */
   error?: string;
+  /** What the deltas of an open message added up to so far, apart from what its events' message content said. */
+  streamed?: { text: string; thinking: string };
 }
 
 export interface NoticeItem {
@@ -171,6 +173,11 @@ export interface Transcript {
   state: SessionState;
   from?: number;
   total?: number;
+  /**
+   * A whole answer (`from` 0) from a session past the daemon's message cap:
+   * the index in the session of its first message. Absent (0) otherwise.
+   */
+  base?: number;
   messages: AgentMessage[];
 }
 
