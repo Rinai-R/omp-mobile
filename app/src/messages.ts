@@ -92,6 +92,15 @@ export function roleOf(message: AgentMessage): MessageItem["role"] | undefined {
   return undefined;
 }
 
+/** How an assistant message ended, when that was an error or a stop. */
+function stopOf(message: AgentMessage): Pick<MessageItem, "stop" | "error"> {
+  if (message.role !== "assistant") return {};
+  const reason = message.stopReason;
+  if (reason !== "error" && reason !== "aborted") return {};
+  const error = typeof message.errorMessage === "string" && message.errorMessage.trim() !== "" ? message.errorMessage : undefined;
+  return reason === "error" ? { stop: reason, error } : { stop: reason };
+}
+
 function messageToItem(message: AgentMessage, index: number): ChatItem | undefined {
   const role = roleOf(message);
   if (role === undefined) return undefined;
@@ -99,7 +108,9 @@ function messageToItem(message: AgentMessage, index: number): ChatItem | undefin
   const thinking = thinkingOf(message.content);
   const images = imagesOf(message.content);
   const empty = text.trim() === "";
-  if (empty && images === undefined && (role !== "assistant" || thinking === undefined)) return undefined;
+  const stop = stopOf(message);
+  // A message that ended on an error or a stop is kept even when empty: it says how its turn ended.
+  if (empty && images === undefined && stop.stop === undefined && (role !== "assistant" || thinking === undefined)) return undefined;
   return {
     kind: "message",
     id: message.id ?? `m-${index}`,
@@ -108,6 +119,7 @@ function messageToItem(message: AgentMessage, index: number): ChatItem | undefin
     thinking,
     images,
     createdAt: typeof message.timestamp === "number" ? message.timestamp : undefined,
+    ...stop,
   };
 }
 
@@ -159,6 +171,7 @@ export function snapshotItems(messages: AgentMessage[], offset = 0): ChatItem[] 
         tool.isError = message.isError === true;
         tool.status = tool.isError ? "error" : "done";
         tool.images = images;
+        if (typeof message.timestamp === "number") tool.endedAt = message.timestamp;
         return;
       }
       const text = textOf(message.content).trim();
@@ -250,6 +263,7 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       images: imagesOf(message.content),
       streaming: true,
       open: true,
+      createdAt: typeof message.timestamp === "number" ? message.timestamp : Date.now(),
     };
     return [...items.filter((entry) => entry.id !== item.id), item];
   }
@@ -299,8 +313,13 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       images: imagesOf(message.content),
       streaming: false,
       open: false,
+      createdAt: before?.createdAt ?? (typeof message.timestamp === "number" ? message.timestamp : undefined),
+      endedAt: Date.now(),
+      ...stopOf(message),
     };
-    const keep = !blank(final) && !(role !== "assistant" && final.text.trim() === "" && final.images === undefined);
+    const keep =
+      final.stop !== undefined ||
+      (!blank(final) && !(role !== "assistant" && final.text.trim() === "" && final.images === undefined));
     if (at === -1) return keep ? [...items, final] : items;
     if (!keep) return items.filter((_, index) => index !== at);
     return items.map((entry, index) => (index === at ? final : entry));

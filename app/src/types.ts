@@ -99,7 +99,7 @@ export interface ToolItem {
   status: "running" | "done" | "error";
   /** Images a result carried, e.g. a screenshot or a picture the read tool opened. */
   images?: ImagePart[];
-  /** When the phone saw the call start and end (epoch ms); absent for calls loaded from a snapshot. */
+  /** When the call started and ended (epoch ms): as the phone saw it live; a stored call has only its result's time as the end. */
   startedAt?: number;
   endedAt?: number;
 }
@@ -119,7 +119,14 @@ export interface MessageItem {
   streaming?: boolean;
   /** The message OMP is still emitting: updates and the final message land on it. */
   open?: boolean;
+  /** When the message started (epoch ms): OMP's timestamp, else when the phone saw it start. */
   createdAt?: number;
+  /** When the phone saw the message end; absent for stored messages. */
+  endedAt?: number;
+  /** How an assistant message ended, when it did not end normally: an error, or stopped by the user. */
+  stop?: "error" | "aborted";
+  /** The error an assistant message ended on. */
+  error?: string;
 }
 
 export interface NoticeItem {
