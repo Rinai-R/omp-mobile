@@ -45,6 +45,7 @@
       }
     },
     "plugins": [
+      "./plugins/withFontScaleChanges",
       [
         "expo-build-properties",
         {
