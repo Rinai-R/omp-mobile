@@ -33,7 +33,7 @@ const POLL_MS = 1_500;
 /** How long the code stays up without a phone connecting. */
 const SHOW_MS = 5 * 60_000;
 /** How often the session's takeover request is looked for, and how stale one may be. */
-const TAKEOVER_POLL_MS = 1_000;
+const TAKEOVER_POLL_MS = 500;
 const TAKEOVER_MAX_AGE_MS = 60_000;
 /** How long a running turn gets to stop before omp closes anyway. */
 const TAKEOVER_IDLE_WAIT_MS = 5_000;

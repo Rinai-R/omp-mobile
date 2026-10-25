@@ -3,6 +3,8 @@ import { t } from "./i18n/index.ts";
 import { ownerOf } from "./takeover.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
+/** How long a session socket may go without a frame before it is treated as dead. */
+const SILENCE_MS = 60_000;
 
 async function request<T>(machine: Machine, path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${machine.url}${path}`, {
@@ -150,6 +152,9 @@ export class SessionSocket {
   private timer: ReturnType<typeof setTimeout> | undefined;
   /** Connection attempts since the last open; the screen asks over HTTP why after a few. */
   private attempts = 0;
+  /** When the last frame arrived; 0 until one does (or while a newer socket replaces this one). */
+  private lastFrame = 0;
+  private watchdog: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly machine: Machine,
@@ -177,6 +182,7 @@ export class SessionSocket {
     this.socket = socket;
     let opened = false;
     socket.onmessage = (event) => {
+      this.lastFrame = Date.now();
       let message: ServerMessage;
       try {
         message = JSON.parse(String(event.data)) as ServerMessage;
@@ -197,6 +203,9 @@ export class SessionSocket {
         this.onOpen();
       }
       this.onMessage(message);
+    };
+    socket.onopen = () => {
+      this.lastFrame = Date.now();
     };
     socket.onerror = () => undefined;
     socket.onclose = () => {
@@ -235,8 +244,25 @@ export class SessionSocket {
     return true;
   }
 
+  /**
+   * Treat a link that sends nothing for a minute as gone: the daemon beats
+   * every 20 s (`heartbeat` feature), so silence means the socket died under a
+   * NAT or a doze, not that the session is quiet. The close handler reconnects.
+   */
+  watchSilence(): void {
+    if (this.watchdog !== undefined) return;
+    this.watchdog = setInterval(() => {
+      if (this.closed || this.failed) return;
+      if (this.socket?.readyState === WebSocket.OPEN && this.lastFrame > 0 && Date.now() - this.lastFrame > SILENCE_MS) {
+        this.socket.close();
+      }
+    }, 10_000);
+  }
+
   close(): void {
     this.closed = true;
+    if (this.watchdog !== undefined) clearInterval(this.watchdog);
+    this.watchdog = undefined;
     if (this.timer !== undefined) clearTimeout(this.timer);
     const socket = this.socket;
     this.socket = undefined;

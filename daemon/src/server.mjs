@@ -43,6 +43,18 @@ const STATE_EVENTS = new Set([
   "todo_auto_clear",
   "goal_updated",
 ]);
+/**
+ * How long OMP's session directory and owner locks are reused for, in ms.
+ * The phone probes every 15 s; without this every probe would rescan every
+ * session file (hundreds, often a gigabyte) and spawn `lsof` again.
+ */
+const SESSION_SCAN_TTL_MS = 3_000;
+const OWNERS_TTL_MS = 1_500;
+/** WebSocket keepalive: a protocol ping plus a `ping` frame, and a dead peer after one missed beat. */
+const HEARTBEAT_MS = 20_000;
+/** A live omp nobody has looked at for this long is closed; the next open resumes it. */
+const IDLE_SESSION_MS = 30 * 60_000;
+const REAP_INTERVAL_MS = 60_000;
 /** Image types a phone may attach to a prompt: what the camera and the photo picker produce. */
 const PROMPT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 /** At most this many images per prompt, each at most this many decoded bytes. */
@@ -75,9 +87,11 @@ export function promptImages(value) {
 /**
  * What this daemon supports beyond protocol 1, for an app to offer only what
  * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`;
- * `takeover`: `POST /sessions/:id/takeover` continues a session another omp process holds.
+ * `takeover`: `POST /sessions/:id/takeover` continues a session another omp process holds;
+ * `heartbeat`: session sockets get a `ping` frame every 20 s, so the app can
+ * treat a silent link as gone.
  */
-const FEATURES = ["prompt-images", "takeover"];
+const FEATURES = ["prompt-images", "takeover", "heartbeat"];
 /** Who a phone continues a session on, as the terminal it leaves is told. */
 const DEFAULT_DEVICE = "OMP Mobile";
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
@@ -249,6 +263,27 @@ function saveRegistry(path, registry) {
   writeFileSync(path, `${JSON.stringify(Object.fromEntries(registry), null, 2)}\n`, { mode: 0o600 });
 }
 
+/**
+ * The directory an omp starts in, recreated when it has been removed (a
+ * session in /tmp outlives its directory). Answers a 410 the phone can show
+ * when it cannot be recreated (a parent that is a file, no permission).
+ * @param {string} cwd
+ * @returns {string}
+ */
+export function ensureWorkingDirectory(cwd) {
+  try {
+    if (statSync(cwd).isDirectory()) return cwd;
+  } catch {
+    // Missing: recreate it below.
+  }
+  try {
+    mkdirSync(cwd, { recursive: true });
+    return cwd;
+  } catch {
+    throw httpError(410, `the session's working directory is gone and cannot be recreated: ${cwd}`);
+  }
+}
+
 function storedSummary(stored) {
   return {
     id: stored.id,
@@ -388,6 +423,8 @@ class SessionEntry {
      */
     this.onBroadcast = undefined;
     this.closed = false;
+    /** When the last phone left; undefined while one is connected. The reaper reads it. */
+    this.idleSince = undefined;
   }
 
   async hydrate() {
@@ -521,6 +558,14 @@ class Daemon {
     this.streams = new Set();
     /** OMP's own sessions as last listed, for resuming one the app picked. @type {Map<string, import("./omp-sessions.mjs").OmpSession>} */
     this.ompSessions = new Map();
+    /** The last full scan of OMP's session directory, reused within `SESSION_SCAN_TTL_MS`. */
+    this.sessionScan = { at: 0, list: /** @type {import("./omp-sessions.mjs").OmpSession[]} */ ([]), pending: undefined };
+    /** The last `lsof` of the owner locks, pending or settled, reused within `OWNERS_TTL_MS`. */
+    this.ownerLookup = { at: 0, owners: /** @type {Promise<Map<string, number> | undefined> | undefined} */ (undefined) };
+    /** @type {ReturnType<typeof setInterval> | undefined} */
+    this.heartbeat = undefined;
+    /** @type {ReturnType<typeof setInterval> | undefined} */
+    this.reaper = undefined;
     /** Resumes in flight, so two opens of one session start one process. @type {Map<string, Promise<SessionEntry>>} */
     this.starting = new Map();
     /** Takeovers in flight, so two phones asking at once ask the owner once. @type {Map<string, Promise<object>>} */
@@ -657,6 +702,7 @@ class Daemon {
           const live = this.sessions.get(id);
           if (live !== undefined) this.attention.forget(live);
           live?.close();
+          this.forgetOwners();
           this.sessions.delete(id);
           this.registry.delete(id);
           saveRegistry(this.options.registryFile, this.registry);
@@ -685,10 +731,7 @@ class Daemon {
       .filter((stored) => !known.has(stored.id))
       .map((stored) => storedSummary(stored));
     for (const session of dormant) known.add(session.id);
-    const [found, owners] = await Promise.all([
-      listOmpSessions(join(this.options.ompHome, "agent", "sessions"), { limit: OMP_SESSION_LIMIT }),
-      this.owners(),
-    ]);
+    const [found, owners] = await Promise.all([this.scanOmpSessions(), this.owners()]);
     this.ompSessions = new Map(found.map((session) => [session.id, session]));
     const others = found
       .filter((session) => !known.has(session.id))
@@ -713,9 +756,40 @@ class Daemon {
     return { pid, busy: typeof sessionFile === "string" && sessionBusy(sessionFile), terminal: info?.tty !== undefined };
   }
 
-  /** Which sessions some omp process holds open (`undefined`: cannot tell). */
+  /**
+   * OMP's sessions, rescanned at most every `SESSION_SCAN_TTL_MS`: a phone's
+   * probes ask for the same list every few seconds, and reading the first
+   * 512 KB of up to 50 of hundreds of files is the daemon's most expensive read.
+   */
+  scanOmpSessions() {
+    const scan = this.sessionScan;
+    if (Date.now() - scan.at < SESSION_SCAN_TTL_MS) return Promise.resolve(scan.list);
+    if (scan.pending !== undefined) return scan.pending;
+    scan.pending = listOmpSessions(join(this.options.ompHome, "agent", "sessions"), { limit: OMP_SESSION_LIMIT }).then(
+      (list) => {
+        this.sessionScan = { at: Date.now(), list, pending: undefined };
+        return list;
+      },
+      (error) => {
+        scan.pending = undefined;
+        throw error;
+      },
+    );
+    return scan.pending;
+  }
+
+  /** Which sessions some omp process holds open (`undefined`: cannot tell). Cached for `OWNERS_TTL_MS`. */
   owners() {
-    return sessionOwners(join(this.options.ompHome, "run", "session-owners"));
+    const lookup = this.ownerLookup;
+    if (lookup.owners !== undefined && Date.now() - lookup.at < OWNERS_TTL_MS) return lookup.owners;
+    const owners = sessionOwners(join(this.options.ompHome, "run", "session-owners"));
+    this.ownerLookup = { at: Date.now(), owners };
+    return owners;
+  }
+
+  /** The owner locks changed (a takeover, an omp closing): the next look must not reuse the cache. */
+  forgetOwners() {
+    this.ownerLookup = { at: 0, owners: undefined };
   }
 
   remember(entry) {
@@ -754,14 +828,20 @@ class Daemon {
     if (!existsSync(stored.sessionFile)) throw httpError(410, "session file is gone");
     // A second omp on the same file would fork it into a new one; the session
     // stays with the process that has it (a terminal) until that one exits.
+    // This comes before the directory check: a held session is a takeover, not
+    // a broken one, and the phone's Take over button needs the 409.
     const owner = (await this.owners())?.get(id);
     if (owner !== undefined) {
       throw httpError(409, `This session is open in another omp process (pid ${owner}). Close it there to continue here.`, {
         owner: await this.ownerOf(owner, stored.sessionFile),
       });
     }
+    // OMP refuses to start in a directory that no longer exists (a session in
+    // /tmp whose directory was cleaned up). Recreate it here instead of letting
+    // the start wait out its timeout and answer with a bare 500.
+    const cwd = ensureWorkingDirectory(stored.cwd);
     const rpc = new RpcSession({
-      cwd: stored.cwd,
+      cwd,
       ompBin: this.options.omp,
       resume: stored.sessionFile,
       autoApprove: this.options.autoApprove,
@@ -832,6 +912,8 @@ class Daemon {
       if (forks.length > 0) this.log(new Error(`taking over ${id} from pid ${pid} left forked session files: ${forks.join(", ")}`));
       outcome = { pid, via: left.via, waitedMs: left.waitedMs, busy, forks };
     }
+    // The owner left: the cached lock map is stale and would refuse this open.
+    this.forgetOwners();
     const entry = await this.ensureLive(id);
     return { ...entry.snapshot(), takeover: outcome };
   }
@@ -875,29 +957,62 @@ class Daemon {
       return;
     }
     this.noteClient(req);
-    void this.ensureLive(decodeURIComponent(match[1]))
-      .then((entry) => {
-        this.wsServer.handleUpgrade(req, socket, head, (ws) => {
-          entry.clients.add(ws);
-          ws.send(JSON.stringify({ type: "snapshot", ...entry.snapshot() }));
+    const id = decodeURIComponent(match[1]);
+    // Finish the handshake before the session is open: a slow omp can take
+    // tens of seconds, and a phone's WebSocket client gives up after ~10 s --
+    // then retries, starting another omp every time. The snapshot (or
+    // `open_failed`) follows on the open socket instead.
+    this.wsServer.handleUpgrade(req, socket, head, (ws) => {
+      ws.isAlive = true;
+      ws.on("pong", () => {
+        ws.isAlive = true;
+      });
+      /** @type {SessionEntry | undefined} */
+      let entry;
+      /** Frames the phone sent before the session was ready. */
+      const early = [];
+      ws.on("message", (data) => {
+        if (entry === undefined) {
+          early.push(data.toString());
+          return;
+        }
+        void this.handleClientMessage(entry, ws, data.toString());
+      });
+      ws.on("close", () => {
+        if (entry !== undefined) this.detach(entry, ws);
+      });
+      ws.on("error", () => {
+        if (entry !== undefined) this.detach(entry, ws);
+      });
+      void this.ensureLive(id).then(
+        (live) => {
+          entry = live;
+          if (ws.readyState !== 1) return;
+          live.clients.add(ws);
+          live.idleSince = undefined;
+          ws.send(JSON.stringify({ type: "snapshot", ...live.snapshot() }));
           // A dialog opened before this client connected (it may have come from a notification tap).
-          for (const request of entry.openRequests()) ws.send(JSON.stringify({ type: "approval", request }));
-          ws.on("message", (data) => void this.handleClientMessage(entry, ws, data.toString()));
-          ws.on("close", () => entry.clients.delete(ws));
-          ws.on("error", () => entry.clients.delete(ws));
-        });
-      })
-      .catch((error) => {
-        const status = typeof error?.status === "number" ? error.status : 500;
-        if (status >= 500) this.log(error);
-        // A browser-style client only sees that the upgrade failed, never why. Finish
-        // the handshake instead, say why the session cannot open, and close: the app
-        // shows the reason and stops retrying what a retry cannot fix.
-        this.wsServer.handleUpgrade(req, socket, head, (ws) => {
+          for (const request of live.openRequests()) ws.send(JSON.stringify({ type: "approval", request }));
+          for (const data of early) void this.handleClientMessage(live, ws, data);
+          early.length = 0;
+        },
+        (error) => {
+          const status = typeof error?.status === "number" ? error.status : 500;
+          if (status >= 500) this.log(error);
+          if (ws.readyState !== 1) return;
+          // Say why the session cannot open and close: the app shows the reason
+          // and stops retrying what a retry cannot fix.
           ws.send(JSON.stringify({ type: "open_failed", status, ...errorBody(error) }));
           ws.close(OPEN_FAILED_CLOSE_CODE, "session did not open");
-        });
-      });
+        },
+      );
+    });
+  }
+
+  /** A phone left a session: it counts as idle from now, for the reaper. */
+  detach(entry, ws) {
+    if (!entry.clients.delete(ws)) return;
+    if (entry.clients.size === 0) entry.idleSince = Date.now();
   }
 
   async handleClientMessage(entry, ws, text) {
@@ -996,11 +1111,57 @@ class Daemon {
 
   listen() {
     return new Promise((resolveListen) => {
-      this.server.listen(this.options.port, this.options.host, () => resolveListen());
+      this.server.listen(this.options.port, this.options.host, () => {
+        this.startTimers();
+        resolveListen();
+      });
     });
   }
 
+  /** Keepalive pings and the idle-session reaper, once the daemon listens. */
+  startTimers() {
+    this.heartbeat = setInterval(() => this.pingClients(), this.options.heartbeatMs ?? HEARTBEAT_MS);
+    this.heartbeat.unref?.();
+    this.reaper = setInterval(() => this.reapIdleSessions(), this.options.reapIntervalMs ?? REAP_INTERVAL_MS);
+    this.reaper.unref?.();
+  }
+
+  /**
+   * Ping every WebSocket and drop the ones that missed the previous beat. A
+   * protocol ping plus a small frame keeps NAT and phone radios from dropping
+   * an idle session silently; the app ignores the frame, older ones too.
+   */
+  pingClients() {
+    const beat = JSON.stringify({ type: "ping", at: Date.now() });
+    for (const ws of this.wsServer.clients) {
+      if (ws.isAlive === false) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+        ws.send(beat);
+      } catch {
+        // Closing; the close handler cleans up.
+      }
+    }
+  }
+
+  /** Close live sessions no phone has looked at for `IDLE_SESSION_MS` (never mid-turn). */
+  reapIdleSessions() {
+    const now = Date.now();
+    for (const [id, entry] of this.sessions) {
+      if (entry.clients.size > 0 || entry.state?.isStreaming === true) continue;
+      if (now - (entry.idleSince ?? entry.updatedAt) < (this.options.idleSessionMs ?? IDLE_SESSION_MS)) continue;
+      entry.close();
+      this.sessions.delete(id);
+    }
+  }
+
   async close() {
+    clearInterval(this.heartbeat);
+    clearInterval(this.reaper);
     for (const end of this.streams) end();
     this.streams.clear();
     // Each omp saves and releases its session before the daemon exits.
