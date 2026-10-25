@@ -20,6 +20,7 @@ import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
 import { listOmpSessions, oneLine, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
+import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
@@ -100,9 +101,11 @@ export function promptImages(value) {
  * the computer it talks to can do. `prompt-images`: `prompt` frames carry `images`;
  * `takeover`: `POST /sessions/:id/takeover` continues a session another omp process holds;
  * `heartbeat`: session sockets get a `ping` frame every 20 s, so the app can
- * treat a silent link as gone.
+ * treat a silent link as gone; `transcript-sync`: a session socket's `since`/`last`
+ * ask for a delta snapshot (`from`, `total`), and `GET /sessions/:id/transcript`
+ * answers the same without starting an omp.
  */
-const FEATURES = ["prompt-images", "takeover", "heartbeat"];
+const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync"];
 /** Who a phone continues a session on, as the terminal it leaves is told. */
 const DEFAULT_DEVICE = "OMP Mobile";
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
@@ -520,6 +523,11 @@ class SessionEntry {
     this.idleSince = undefined;
     /** Where inline images go (see `phoneMessage`); undefined keeps them inline. */
     this.blobDir = undefined;
+    /**
+     * Hears the omp process exit, once its session file is final (the daemon saves the transcript).
+     * @type {((entry: SessionEntry) => void) | undefined}
+     */
+    this.onClosed = undefined;
   }
 
   async hydrate() {
@@ -548,12 +556,13 @@ class SessionEntry {
     };
   }
 
-  snapshot() {
-    return {
-      session: this.summary(),
-      state: this.state,
-      messages: this.messages,
-    };
+  /**
+   * What a phone is sent on open: everything, or only the messages after the
+   * ones it holds when its copy lines up (see `deltaBody`).
+   * @param {{since: number, last: string}} [held]
+   */
+  snapshot(held) {
+    return deltaBody({ session: this.summary(), state: this.state, messages: this.messages }, held);
   }
 
   broadcast(payload) {
@@ -606,6 +615,11 @@ class SessionEntry {
     this.rpc.on("closed", ({ reason, stderr }) => {
       this.closed = true;
       this.broadcast({ type: "closed", reason, stderr: stderr.slice(-2_000) });
+      try {
+        this.onClosed?.(this);
+      } catch {
+        // Saving the transcript is a shortcut; the session file has everything.
+      }
     });
     this.rpc.on("protocol-error", (payload) => this.broadcast({ type: "protocol-error", ...payload }));
   }
@@ -667,6 +681,8 @@ class Daemon {
     this.takingOver = new Map();
     /** Images stashed out of snapshots, served by `/blobs` next to OMP's own store. */
     this.blobDir = options.blobDir ?? join(dirname(options.registryFile ?? DEFAULT_REGISTRY_FILE), "blobs");
+    /** Transcripts of sessions whose omp exited, served by `/transcript` without starting one. */
+    this.transcripts = new TranscriptStore(options.transcriptDir ?? join(dirname(options.registryFile ?? DEFAULT_REGISTRY_FILE), "transcripts"));
     this.server = createServer((req, res) => void this.admitHttp(req, res));
     // Compressed frames: a snapshot is JSON text, several times smaller deflated, and
     // the phone's WebSocket client (OkHttp) asks for permessage-deflate on its own.
@@ -789,6 +805,11 @@ class Daemon {
         sendJson(res, 200, await this.takeOver(decodeURIComponent(takeover[1]), device));
         return;
       }
+      const transcript = /^\/sessions\/([^/]+)\/transcript$/.exec(url.pathname);
+      if (transcript !== null && req.method === "GET") {
+        sendJson(res, 200, this.transcript(decodeURIComponent(transcript[1]), deltaQuery(url.searchParams)));
+        return;
+      }
       const match = /^\/sessions\/([^/]+)$/.exec(url.pathname);
       if (match !== null) {
         const id = decodeURIComponent(match[1]);
@@ -799,8 +820,13 @@ class Daemon {
         }
         if (req.method === "DELETE") {
           const live = this.sessions.get(id);
-          if (live !== undefined) this.attention.forget(live);
+          if (live !== undefined) {
+            this.attention.forget(live);
+            // Closed for good: its exit must not save it, or bring it back into the registry.
+            live.onClosed = undefined;
+          }
           live?.close();
+          this.transcripts.remove(id);
           this.forgetOwners();
           this.sessions.delete(id);
           this.registry.delete(id);
@@ -835,6 +861,11 @@ class Daemon {
     const others = found
       .filter((session) => !known.has(session.id))
       .map((session) => ({ ...session, status: "idle", origin: "omp" }));
+    // A dormant session is as recent as its file: a terminal omp may have written it since.
+    for (const session of dormant) {
+      const scanned = this.ompSessions.get(session.id);
+      if (scanned !== undefined && scanned.updatedAt > session.updatedAt) session.updatedAt = scanned.updatedAt;
+    }
     const marked = await Promise.all(
       [...dormant, ...others].map(async (session) => {
         const pid = owners?.get(session.id);
@@ -889,6 +920,29 @@ class Daemon {
   /** The owner locks changed (a takeover, an omp closing): the next look must not reuse the cache. */
   forgetOwners() {
     this.ownerLookup = { at: 0, owners: undefined };
+  }
+
+  /**
+   * A session's transcript without starting an omp: a live session's from
+   * memory, a closed one's from its saved copy while its session file is
+   * unchanged; otherwise a 404 the phone skips.
+   * @param {string} id
+   * @param {{since: number, last: string}} held
+   */
+  transcript(id, held) {
+    const live = this.sessions.get(id);
+    if (live !== undefined && !live.closed) return live.snapshot(held);
+    const known = this.registry.get(id)?.sessionFile ?? this.ompSessions.get(id)?.sessionFile;
+    const saved = this.transcripts.read(id, typeof known === "string" ? known : undefined);
+    if (saved === undefined) throw httpError(404, "not cached");
+    return deltaBody(saved, held);
+  }
+
+  /** The omp of a session exited: save its transcript and when it was last active. */
+  sessionClosed(entry) {
+    if (entry.id === "") return;
+    this.transcripts.write(entry.id, { sessionFile: entry.state?.sessionFile, messages: entry.messages, state: entry.state, session: entry.summary() });
+    if (this.registry.has(entry.id)) this.remember(entry);
   }
 
   remember(entry) {
@@ -957,6 +1011,7 @@ class Daemon {
       entry.id = id;
       entry.onChange = (changed) => this.remember(changed);
       entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
+      entry.onClosed = (closed) => this.sessionClosed(closed);
       entry.bind();
       this.sessions.set(id, entry);
       this.remember(entry);
@@ -1034,6 +1089,7 @@ class Daemon {
       if (entry.id === "") throw new Error("omp returned no session id");
       entry.onChange = (changed) => this.remember(changed);
       entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
+      entry.onClosed = (closed) => this.sessionClosed(closed);
       entry.bind();
       this.sessions.set(entry.id, entry);
       this.remember(entry);
@@ -1059,6 +1115,8 @@ class Daemon {
     }
     this.noteClient(req);
     const id = decodeURIComponent(match[1]);
+    // What the phone already holds, read now: the snapshot is cut against it once the session is open.
+    const held = deltaQuery(url.searchParams);
     // Finish the handshake before the session is open: a slow omp can take
     // tens of seconds, and a phone's WebSocket client gives up after ~10 s --
     // then retries, starting another omp every time. The snapshot (or
@@ -1091,7 +1149,7 @@ class Daemon {
           if (ws.readyState !== 1) return;
           live.clients.add(ws);
           live.idleSince = undefined;
-          ws.send(JSON.stringify({ type: "snapshot", ...live.snapshot() }));
+          ws.send(JSON.stringify({ type: "snapshot", ...live.snapshot(held) }));
           // A dialog opened before this client connected (it may have come from a notification tap).
           for (const request of live.openRequests()) ws.send(JSON.stringify({ type: "approval", request }));
           for (const data of early) void this.handleClientMessage(live, ws, data);
@@ -1222,6 +1280,7 @@ class Daemon {
   /** Keepalive pings and the idle-session reaper, once the daemon listens; old stashed images go. */
   startTimers() {
     pruneBlobCache(this.blobDir);
+    this.transcripts.prune();
     this.heartbeat = setInterval(() => this.pingClients(), this.options.heartbeatMs ?? HEARTBEAT_MS);
     this.heartbeat.unref?.();
     this.reaper = setInterval(() => this.reapIdleSessions(), this.options.reapIntervalMs ?? REAP_INTERVAL_MS);
@@ -1395,4 +1454,4 @@ if (isMain) {
   });
 }
 
-export { Daemon, SessionEntry, VERSION, PROTOCOL, parseArgs, resolveIdentity };
+export { Daemon, SessionEntry, VERSION, PROTOCOL, FEATURES, parseArgs, resolveIdentity };
