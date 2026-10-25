@@ -350,7 +350,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     let disposed = false;
     const paint = (saved: { session: SessionSummary; state: SessionState | null }) => {
       savedStateRef.current = JSON.stringify(saved.state ?? null);
-      if (saved.state !== null) setState(saved.state);
+      // A copy saved mid-turn says "streaming"; whether it still is, only the daemon knows: not working until it says so.
+      if (saved.state !== null) setState({ ...saved.state, isStreaming: false });
       setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
       markViewed(machine.id, initialSession.id);
     };
