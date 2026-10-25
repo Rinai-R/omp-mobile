@@ -173,6 +173,11 @@ export interface Transcript {
   state: SessionState;
   from?: number;
   total?: number;
+  /**
+   * A whole answer (`from` 0) from a session past the daemon's message cap:
+   * the index in the session of its first message. Absent (0) otherwise.
+   */
+  base?: number;
   messages: AgentMessage[];
 }
 

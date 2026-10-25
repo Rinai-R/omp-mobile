@@ -35,6 +35,12 @@ export interface CacheEntry {
   /** How many messages the copy holds, and the fingerprint of the last. */
   count: number;
   last: string;
+  /**
+   * The size in bytes of the copy's message file as last written (one message
+   * per line): a file of another size was not left by the last save, so it is
+   * rewritten instead of appended to. Absent for copies of earlier versions.
+   */
+  bytes?: number;
 }
 
 /** What the phone holds of a transcript, as `since`/`last` tell the daemon. */
@@ -82,13 +88,15 @@ export function heldQuery(held: Held | undefined): string {
 export function mergeTranscript(
   base: readonly AgentMessage[],
   held: Held | undefined,
-  answer: Pick<Transcript, "from" | "total" | "messages">,
+  answer: Pick<Transcript, "from" | "total" | "messages" | "base">,
 ): AgentMessage[] | undefined {
   if (!Array.isArray(answer.messages)) return undefined;
   const from = answer.from ?? 0;
   if (!Number.isSafeInteger(from) || from < 0) return undefined;
   let merged: AgentMessage[];
   if (from === 0) {
+    // Only the end of a session past the daemon's cap: it is not the transcript from its start.
+    if (startOf(answer) > 0) return undefined;
     merged = answer.messages;
   } else {
     if (held === undefined || from !== held.since || from > base.length) return undefined;
@@ -148,6 +156,12 @@ export function tailStart(messages: readonly AgentMessage[]): number {
   return candidate;
 }
 
+/** Where a whole answer starts in its session: 0, or the daemon's `base` past its message cap. */
+export function startOf(answer: Pick<Transcript, "base">): number {
+  const base = answer.base;
+  return typeof base === "number" && Number.isSafeInteger(base) && base > 0 ? base : 0;
+}
+
 /** What the window tells the daemon it holds: the transcript up to its end. */
 export function heldOfWindow(window: TranscriptWindow): Held | undefined {
   const count = window.offset + window.messages.length;
@@ -163,14 +177,15 @@ export function heldOfWindow(window: TranscriptWindow): Held | undefined {
 export function mergeWindow(
   window: TranscriptWindow,
   held: Held | undefined,
-  answer: Pick<Transcript, "from" | "total" | "messages">,
+  answer: Pick<Transcript, "from" | "total" | "messages" | "base">,
 ): TranscriptWindow | undefined {
   if (!Array.isArray(answer.messages)) return undefined;
   const from = answer.from ?? 0;
   if (!Number.isSafeInteger(from) || from < 0) return undefined;
   if (from === 0) {
     if (answer.total !== undefined && answer.total !== answer.messages.length) return undefined;
-    return { offset: 0, messages: answer.messages };
+    // A session past the daemon's cap: the window starts where what the daemon holds does.
+    return { offset: startOf(answer), messages: answer.messages };
   }
   if (held === undefined || from !== held.since || from !== window.offset + window.messages.length) return undefined;
   if (window.messages.length === 0 || fingerprint(window.messages[window.messages.length - 1]) !== held.last) return undefined;
@@ -231,19 +246,21 @@ export function behind(session: Pick<SessionSummary, "updatedAt">, entry: Pick<C
 /**
  * The sessions a background pass refreshes, newest first: active in the last
  * {@link RECENT_MS} and newer than their copy, minus those held by another omp
- * (the daemon's copy of them is stale) and those the daemon recently had none
- * for (`misses`: session id to the time it answered 404).
+ * (the daemon's copy of them is stale), those the daemon recently had none
+ * for (`misses`: session id to the time it answered 404), and the one whose
+ * chat is on screen (`onScreen`: its chat keeps its copy and refreshes it when left).
  */
 export function syncQueue(
   sessions: readonly SessionSummary[],
   entries: ReadonlyMap<string, CacheEntry>,
   misses: ReadonlyMap<string, number>,
   now: number,
+  onScreen?: string,
 ): SessionSummary[] {
   return sessions
     .filter((session) => {
       const entry = entries.get(session.id);
-      if (session.openElsewhere === true) return false;
+      if (session.openElsewhere === true || session.id === onScreen) return false;
       if (now - Math.max(session.updatedAt, entry?.viewedAt ?? 0) > RECENT_MS) return false;
       if (!behind(session, entry)) return false;
       const missed = misses.get(session.id);
@@ -296,6 +313,7 @@ export function parseIndex(value: unknown): Map<string, CacheEntry> {
     if (!isNumber(entry.updatedAt) || !isNumber(entry.viewedAt) || !isNumber(entry.savedAt) || !isNumber(entry.count)) continue;
     if (typeof entry.last !== "string") continue;
     entries.set(name, {
+      ...(isNumber(entry.bytes) ? { bytes: entry.bytes } : {}),
       machineId: entry.machineId,
       sessionId: entry.sessionId,
       updatedAt: entry.updatedAt,
@@ -306,6 +324,71 @@ export function parseIndex(value: unknown): Map<string, CacheEntry> {
     });
   }
   return entries;
+}
+
+/**
+ * A copy's messages as its file keeps them: one JSON message per line, so a
+ * delta is appended instead of the whole copy rewritten.
+ */
+export function copyLines(messages: readonly AgentMessage[]): string {
+  let text = "";
+  for (const message of messages) text += `${JSON.stringify(message)}\n`;
+  return text;
+}
+
+/**
+ * The messages of a copy file, if it holds the copy the index knows: at
+ * least `count` lines (a save that did not finish may have left more), the
+ * last of them fingerprinted `last`. Undefined for anything else.
+ */
+export function parseCopyLines(text: string, entry: Pick<CacheEntry, "count" | "last">): AgentMessage[] | undefined {
+  const messages: AgentMessage[] = [];
+  let at = 0;
+  while (messages.length < entry.count) {
+    const end = text.indexOf("\n", at);
+    if (end === -1) return undefined;
+    let message: unknown;
+    try {
+      message = JSON.parse(text.slice(at, end));
+    } catch {
+      return undefined;
+    }
+    if (message === null || typeof message !== "object") return undefined;
+    messages.push(message as AgentMessage);
+    at = end + 1;
+  }
+  if (messages.length === 0 || fingerprint(messages[messages.length - 1]) !== entry.last) return undefined;
+  return messages;
+}
+
+/**
+ * Where a save may append to the copy file instead of rewriting it: the index
+ * in `messages` of the first message the file lacks, or undefined to rewrite.
+ * `from` is where `messages` start in the transcript: 0 for a whole copy, the
+ * saved count for a delta. Appending needs the file exactly as the last save
+ * left it (`size` equals the recorded bytes) and `messages` to continue it.
+ */
+export function appendAt(
+  entry: Pick<CacheEntry, "count" | "last" | "bytes"> | undefined,
+  size: number | undefined,
+  messages: readonly AgentMessage[],
+  from = 0,
+): number | undefined {
+  if (entry === undefined || entry.bytes === undefined || size !== entry.bytes || entry.count <= 0) return undefined;
+  if (from > 0) return from === entry.count ? 0 : undefined;
+  if (messages.length < entry.count || fingerprint(messages[entry.count - 1]) !== entry.last) return undefined;
+  return entry.count;
+}
+
+/**
+ * The tail after a delta, from the tail before it: the last messages of both,
+ * started at a turn as {@link tailStart} does. `delta` continues `tail` (its
+ * first message is the transcript's message `tail.from + tail.messages.length`).
+ */
+export function extendTail(tail: Pick<CachedTail, "from" | "messages">, delta: readonly AgentMessage[]): { from: number; messages: AgentMessage[] } {
+  const joined = [...tail.messages, ...delta];
+  const start = tailStart(joined);
+  return { from: tail.from + start, messages: joined.slice(start) };
 }
 
 /** A file name for one machine's session: stable, short, and free of URL characters. */

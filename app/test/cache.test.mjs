@@ -24,6 +24,10 @@ import {
   mergeWindow,
   parseTail,
   tailStart,
+  appendAt,
+  copyLines,
+  extendTail,
+  parseCopyLines,
 } from "../src/cache.ts";
 import { snapshotItems } from "../src/messages.ts";
 import { fingerprint as daemonFingerprint } from "../../daemon/src/transcripts.mjs";
@@ -122,6 +126,11 @@ test("the background pass refreshes recent sessions newer than their copy, newes
   assert.deepEqual(
     syncQueue(sessions, entries, misses, now).map((item) => item.id),
     ["missedLongAgo", "newer", "uncached", "viewed"],
+  );
+  assert.deepEqual(
+    syncQueue(sessions, entries, misses, now, "newer").map((item) => item.id),
+    ["missedLongAgo", "uncached", "viewed"],
+    "the chat on screen keeps its own copy",
   );
   assert.equal(behind({ updatedAt: 5 }, { updatedAt: 5 }), false);
   assert.equal(behind({ updatedAt: 6 }, { updatedAt: 5 }), true);
@@ -249,4 +258,56 @@ test("a tail asks for a delta; the whole copy goes under it; anything that does 
   const rewritten = long.map((message, i) => (i === from ? { ...message, timestamp: -1 } : message));
   assert.equal(attachHead(extended, rewritten), undefined, "disagrees where they meet");
   assert.equal(attachHead({ offset: 3, messages: [] }, long), undefined);
+});
+
+test("a whole answer from a session past the daemon's cap opens a window where it starts, and is never saved as a copy", () => {
+  const held = messages.slice(1);
+  const window = mergeWindow({ offset: 0, messages: [] }, undefined, { from: 0, total: 3, base: 1, messages: held });
+  assert.deepEqual(window, { offset: 1, messages: held });
+  // Its next ask is in the session's own indices.
+  assert.deepEqual(heldOfWindow(window), { since: 4, last: fingerprint(messages[3]) });
+  assert.equal(mergeTranscript([], undefined, { from: 0, total: 3, base: 1, messages: held }), undefined, "not the transcript from its start");
+  assert.deepEqual(mergeWindow(window, heldOfWindow(window), { from: 4, total: 5, messages: [{ role: "user", timestamp: 5 }] })?.messages.length, 4);
+});
+
+test("a copy file holds one message per line and reads back only what the index knows", () => {
+  const text = copyLines(messages);
+  assert.equal(text.split("\n").length, messages.length + 1);
+  const entry = { count: 4, last: fingerprint(messages[3]) };
+  assert.deepEqual(parseCopyLines(text, entry), messages);
+  // A save that did not finish left more (or half a line): the first `count` lines still read.
+  assert.deepEqual(parseCopyLines(`${text}{"role":"us`, entry), messages);
+  assert.deepEqual(parseCopyLines(text, { count: 2, last: fingerprint(messages[1]) }), messages.slice(0, 2));
+  assert.equal(parseCopyLines(text, { count: 4, last: "other" }), undefined, "another copy than the index names");
+  assert.equal(parseCopyLines(copyLines(messages.slice(0, 3)), entry), undefined, "shorter than the index says");
+  assert.equal(parseCopyLines("{not json\n", { count: 1, last: "" }), undefined);
+  assert.equal(copyLines([]), "");
+});
+
+test("a save appends to the copy file only when it continues the file the last save left", () => {
+  const bytes = 120;
+  const entry = { count: 2, last: fingerprint(messages[1]), bytes };
+  assert.equal(appendAt(entry, bytes, messages), 2, "the whole copy, continuing the saved one: append the rest");
+  assert.equal(appendAt(entry, bytes, messages.slice(2), 2), 0, "a delta at the saved count: append it all");
+  assert.equal(appendAt(entry, bytes, messages.slice(2), 3), undefined, "a delta elsewhere");
+  assert.equal(appendAt(entry, bytes + 7, messages), undefined, "the file is not what the last save left");
+  assert.equal(appendAt({ ...entry, bytes: undefined }, bytes, messages), undefined, "an earlier version's copy");
+  assert.equal(appendAt(entry, bytes, [messages[0], { role: "user", timestamp: 9 }, ...messages.slice(2)]), undefined, "the copy changed");
+  assert.equal(appendAt(undefined, undefined, messages), undefined);
+});
+
+test("a delta extends the tail, which stays small and starts at a turn", () => {
+  const turn = (index) => [
+    { role: "user", timestamp: index * 2, content: "q" },
+    { role: "assistant", timestamp: index * 2 + 1, responseId: `r${index}`, content: [] },
+  ];
+  const all = Array.from({ length: TAIL_MESSAGES }, (_, index) => turn(index)).flat();
+  const start = tailStart(all.slice(0, 300));
+  const before = { from: start, messages: all.slice(start, 300) };
+  const after = extendTail(before, all.slice(300));
+  assert.equal(after.from + after.messages.length, all.length);
+  assert.equal(after.messages[0].role, "user");
+  assert.ok(after.messages.length <= TAIL_MESSAGES + 1);
+  assert.deepEqual(after.messages, all.slice(after.from));
+  assert.deepEqual(extendTail({ from: 0, messages: messages.slice(0, 2) }, messages.slice(2)), { from: 0, messages });
 });
