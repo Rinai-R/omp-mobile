@@ -1,4 +1,5 @@
-import type { Hello, Machine, SessionOwner, SessionSummary, ServerMessage } from "./types";
+import type { Hello, Machine, SessionOwner, SessionSummary, ServerMessage, Transcript } from "./types";
+import { heldQuery, type Held } from "./cache.ts";
 import { t } from "./i18n/index.ts";
 import { ownerOf } from "./takeover.ts";
 
@@ -35,15 +36,41 @@ export class HttpError extends Error {
   }
 }
 
+/** Each machine's features as `/hello` last listed them, for code that cannot wait for another request. */
+const featureMemo = new Map<string, string[]>();
+
 /** The daemon's optional features from `/hello`; empty for daemons that predate them or cannot be reached. */
 export async function daemonFeatures(machine: Machine): Promise<string[]> {
   try {
     const response = await fetch(`${machine.url}/hello`);
     if (!response.ok) return [];
     const data = (await response.json()) as Hello;
-    return Array.isArray(data.features) ? data.features.filter((feature) => typeof feature === "string") : [];
+    const features = Array.isArray(data.features) ? data.features.filter((feature) => typeof feature === "string") : [];
+    featureMemo.set(machine.url, features);
+    return features;
   } catch {
     return [];
+  }
+}
+
+/** The features this machine's daemon listed last time it was asked in this launch; empty until then. */
+export function knownFeatures(machine: Machine): string[] {
+  return featureMemo.get(machine.url) ?? [];
+}
+
+/**
+ * A session's transcript without starting an omp (`transcript-sync`): only
+ * the messages after `held` when the phone's copy lines up. `null` when the
+ * daemon has none to give (a 404: the session's omp is not running and no
+ * saved copy matches its file).
+ */
+export async function fetchTranscript(machine: Machine, id: string, held: Held | undefined): Promise<Transcript | null> {
+  const query = heldQuery(held);
+  try {
+    return await request<Transcript>(machine, `/sessions/${encodeURIComponent(id)}/transcript${query === "" ? "" : `?${query}`}`);
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 404) return null;
+    throw error;
   }
 }
 
@@ -165,6 +192,11 @@ export class SessionSocket {
     private readonly onFailed: (failure: OpenFailure) => void = () => undefined,
     /** The socket upgraded: the link is up, the daemon may still be starting the session. */
     private readonly onLink: () => void = () => undefined,
+    /**
+     * What the phone holds of the transcript, asked at every connect: the
+     * daemon then sends a snapshot of only what is new (`transcript-sync`).
+     */
+    private readonly held: () => Held | undefined = () => undefined,
   ) {}
 
   connect(): void {
@@ -172,7 +204,8 @@ export class SessionSocket {
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     const base = this.machine.url.replace(/^http/i, "ws");
-    const url = `${base}/sessions/${encodeURIComponent(this.sessionId)}/ws?token=${encodeURIComponent(this.machine.token)}`;
+    const query = heldQuery(this.held());
+    const url = `${base}/sessions/${encodeURIComponent(this.sessionId)}/ws?token=${encodeURIComponent(this.machine.token)}${query === "" ? "" : `&${query}`}`;
     const previous = this.socket;
     if (previous !== undefined) {
       previous.onclose = null;
@@ -234,6 +267,14 @@ export class SessionSocket {
     this.failed = false;
     this.retry = 0;
     if (this.socket?.readyState === WebSocket.OPEN) return;
+    this.connect();
+  }
+
+  /** Open a new socket now, even over a working one: a snapshot that did not fit is asked for again. */
+  restart(): void {
+    if (this.closed) return;
+    this.failed = false;
+    this.retry = 0;
     this.connect();
   }
 
