@@ -153,3 +153,32 @@ describe("summaryOf", () => {
     assert.equal(linkText(undefined), "Checking…");
   });
 });
+
+describe("one /sessions request at a time", () => {
+  it("a probe and the home's list asked at once share one request", async () => {
+    const { fetchSessions } = await import("../src/sessionsFetch.ts");
+    let release;
+    const calls = stub({
+      "/hello": () => reply(200, HELLO),
+      "/sessions": () => new Promise((resolve) => (release = () => resolve(reply(200, { sessions: [{ id: "a", status: "idle" }] })))),
+    });
+    const probe = probeMachine(MACHINE);
+    const list = (async () => {
+      while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+      return fetchSessions(MACHINE.url, MACHINE.token);
+    })();
+    while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+    await new Promise((wait) => setTimeout(wait, 5));
+    release();
+    assert.equal((await probe).state, "online");
+    assert.equal(JSON.parse((await list).text).sessions.length, 1);
+    assert.equal(calls.filter((call) => call.path === "/sessions").length, 1);
+    // Settled: the next one asks again.
+    release = undefined;
+    const again = fetchSessions(MACHINE.url, MACHINE.token);
+    while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
+    release();
+    await again;
+    assert.equal(calls.filter((call) => call.path === "/sessions").length, 2);
+  });
+});
