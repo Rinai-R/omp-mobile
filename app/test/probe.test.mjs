@@ -182,3 +182,16 @@ describe("one /sessions request at a time", () => {
     assert.equal(calls.filter((call) => call.path === "/sessions").length, 2);
   });
 });
+
+describe("linkName", () => {
+  it("calls a tailnet address Tailscale and any other address LAN", async () => {
+    const { linkName } = await import("../src/probe.ts");
+    assert.equal(linkName("http://100.68.127.23:7390"), "Tailscale");
+    assert.equal(linkName("http://box.tail1234.ts.net:7390"), "Tailscale");
+    assert.equal(linkName("http://10.0.2.2:7395"), "LAN", "the emulator's host");
+    assert.equal(linkName("http://192.168.1.20:7390"), "LAN");
+    assert.equal(linkName(undefined), "Tailscale");
+    const online = { state: "online", latencyMs: 3, sessionCount: 2, running: 0, name: "a", version: "1" };
+    assert.equal(summaryOf(online, undefined, 0, "http://10.0.2.2:7395").text, "LAN · 2 sessions");
+  });
+});

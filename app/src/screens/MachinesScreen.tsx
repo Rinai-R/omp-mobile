@@ -193,7 +193,7 @@ export function MachinesScreen({
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
-                const summary = summaryOf(probe, machine.lastSeen, now);
+                const summary = summaryOf(probe, machine.lastSeen, now, machine.url);
                 return (
                   <Row
                     key={machine.id}
@@ -240,7 +240,7 @@ export function MachinesScreen({
 
       <ConfirmSheet
         visible={removing !== null}
-        title={removing === null ? "" : t("machines.remove.title", { name: displayName(removing) })}
+        title={removing === null ? "" : t("machines.remove.title", { name: machineLabel(removing, machines) })}
         body={t("machines.remove.body")}
         action={t("common.remove")}
         danger

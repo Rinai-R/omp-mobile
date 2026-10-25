@@ -5,7 +5,7 @@ import { createSession, deleteSession } from "../api";
 import { GradientFill, LiveDot, PulseDot, Wordmark } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
 import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
-import { displayName } from "../machines";
+import { displayName, machineLabel } from "../machines";
 import { Banner, Button, ConfirmSheet, Field, IconButton, Sheet } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
 import { attentionCount, folderOf, groupSessions } from "../sessionGroups";
@@ -16,6 +16,8 @@ import type { Machine, SessionSummary } from "../types";
 
 interface Props {
   machine: Machine;
+  /** Every computer on the phone: one named like another is told apart by its address. */
+  machines: readonly Machine[];
   probe: Probe | undefined;
   onOpen: (machine: Machine, session: SessionSummary) => void;
   /** Open the computer picker (the computer card). */
@@ -27,7 +29,7 @@ interface Props {
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, onRetry, newRequest }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onSettings, onRetry, newRequest }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -141,14 +143,14 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
           onPress={onPickMachine}
           style={({ pressed }) => [styles.machine, pressed && styles.machinePressed]}
           accessibilityRole="button"
-          accessibilityLabel={t("home.machineA11y", { name: displayName(machine), detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
+          accessibilityLabel={t("home.machineA11y", { name: machineLabel(machine, machines), detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
         >
           <View style={styles.machineTile}>
             <ComputerGlyph size={18} color={down ? colors.fgGhost : colors.fgMuted} />
           </View>
           <View style={styles.machineText}>
             <Text style={styles.machineName} numberOfLines={1}>
-              {displayName(machine)}
+              {machineLabel(machine, machines)}
             </Text>
             {detail !== undefined ? (
               <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>

@@ -4,6 +4,8 @@
  *
  * Only type imports here: node:test loads this file directly.
  */
+import { hostOf } from "./machines.ts";
+import { isTailnetHost } from "./pairing.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
 import type { Machine, SessionSummary } from "./types";
 import { t } from "./i18n/index.ts";
@@ -189,14 +191,26 @@ export function summaryOf(
   probe: Probe | undefined,
   lastSeen: number | undefined,
   now: number,
+  /** The machine's address: what the link is called (Tailscale, or a LAN address). */
+  url?: string,
 ): { dot: Dot; text: string } {
   if (probe === undefined) return { dot: "checking", text: t("probe.checking") };
-  if (probe.state === "online") return { dot: "online", text: `Tailscale · ${sessionsText(probe)}` };
+  if (probe.state === "online") return { dot: "online", text: `${linkName(url)} · ${sessionsText(probe)}` };
   const reason = reasonText(probe.reason);
   return {
     dot: "down",
     text: lastSeen === undefined ? reason : t("probe.seen", { reason, ago: agoText(lastSeen, now) }),
   };
+}
+
+/**
+ * What the phone reaches a machine over, by its address: "Tailscale" for a
+ * tailnet address, else "LAN" (an emulator's 10.0.2.2, a home network's 192.168.x).
+ * Unknown (no address): Tailscale, the one link the app is meant for.
+ */
+export function linkName(url: string | undefined): string {
+  if (url === undefined || isTailnetHost(hostOf(url).toLowerCase())) return "Tailscale";
+  return t("link.lan");
 }
 
 /** The sheet's link line: "Online · 34 ms", "Unreachable: No reply", or "Checking…". */

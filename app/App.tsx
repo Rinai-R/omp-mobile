@@ -401,6 +401,7 @@ export default function App(): ReactNode {
         // Another computer's home starts fresh: its list and probe state.
         key={route.machine.id}
         machine={liveMachine(route.machine)}
+        machines={machines}
         probe={probes.get(route.machine.id)}
         onOpen={openChat}
         onPickMachine={() => setMachinePicker(true)}

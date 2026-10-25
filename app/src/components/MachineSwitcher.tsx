@@ -33,7 +33,7 @@ export function MachineSwitcher({ visible, machines, current, probes, onProbe, o
     <Sheet visible={visible} title={t("switcher.title")} onClose={onClose}>
       <Group>
         {machines.map((machine, index) => {
-          const summary = summaryOf(probes.get(machine.id), machine.lastSeen, now);
+          const summary = summaryOf(probes.get(machine.id), machine.lastSeen, now, machine.url);
           const here = machine.id === current.id;
           return (
             <Row
