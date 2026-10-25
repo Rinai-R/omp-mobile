@@ -534,7 +534,15 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     lastNewest.current = newest;
     if (away) setUnseen((count) => count + 1);
   }, [away, newest]);
+  const offset = useRef(0);
+  /** A row opened or closed on a tap: move the list by what it gained, so the tapped header stays put. */
+  const shift = useCallback((delta: number) => {
+    const next = Math.max(0, offset.current + delta);
+    offset.current = next;
+    listRef.current?.scrollToOffset({ offset: next, animated: false });
+  }, []);
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offset.current = event.nativeEvent.contentOffset.y;
     const isAway = event.nativeEvent.contentOffset.y > NEAR_BOTTOM;
     setAway(isAway);
     if (!isAway) setUnseen(0);
@@ -688,7 +696,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         ) : null}
 
         <View style={styles.listWrap}>
-          <TranscriptFolds>
+          <TranscriptFolds onShift={shift}>
           <FlatList
             ref={listRef}
             inverted

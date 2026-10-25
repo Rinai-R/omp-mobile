@@ -10,7 +10,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View, type FontVariant } from "react-native";
+import {
+  Animated,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type FontVariant,
+  type LayoutChangeEvent,
+} from "react-native";
 import { editDiff } from "../diff";
 import { imageUri } from "../media";
 import { resultText } from "../messages";
@@ -83,8 +94,23 @@ interface Folds {
 
 const FoldContext = createContext<Folds>({ folded: new Set(), toggle: () => undefined });
 
-/** Holds which turns are folded, for the rows under it. */
-export function TranscriptFolds({ children }: { children: ReactNode }): ReactNode {
+/**
+ * The list is inverted: it keeps each row's distance from the newest message,
+ * so a row that opens grows upward and its own header slides off the top.
+ * `onShift` moves the list by the height a row gained on a tap, which keeps
+ * the tapped header where the finger left it, as in a list that grows down.
+ */
+const ShiftContext = createContext<(delta: number) => void>(() => undefined);
+
+/** Marks the row around a control: its next change of height came from a tap. */
+const ArmContext = createContext<() => void>(() => undefined);
+
+function useArm(): () => void {
+  return useContext(ArmContext);
+}
+
+/** Holds which turns are folded, for the rows under it; `onShift` keeps a tapped row in place. */
+export function TranscriptFolds({ children, onShift }: { children: ReactNode; onShift?: (delta: number) => void }): ReactNode {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((turn: string) => {
     setFolded((current) => {
@@ -95,7 +121,12 @@ export function TranscriptFolds({ children }: { children: ReactNode }): ReactNod
     });
   }, []);
   const value = useMemo(() => ({ folded, toggle }), [folded, toggle]);
-  return <FoldContext.Provider value={value}>{children}</FoldContext.Provider>;
+  const shift = useCallback((delta: number) => onShift?.(delta), [onShift]);
+  return (
+    <ShiftContext.Provider value={shift}>
+      <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+    </ShiftContext.Provider>
+  );
 }
 
 interface RowProps {
@@ -200,8 +231,28 @@ export const TranscriptRow = memo(
 
 function Enter({ animate, gap, children }: { animate: boolean; gap: number; children: ReactNode }): ReactNode {
   const value = useEnter(300, !animate);
+  const shift = useContext(ShiftContext);
+  const height = useRef<number | undefined>(undefined);
+  const armed = useRef(false);
+  const arm = useCallback(() => {
+    armed.current = true;
+  }, []);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const next = event.nativeEvent.layout.height;
+      const before = height.current;
+      height.current = next;
+      if (armed.current && before !== undefined && next !== before) {
+        armed.current = false;
+        shift(next - before);
+      }
+    },
+    [shift],
+  );
   return (
+    <ArmContext.Provider value={arm}>
     <Animated.View
+      onLayout={onLayout}
       style={{
         marginTop: gap,
         paddingHorizontal: GUTTER,
@@ -211,6 +262,7 @@ function Enter({ animate, gap, children }: { animate: boolean; gap: number; chil
     >
       {children}
     </Animated.View>
+    </ArmContext.Provider>
   );
 }
 
@@ -239,7 +291,11 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
   const now = useNow(row.running);
   const pulse = usePulse(row.running, 1400);
   const markOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 0.45] });
-  const press = useCallback(() => toggle(row.id), [row.id, toggle]);
+  const arm = useArm();
+  const press = useCallback(() => {
+    arm();
+    toggle(row.id);
+  }, [arm, row.id, toggle]);
   const foldable = row.members > 0;
   const label = row.running ? liveLabel(row.live) : turnLabel(row);
   const elapsed = row.running && row.startedAt !== undefined ? turnDuration(Math.max(0, now - row.startedAt)) : undefined;
@@ -375,7 +431,11 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
-  const toggle = useCallback(() => setOpen((value) => !value), []);
+  const arm = useArm();
+  const toggle = useCallback(() => {
+    arm();
+    setOpen((value) => !value);
+  }, [arm]);
   const active = item.streaming === true && item.text.trim() === "";
   const label = active ? t("transcript.thinking") : thoughtLabel(item.thinkingMs);
   return (
@@ -449,7 +509,11 @@ function ActivityRow({
   if (row.running && !watched) setWatched(true);
   const open = chosen ?? (row.running || watched);
   const [all, setAll] = useState(false);
-  const toggle = useCallback(() => setChosen((value) => !(value ?? (row.running || watched))), [row.running, watched]);
+  const arm = useArm();
+  const toggle = useCallback(() => {
+    arm();
+    setChosen((value) => !(value ?? (row.running || watched)));
+  }, [arm, row.running, watched]);
   const title = activityLabel(row.steps);
   const lead = activityKinds(row.steps)[0] ?? "other";
   const images = row.steps.flatMap((value) => (value.kind === "tool" ? (value.tool.images ?? []) : []));
@@ -479,7 +543,10 @@ function ActivityRow({
         <View style={styles.steps}>
           {row.steps.length > INLINE_STEPS ? (
             <Pressable
-              onPress={() => setAll((value) => !value)}
+              onPress={() => {
+                arm();
+                setAll((value) => !value);
+              }}
               hitSlop={SLOP}
               style={styles.more}
               accessibilityRole="button"
@@ -517,7 +584,11 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
-  const toggle = useCallback(() => setOpen((value) => !value), []);
+  const arm = useArm();
+  const toggle = useCallback(() => {
+    arm();
+    setOpen((value) => !value);
+  }, [arm]);
   const details = useCallback(() => onOpen({ kind: "tool", tool }), [onOpen, tool]);
   const running = tool.status === "running";
   const failed = tool.status === "error";

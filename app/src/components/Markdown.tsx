@@ -208,8 +208,10 @@ function ListBlock({ block, ctx, tail }: { block: Extract<Block, { kind: "list" 
   const { styles } = ctx;
   const depth = useListDepth();
   const lastNumber = block.start + block.items.length - 1;
-  // Wide enough for the longest number, so the items' text lines up.
-  const markerWidth = block.ordered ? Math.max(18, String(lastNumber).length * styles.digitWidth + styles.digitWidth) : 18;
+  // Wide enough for the longest number at the current text size, so the items' text lines up;
+  // a minimum, not a width, so a larger font grows the column instead of wrapping "10.".
+  const scale = Math.min(Math.max(1, PixelRatio.getFontScale()), styles.scale.body);
+  const markerWidth = block.ordered ? Math.ceil(Math.max(18, (String(lastNumber).length + 1) * styles.digitWidth * scale + 4)) : 18;
   return (
     <ListDepth value={depth + 1}>
       <View style={styles.list}>
@@ -264,7 +266,7 @@ function ItemMarker({
     );
   }
   return (
-    <Text style={[ordered ? styles.number : styles.bullet, { width }]} importantForAccessibility="no" maxFontSizeMultiplier={styles.scale.body}>
+    <Text style={[ordered ? styles.number : styles.bullet, { minWidth: width }]} numberOfLines={1} importantForAccessibility="no" maxFontSizeMultiplier={styles.scale.body}>
       {label}
     </Text>
   );
@@ -543,9 +545,11 @@ function createStyles(c: Palette, quiet: boolean) {
     list: { gap: quiet ? 2 : 6 },
     item: { flexDirection: "row" },
     itemBody: { flex: 1, minWidth: 0 },
-    bullet: { ...body, color: c.fgMuted, textAlign: "left" },
+    bullet: { ...body, flexShrink: 0, color: c.fgMuted, textAlign: "left" },
     number: {
       ...body,
+      flexShrink: 0,
+      paddingRight: 4,
       color: c.fgMuted,
       textAlign: "left",
       fontVariant: ["tabular-nums"] as FontVariant[],

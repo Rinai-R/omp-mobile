@@ -67,7 +67,7 @@ export function gapBefore(kind: Row["kind"], previous: Row["kind"] | undefined):
     case "activity":
       return previous === "turn" ? 12 : 6;
     case "reply":
-      return previous === "turn" ? 14 : previous === "reply" ? 14 : 10;
+      return 14;
     case "tail":
       return 6;
     default:
@@ -93,6 +93,8 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
   let turn: Extract<Row, { kind: "turn" }> | undefined;
   /** The current turn's user message time, and its items so far. */
   let asked: number | undefined;
+  /** The current turn's user message id: the turn is named after it, so its divider can show before OMP answers. */
+  let askedId: string | undefined;
   let turnItems: ChatItem[] = [];
   let activity: Extract<Row, { kind: "activity" }> | undefined;
 
@@ -103,7 +105,7 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
   };
   const head = (anchor: string) => {
     if (turn !== undefined) return turn;
-    const created = push<"turn">({ kind: "turn", id: `turn:${anchor}`, running: false, end: "done", startedAt: asked, members: 0 });
+    const created = push<"turn">({ kind: "turn", id: `turn:${askedId ?? anchor}`, running: false, end: "done", startedAt: asked, members: 0 });
     turn = created;
     return created;
   };
@@ -129,6 +131,7 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
     turn = undefined;
     turnItems = [];
     asked = undefined;
+    askedId = undefined;
     activity = undefined;
   };
   const step = (value: Step, id: string) => {
@@ -156,6 +159,7 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
     if (item.kind === "message" && item.role === "user") {
       finish(false);
       asked = item.createdAt;
+      askedId = item.id;
       push<"user">({ kind: "user", id: item.id, item });
       return;
     }
@@ -186,6 +190,8 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
       push<"error">({ kind: "error", id: `err:${item.id}`, item });
     }
   });
+  // A prompt OMP has not answered yet: its divider already says it is working.
+  if (streaming && turn === undefined && askedId !== undefined) head(askedId);
   finish(true);
   return rows;
 }

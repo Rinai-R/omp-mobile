@@ -36,14 +36,14 @@ test("a turn is a divider, its work rows, its prose and a tail", () => {
   ]);
   assert.deepEqual(
     rows.map((row) => `${row.kind}:${row.id}`),
-    ["user:u1", "turn:turn:r1", "activity:act:r1", "thinking:think:r2", "reply:r2", "activity:act:t3", "reply:r3", "tail:tail:turn:r1"],
+    ["user:u1", "turn:turn:u1", "activity:act:r1", "thinking:think:r2", "reply:r2", "activity:act:t3", "reply:r3", "tail:tail:turn:u1"],
   );
   assert.deepEqual(
     rows[2].steps.map((step) => step.kind),
     ["thought", "tool", "tool"],
     "thinking that only leads into a tool call belongs to the stretch",
   );
-  for (const row of rows.filter((row) => row.kind === "activity" || row.kind === "thinking")) assert.equal(row.turn, "turn:r1");
+  for (const row of rows.filter((row) => row.kind === "activity" || row.kind === "thinking")) assert.equal(row.turn, "turn:u1");
   assert.equal(rows[1].members, 3);
   assert.equal(rows.at(-1).text, "Found it.\n\nFixed.", "the tail copies the whole reply");
 });
@@ -60,6 +60,9 @@ test("a running turn has no tail and says what it is doing", () => {
   assert.equal(running[1].live.kind, "tool");
   assert.equal(liveLabel(running[1].live), "Listing files");
   assert.equal(liveLabel({ kind: "tool", tool: tool("t", "bash", {}, { status: "running" }) }), "Running a command");
+  const asked = layoutRows([user("u1", "go")], true);
+  assert.deepEqual(asked.map((row) => `${row.kind}:${row.id}`), ["user:u1", "turn:turn:u1"], "the divider shows before the first event");
+  assert.equal(asked[1].running, true);
   const earlier = layoutRows([user("u1", "a"), reply("r1", "b"), user("u2", "c")], true);
   assert.equal(earlier[1].running, false, "only the last turn runs");
 });
@@ -109,7 +112,7 @@ test("rows keep one rhythm: tight work rows, room around prose and between turns
   ]);
   assert.deepEqual(
     rows.map((row) => `${row.kind}:${row.gap}`),
-    ["user:0", "turn:14", "activity:12", "thinking:6", "reply:10", "tail:6", "user:28"],
+    ["user:0", "turn:14", "activity:12", "thinking:6", "reply:14", "tail:6", "user:28"],
   );
   assert.equal(gapBefore("reply", "turn"), 14);
 });
