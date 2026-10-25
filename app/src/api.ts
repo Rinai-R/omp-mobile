@@ -163,6 +163,8 @@ export class SessionSocket {
     private readonly onOpen: () => void,
     private readonly onClose: (attempts: number) => void,
     private readonly onFailed: (failure: OpenFailure) => void = () => undefined,
+    /** The socket upgraded: the link is up, the daemon may still be starting the session. */
+    private readonly onLink: () => void = () => undefined,
   ) {}
 
   connect(): void {
@@ -206,6 +208,7 @@ export class SessionSocket {
     };
     socket.onopen = () => {
       this.lastFrame = Date.now();
+      this.onLink();
     };
     socket.onerror = () => undefined;
     socket.onclose = () => {

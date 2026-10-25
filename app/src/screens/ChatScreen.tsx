@@ -98,6 +98,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [features, setFeatures] = useState<string[]>([]);
   /** A takeover of a session held on the computer is in flight, or what it failed with. */
   const [taking, setTaking] = useState(false);
+  /** The socket is up but the daemon is still opening the session (an omp starts, the snapshot follows). */
+  const [opening, setOpening] = useState(false);
+  /** A chat just opened: no status word for the first second, so a 3 ms socket does not flash "connecting". */
+  const [settled, setSettled] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const [confirmTake, setConfirmTake] = useState(false);
   /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
@@ -231,11 +235,13 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       },
       () => {
         setConnected(true);
+        setOpening(false);
         setFailure(null);
         setError(null);
       },
       (attempts) => {
         setConnected(false);
+        setOpening(false);
         // A prompt unanswered when the link dropped is never answered on the new link: do not restore it later.
         pending.current = null;
         // An older daemon only refuses the upgrade; ask over HTTP why, once the retries pile up.
@@ -255,8 +261,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       },
       (reason) => {
         setConnected(false);
+        setOpening(false);
         setFailure(reason);
       },
+      // The upgrade landed: the phone is connected, the session itself may still be starting.
+      () => setOpening(true),
     );
     socketRef.current = socket;
     if (featuresRef.current.includes("heartbeat")) socket.watchSilence();
@@ -278,6 +287,13 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     Attention.setOnScreen(machine.id, initialSession.id);
     return () => Attention.setOnScreen("", "");
   }, [initialSession.id, machine.id]);
+
+  useEffect(() => {
+    setOpening(false);
+    setSettled(false);
+    const timer = setTimeout(() => setSettled(true), 1_000);
+    return () => clearTimeout(timer);
+  }, [initialSession.id]);
 
   const streaming = state?.isStreaming === true;
 
@@ -448,7 +464,22 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const failed = failure === null ? null : failureText(failure);
   const offerTakeover = failure !== null && canTakeOver(failure.status, features);
   // A session a terminal holds is not broken: the card under the header says where it is and offers to take it.
-  const status = offerTakeover ? "held" : failure !== null ? "failed" : connected ? (streaming ? "working" : "live") : "connecting";
+  // "connecting" is about the link; while the link is up and the daemon is starting the
+  // session, say "opening" -- the phone is connected either way. The first second shows
+  // no word at all: a live session's socket opens in milliseconds.
+  const status = offerTakeover
+    ? "held"
+    : failure !== null
+      ? "failed"
+      : connected
+        ? streaming
+          ? "working"
+          : "live"
+        : opening
+          ? "opening"
+          : settled
+            ? "connecting"
+            : "quiet";
 
   return (
     <View style={styles.root}>
@@ -484,11 +515,20 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <LiveDot color={colors.err} size={7} />
               ) : status === "held" ? (
                 <LiveDot color={colors.warn} size={7} />
+              ) : status === "quiet" ? (
+                <LiveDot color={colors.fgFaint} size={7} />
               ) : (
                 <PulseDot color={colors.warn} size={7} />
               )}
               <Text style={styles.subtitle} numberOfLines={1}>
-                {displayName(machine)} · {status === "connecting" ? t("chat.connecting") : status === "failed" ? t("chat.cannotOpen") : folder}
+                {displayName(machine)} ·{" "}
+                {status === "opening"
+                  ? t("chat.opening")
+                  : status === "connecting"
+                    ? t("chat.connecting")
+                    : status === "failed"
+                      ? t("chat.cannotOpen")
+                      : folder}
               </Text>
             </View>
           </Pressable>

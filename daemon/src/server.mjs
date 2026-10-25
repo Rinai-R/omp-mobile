@@ -8,8 +8,8 @@
  * to be exposed to the public internet.
  */
 import { STATUS_CODES, createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +55,17 @@ const HEARTBEAT_MS = 20_000;
 /** A live omp nobody has looked at for this long is closed; the next open resumes it. */
 const IDLE_SESSION_MS = 30 * 60_000;
 const REAP_INTERVAL_MS = 60_000;
+/**
+ * The fields of a tool result's `details` the app reads: an edit's diff, a
+ * read's line count, a command's run time, a screenshot's file. The rest
+ * (an edit's old and new text, a read's display copy) repeats what the
+ * result already says, and was a fifth of a long session's snapshot.
+ */
+const PHONE_DETAILS = ["diff", "totalLines", "wallTimeMs", "mediaPath"];
+/** Inline images shorter than this (base64 characters) stay inline: a reference would save nothing. */
+const STASH_MIN_CHARS = 4_096;
+/** Stashed images untouched this long are dropped at start; the session file still has them. */
+const BLOB_CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 /** Image types a phone may attach to a prompt: what the camera and the photo picker produce. */
 const PROMPT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 /** At most this many images per prompt, each at most this many decoded bytes. */
@@ -284,6 +295,87 @@ export function ensureWorkingDirectory(cwd) {
   }
 }
 
+/**
+ * Write an inline image to the daemon's blob cache under its SHA-256 and
+ * answer the `blob:sha256:` reference the app loads from `/blobs`; undefined
+ * leaves the image inline (too small, already a reference, not base64, no disk).
+ * @param {{data?: unknown}} part
+ * @param {string} blobDir
+ */
+function stashImage(part, blobDir) {
+  const data = part.data;
+  if (typeof data !== "string" || data.length < STASH_MIN_CHARS || data.startsWith("blob:") || data.startsWith("data:")) return undefined;
+  const bytes = Buffer.from(data, "base64");
+  if (bytes.length === 0) return undefined;
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const path = join(blobDir, hash);
+  try {
+    if (!existsSync(path)) {
+      mkdirSync(blobDir, { recursive: true, mode: 0o700 });
+      writeFileSync(path, bytes, { mode: 0o600 });
+    }
+  } catch {
+    return undefined;
+  }
+  return `blob:sha256:${hash}`;
+}
+
+/**
+ * A message as a snapshot carries it to the phone: inline images moved to
+ * the blob cache and sent as references (the app loads only the ones it
+ * shows), and tool details cut to {@link PHONE_DETAILS}. A long session's
+ * snapshot was mostly base64 screenshots and copies of edited text --
+ * megabytes the phone downloaded, parsed and cached before it showed anything.
+ * Live events still carry messages whole.
+ * @param {any} message
+ * @param {string | undefined} blobDir no stashing when undefined
+ */
+export function phoneMessage(message, blobDir) {
+  if (message === null || typeof message !== "object") return message;
+  let next = message;
+  if (blobDir !== undefined && Array.isArray(message.content)) {
+    let changed = false;
+    const content = message.content.map((part) => {
+      const ref = part !== null && typeof part === "object" && part.type === "image" ? stashImage(part, blobDir) : undefined;
+      if (ref === undefined) return part;
+      changed = true;
+      return { ...part, data: ref };
+    });
+    if (changed) next = { ...next, content };
+  }
+  const tool = message.role === "toolResult" || message.role === "tool";
+  if (tool && message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)) {
+    const details = {};
+    for (const key of PHONE_DETAILS) if (key in message.details) details[key] = message.details[key];
+    next = { ...next, details };
+  }
+  return next;
+}
+
+/** Drop stashed images older than {@link BLOB_CACHE_MAX_AGE_MS}; the next open of their session stashes them again. */
+export function pruneBlobCache(blobDir, now = Date.now()) {
+  let names;
+  try {
+    names = readdirSync(blobDir);
+  } catch {
+    return 0;
+  }
+  let dropped = 0;
+  for (const name of names) {
+    if (!BLOB_NAME.test(name)) continue;
+    const path = join(blobDir, name);
+    try {
+      if (now - statSync(path).mtimeMs > BLOB_CACHE_MAX_AGE_MS) {
+        unlinkSync(path);
+        dropped += 1;
+      }
+    } catch {
+      // Gone already.
+    }
+  }
+  return dropped;
+}
+
 function storedSummary(stored) {
   return {
     id: stored.id,
@@ -335,13 +427,14 @@ export function blobType(bytes) {
 }
 
 /** A stored image: `GET /blobs/<sha256>[.ext]`, authenticated like every other route. */
-function sendBlob(res, ompHome, name) {
+function sendBlob(res, dirs, name) {
   if (!BLOB_NAME.test(name)) {
     sendJson(res, 400, { error: "bad blob name" });
     return;
   }
-  const path = join(ompHome, "agent", "blobs", name);
-  if (!existsSync(path) || !statSync(path).isFile()) {
+  // OMP's own store first, then the images this daemon stashed from snapshots.
+  const path = dirs.map((dir) => join(dir, name)).find((candidate) => existsSync(candidate) && statSync(candidate).isFile());
+  if (path === undefined) {
     sendJson(res, 404, { error: "no such blob" });
     return;
   }
@@ -425,12 +518,14 @@ class SessionEntry {
     this.closed = false;
     /** When the last phone left; undefined while one is connected. The reaper reads it. */
     this.idleSince = undefined;
+    /** Where inline images go (see `phoneMessage`); undefined keeps them inline. */
+    this.blobDir = undefined;
   }
 
   async hydrate() {
     const [state, messages] = await Promise.all([this.rpc.getState(), this.rpc.getMessages()]);
     this.state = state;
-    this.messages = Array.isArray(messages.messages) ? messages.messages : [];
+    this.messages = Array.isArray(messages.messages) ? messages.messages.map((message) => phoneMessage(message, this.blobDir)) : [];
     this.id = state.sessionId ?? "";
     this.title = titleOf(this.messages, state, this.cwd);
     this.updatedAt = Date.now();
@@ -483,7 +578,7 @@ class SessionEntry {
     this.rpc.on("event", (event) => {
       this.updatedAt = Date.now();
       if (event.type === "message_end" && event.message) {
-        this.messages.push(event.message);
+        this.messages.push(phoneMessage(event.message, this.blobDir));
         if (this.messages.length > 5_000) this.messages.splice(0, this.messages.length - 5_000);
         // The first prompt names a session that was created untitled.
         const title = titleOf(this.messages, this.state, this.cwd);
@@ -570,8 +665,12 @@ class Daemon {
     this.starting = new Map();
     /** Takeovers in flight, so two phones asking at once ask the owner once. @type {Map<string, Promise<object>>} */
     this.takingOver = new Map();
+    /** Images stashed out of snapshots, served by `/blobs` next to OMP's own store. */
+    this.blobDir = options.blobDir ?? join(dirname(options.registryFile ?? DEFAULT_REGISTRY_FILE), "blobs");
     this.server = createServer((req, res) => void this.admitHttp(req, res));
-    this.wsServer = new WebSocketServer({ noServer: true });
+    // Compressed frames: a snapshot is JSON text, several times smaller deflated, and
+    // the phone's WebSocket client (OkHttp) asks for permessage-deflate on its own.
+    this.wsServer = new WebSocketServer({ noServer: true, perMessageDeflate: { threshold: 1_024 } });
     this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
   }
 
@@ -643,7 +742,7 @@ class Daemon {
     this.noteClient(req);
     const blob = /^\/blobs\/([0-9a-f]{64})(?:\.[a-z0-9]+)?$/.exec(url.pathname);
     if (blob !== null && req.method === "GET") {
-      sendBlob(res, this.options.ompHome, blob[1]);
+      sendBlob(res, [join(this.options.ompHome, "agent", "blobs"), this.blobDir], blob[1]);
       return;
     }
     if (url.pathname === "/status" && req.method === "GET") {
@@ -853,6 +952,7 @@ class Daemon {
     try {
       await rpc.start();
       const entry = new SessionEntry(stored.cwd, rpc);
+      entry.blobDir = this.blobDir;
       await entry.hydrate();
       entry.id = id;
       entry.onChange = (changed) => this.remember(changed);
@@ -929,6 +1029,7 @@ class Daemon {
     try {
       await rpc.start();
       const entry = new SessionEntry(cwd, rpc);
+      entry.blobDir = this.blobDir;
       await entry.hydrate();
       if (entry.id === "") throw new Error("omp returned no session id");
       entry.onChange = (changed) => this.remember(changed);
@@ -1118,8 +1219,9 @@ class Daemon {
     });
   }
 
-  /** Keepalive pings and the idle-session reaper, once the daemon listens. */
+  /** Keepalive pings and the idle-session reaper, once the daemon listens; old stashed images go. */
   startTimers() {
+    pruneBlobCache(this.blobDir);
     this.heartbeat = setInterval(() => this.pingClients(), this.options.heartbeatMs ?? HEARTBEAT_MS);
     this.heartbeat.unref?.();
     this.reaper = setInterval(() => this.reapIdleSessions(), this.options.reapIntervalMs ?? REAP_INTERVAL_MS);
