@@ -127,6 +127,8 @@ export interface MessageItem {
   stop?: "error" | "aborted";
   /** The error an assistant message ended on. */
   error?: string;
+  /** What the deltas of an open message added up to so far, apart from what its events' message content said. */
+  streamed?: { text: string; thinking: string };
 }
 
 export interface NoticeItem {
