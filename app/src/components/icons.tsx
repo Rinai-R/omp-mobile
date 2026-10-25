@@ -284,3 +284,32 @@ export function CopyGlyph({ size = 16, color }: GlyphProps): ReactNode {
     </Svg>
   );
 }
+
+/** Thinking: an atom, two crossed orbits around a core. */
+export function ThinkGlyph({ size = 14, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M5.6 5.6c2.2-2.2 7.6.2 10.6 3.2s5.4 8.4 3.2 10.6-7.6-.2-10.6-3.2S3.4 7.8 5.6 5.6z" stroke={color} strokeWidth={1.5} />
+      <Path d="M18.4 5.6c2.2 2.2-.2 7.6-3.2 10.6s-8.4 5.4-10.6 3.2.2-7.6 3.2-10.6 8.4-5.4 10.6-3.2z" stroke={color} strokeWidth={1.5} />
+      <Circle cx={12} cy={12} r={1.6} fill={color} />
+    </Svg>
+  );
+}
+
+/** Soft wrap: a line that runs to the edge and returns under itself. */
+export function WrapGlyph({ size = 14, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path d="M4 6h16M4 12h12.5a3.5 3.5 0 0 1 0 7H12M14 16.5L11.5 19l2.5 2.5M4 18h4" stroke={color} {...STROKE} strokeWidth={1.7} />
+    </Svg>
+  );
+}
+
+/** Pointing up: a chevron for something open that folds. */
+export function ChevronUpGlyph({ size = 16, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <Path d="M3.5 10L8 5.5 12.5 10" stroke={color} {...STROKE} strokeWidth={1.5} />
+    </Svg>
+  );
+}
