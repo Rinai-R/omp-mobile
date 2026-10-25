@@ -20,8 +20,8 @@ export function palette(scheme: ColorSchemeName) {
         inset: "#f3f3f5",
         overlay: "#ffffff",
         well: "#f0f0f2",
-        userBubble: "#ececf0",
-        codeBg: "#f4f4f6",
+        userBubble: "#eaedfa",
+        codeBg: "#ffffff",
         codeHead: "#ebebef",
         inlineCode: "#00000009",
         hover: "#00000008",
@@ -61,8 +61,8 @@ export function palette(scheme: ColorSchemeName) {
         inset: "#060607",
         overlay: "#0f0f12",
         well: "#1a1a1f",
-        userBubble: "#17171c",
-        codeBg: "#0e0e11",
+        userBubble: "#1f1f25",
+        codeBg: "#111114",
         codeHead: "#16161b",
         inlineCode: "#ffffff10",
         hover: "#ffffff0a",
@@ -98,8 +98,16 @@ export function palette(scheme: ColorSchemeName) {
 
 export type Palette = ReturnType<typeof palette>;
 
-/** Corner radii: controls 10–12, cards 16, sheets and the composer 24. */
-export const radius = { sm: 6, md: 10, lg: 14, xl: 18, xxl: 24, pill: 999 } as const;
+/** Corner radii: inline code and icon buttons 8, images 12, code and cards 16, the user's bubble 20, sheets 28. */
+export const radius = { sm: 8, md: 12, lg: 16, xl: 20, xxl: 28, pill: 999 } as const;
+
+/**
+ * How far each kind of text follows the system font size
+ * (`maxFontSizeMultiplier`): prose a long way, headings and meta less, code
+ * least, where width matters most. Line heights scale with the size up to
+ * the same cap, so large text does not clip.
+ */
+export const SCALE = { body: 1.35, heading: 1.2, meta: 1.25, table: 1.2, code: 1.15, ui: 1.1 } as const;
 
 /**
  * A component's style sheet for the current color scheme, built once per

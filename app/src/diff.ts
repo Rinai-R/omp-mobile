@@ -83,3 +83,24 @@ export function editSides(args: unknown): { before: string; after: string } | un
   if (!("new_string" in args) || typeof args.new_string !== "string") return undefined;
   return { before: args.old_string, after: args.new_string };
 }
+
+/** An edit's lines: OMP's own result diff, the call's two sides diffed, or its preformatted input. */
+export function editDiff(args: unknown, result: unknown): DiffLine[] | undefined {
+  const details = result !== null && typeof result === "object" ? (result as { details?: { diff?: unknown } }).details : undefined;
+  if (typeof details?.diff === "string" && details.diff.trim() !== "") {
+    return details.diff.split("\n").map((line): DiffLine => {
+      if (/^\+\s*\d+\|/.test(line)) return { kind: "add", text: line.slice(1) };
+      if (/^-\s*\d+\|/.test(line)) return { kind: "remove", text: line.slice(1) };
+      return { kind: "same", text: line.replace(/^ /, "") };
+    });
+  }
+  const sides = editSides(args);
+  if (sides !== undefined) return diffLines(sides.before, sides.after);
+  const input = editInput(args);
+  if (input === undefined) return undefined;
+  return input.split("\n").map((line): DiffLine => {
+    if (line.startsWith("+")) return { kind: "add", text: line.slice(1) };
+    if (line.startsWith("-")) return { kind: "remove", text: line.slice(1) };
+    return { kind: "same", text: line };
+  });
+}

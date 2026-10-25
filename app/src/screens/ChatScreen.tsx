@@ -22,11 +22,11 @@ import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { BrandMark, GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { Composer } from "../components/Composer";
-import { ArrowDownGlyph, BackGlyph, ChevronDownGlyph, WarningGlyph } from "../components/icons";
+import { BackGlyph, ChevronDownGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
-import { TranscriptRow } from "../components/Transcript";
+import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, ConfirmSheet, IconButton } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
 import { displayName } from "../machines";
@@ -505,7 +505,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   }, [initialSession.id]);
 
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
-  const rows = useMemo(() => layoutRows(items).reverse(), [items]);
+  const rows = useMemo(() => layoutRows(items, streaming).reverse(), [items, streaming]);
   /** The open step as it is now: a running tool's output keeps arriving while its sheet is open. */
   const openStep = useMemo(() => {
     if (step === null || step.kind !== "tool") return step;
@@ -534,7 +534,15 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     lastNewest.current = newest;
     if (away) setUnseen((count) => count + 1);
   }, [away, newest]);
+  const offset = useRef(0);
+  /** A row opened or closed on a tap: move the list by what it gained, so the tapped header stays put. */
+  const shift = useCallback((delta: number) => {
+    const next = Math.max(0, offset.current + delta);
+    offset.current = next;
+    listRef.current?.scrollToOffset({ offset: next, animated: false });
+  }, []);
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offset.current = event.nativeEvent.contentOffset.y;
     const isAway = event.nativeEvent.contentOffset.y > NEAR_BOTTOM;
     setAway(isAway);
     if (!isAway) setUnseen(0);
@@ -688,6 +696,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         ) : null}
 
         <View style={styles.listWrap}>
+          <TranscriptFolds onShift={shift}>
           <FlatList
             ref={listRef}
             inverted
@@ -706,6 +715,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             initialNumToRender={14}
             windowSize={11}
           />
+          </TranscriptFolds>
           {rows.length === 0 && failure === null ? (
             // Outside the list: an inverted list flips its children on both axes on Android.
             <View style={styles.emptyOverlay} pointerEvents="none">
@@ -715,9 +725,18 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             </View>
           ) : null}
           {away ? (
-            <Pressable onPress={jump} style={styles.jump} accessibilityRole="button" accessibilityLabel={t("chat.jumpA11y")}>
-              <ArrowDownGlyph size={13} color={colors.fgMuted} />
-              <Text style={styles.jumpText}>{unseen > 0 ? t("chat.unseen", { count: unseen }) : t("chat.latest")}</Text>
+            <Pressable
+              onPress={jump}
+              style={unseen > 0 ? styles.jump : styles.jumpRound}
+              accessibilityRole="button"
+              accessibilityLabel={unseen > 0 ? t("chat.unseen", { count: unseen }) : t("chat.jumpA11y")}
+            >
+              <ChevronDownGlyph size={15} color={colors.fgMuted} />
+              {unseen > 0 ? (
+                <Text style={styles.jumpText} maxFontSizeMultiplier={1.1}>
+                  {t("chat.unseen", { count: unseen })}
+                </Text>
+              ) : null}
             </Pressable>
           ) : null}
         </View>
@@ -801,6 +820,18 @@ function createStyles(c: Palette) {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
   } as const;
+  const jump = {
+    position: "absolute",
+    right: 16,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    height: 36,
+    borderRadius: radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: c.borderStrong,
+    backgroundColor: c.raised,
+  } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
     header: {
@@ -821,30 +852,14 @@ function createStyles(c: Palette) {
     subtitle: { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
 
     listWrap: { flex: 1 },
-    list: { paddingTop: 12, paddingBottom: 8 },
+    list: { paddingTop: 16, paddingBottom: 12 },
     listDim: { opacity: 0.5 },
     emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
     emptyMark,
     emptyMarkWaiting: { ...emptyMark, opacity: 0.45 },
-    jump: {
-      position: "absolute",
-      alignSelf: "center",
-      bottom: 10,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 6,
-      height: 32,
-      paddingHorizontal: 13,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.borderStrong,
-      backgroundColor: c.raised,
-      elevation: 6,
-      shadowColor: "#000",
-      shadowOpacity: 0.3,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 4 },
-    },
+    // The way back to the newest message: a small floating circle, a pill when it can say how many arrived.
+    jump: { ...jump, gap: 6, paddingLeft: 11, paddingRight: 14 },
+    jumpRound: { ...jump, width: 36, justifyContent: "center" },
     jumpText: { fontFamily: SANS, fontSize: 12.5, lineHeight: 16, fontWeight: "500", color: c.fgMuted },
 
     failure: {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, StyleSheet, Text, View, type ViewStyle } from "react-native";
+import { Animated, Easing, StyleSheet, Text, View, type TextStyle, type ViewStyle } from "react-native";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
 import { EASE_OUT, GRADIENT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { t } from "../i18n/index.ts";
@@ -260,4 +260,62 @@ function createStyles(c: Palette) {
     stream: { height: 18, justifyContent: "center" },
     streamBar: { width: STREAM_W, height: 3, transformOrigin: "left" },
   } as const;
+}
+
+/** One sweep of the running shimmer, and the pause before the next. */
+const SHIMMER_MS = 1_600;
+const SHIMMER_DELAY = 300;
+/** The sweep's half width, as a share of the label. */
+const SWEEP = 0.32;
+
+/**
+ * A one-line label with the brand gradient sweeping across its glyphs, left
+ * to right, over a quiet base colour: what a running turn is doing. Each
+ * glyph takes its colour from where the sweep is, so no mask is needed. The
+ * label clips at its box rather than wrapping.
+ */
+export function ShimmerText({
+  text,
+  style,
+  maxFontSizeMultiplier,
+}: {
+  text: string;
+  style: TextStyle;
+  maxFontSizeMultiplier?: number;
+}): ReactNode {
+  const c = useColors();
+  const value = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(value, { toValue: 1, duration: SHIMMER_MS, easing: Easing.linear, useNativeDriver: false }),
+        Animated.delay(SHIMMER_DELAY),
+        Animated.timing(value, { toValue: 0, duration: 0, useNativeDriver: false }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [value]);
+  const glyphs = Array.from(text);
+  const base = typeof style.color === "string" ? style.color : c.fgFaint;
+  const span = 1 + 2 * SWEEP;
+  const n = glyphs.length;
+  return (
+    <View style={{ flexDirection: "row", flexShrink: 1, minWidth: 0, overflow: "hidden" }} accessible accessibilityLabel={text}>
+      {glyphs.map((glyph, index) => {
+        const at = n <= 1 ? 0.5 : index / (n - 1);
+        const point = (d: number) => (at + d + SWEEP) / span;
+        const color = value.interpolate({
+          inputRange: [point(-SWEEP), point(-SWEEP / 2), point(0), point(SWEEP / 2), point(SWEEP)],
+          outputRange: [base, c.accentA, c.accentV, c.accentB, base],
+          extrapolate: "clamp",
+        });
+        return (
+          <Animated.Text key={index} style={[style, { color }]} maxFontSizeMultiplier={maxFontSizeMultiplier} importantForAccessibility="no">
+            {glyph}
+          </Animated.Text>
+        );
+      })}
+    </View>
+  );
 }

@@ -254,3 +254,22 @@ test("a reopened chat keeps the thinking of stored messages", () => {
     [["Plan it.", ""], "tool", ["Wrap up.", "Done."]],
   );
 });
+
+test("messages keep their times, and a turn's end on an error or a stop", () => {
+  const items = snapshotItems([
+    { role: "user", content: [{ type: "text", text: "go" }], timestamp: 1_000 },
+    { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "ls" } }], timestamp: 2_000 },
+    { role: "toolResult", toolCallId: "c1", content: [{ type: "text", text: "a" }], timestamp: 3_000 },
+    { role: "assistant", content: [], stopReason: "error", errorMessage: "overloaded", timestamp: 4_000 },
+  ]);
+  assert.equal(items[0].createdAt, 1_000);
+  assert.equal(items[1].endedAt, 3_000, "a stored call ends when its result came");
+  assert.equal(items[2].stop, "error", "an empty message that ended on an error is kept");
+  assert.equal(items[2].error, "overloaded");
+  let live = applyEvent([], { type: "message_start", message: { role: "assistant", content: [] } });
+  assert.equal(typeof live[0].createdAt, "number");
+  live = applyEvent(live, { type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } });
+  assert.equal(live.length, 1);
+  assert.equal(live[0].stop, "aborted");
+  assert.equal(typeof live[0].endedAt, "number");
+});

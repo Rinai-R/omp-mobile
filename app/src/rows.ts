@@ -1,91 +1,242 @@
 import type { ChatItem, MessageItem, NoticeItem, ToolItem } from "./types";
-import { listSeparator, t, type Key } from "./i18n/index.ts";
+import { t, type Key } from "./i18n/index.ts";
 
 /**
- * The transcript as the chat screen lays it out. A turn is the user's message
- * and everything OMP does in reply: one header line, then its prose, and each
- * stretch of tool calls folded into one activity card. Thinking that only
- * leads into tool calls belongs to that stretch; thinking before an answer
- * stays with the answer.
+ * The transcript as the chat screen lays it out: one conversation column.
+ * A turn is the user's message and everything OMP does in reply. It starts
+ * with a one-line divider that says how the turn ended and how long it took;
+ * then its work (each stretch of tool calls as one activity row, a reply's
+ * thinking as one thinking row) and its prose follow as plain rows, and a
+ * tail with copy and the time closes it. The work rows belong to their turn
+ * (`turn`): collapsing the divider hides them and leaves the answer.
+ *
+ * Every row carries `gap`, the space above it, so the column keeps one
+ * rhythm: tight between work rows, roomier around prose and between turns.
  */
 export type Row =
-  | { kind: "user"; id: string; item: MessageItem }
-  | { kind: "turn"; id: string }
-  | { kind: "reply"; id: string; item: MessageItem }
-  | { kind: "activity"; id: string; steps: Step[]; running: boolean; failed: number }
-  | { kind: "notice"; id: string; item: NoticeItem };
+  | { kind: "user"; id: string; gap: number; item: MessageItem }
+  | {
+      kind: "turn";
+      id: string;
+      gap: number;
+      running: boolean;
+      end: TurnEnd;
+      startedAt?: number;
+      endedAt?: number;
+      /** While running: what OMP is doing now. */
+      live?: Live;
+      /** Whether the turn has work rows the divider can fold. */
+      members: number;
+    }
+  | { kind: "thinking"; id: string; gap: number; turn: string; item: MessageItem }
+  | { kind: "activity"; id: string; gap: number; turn: string; steps: Step[]; running: boolean; failed: number }
+  | { kind: "reply"; id: string; gap: number; turn?: string; item: MessageItem }
+  | { kind: "error"; id: string; gap: number; item: MessageItem }
+  | { kind: "tail"; id: string; gap: number; text: string; at?: number }
+  | { kind: "notice"; id: string; gap: number; item: NoticeItem };
 
-/** One line inside an activity card: a tool call, or a thought between calls. */
+/** How a finished turn ended. */
+export type TurnEnd = "done" | "failed" | "stopped";
+
+/** What a running turn is doing now, for the divider's live label. */
+export type Live = { kind: "tool"; tool: ToolItem } | { kind: "thinking" } | { kind: "writing" } | { kind: "working" };
+
+/** One line inside an activity row: a tool call, or a thought between calls. */
 export type Step = { kind: "tool"; tool: ToolItem } | { kind: "thought"; item: MessageItem };
+
+/** The rows that fold with their turn's divider. */
+export type Member = Extract<Row, { kind: "thinking" | "activity" }>;
 
 function thinkingOnly(item: MessageItem): boolean {
   return item.role === "assistant" && item.text.trim() === "" && (item.images?.length ?? 0) === 0;
 }
 
+function hasThinking(item: MessageItem): boolean {
+  return item.thinking !== undefined && item.thinking.trim() !== "";
+}
+
+/** The space above a row, from the row before it. */
+export function gapBefore(kind: Row["kind"], previous: Row["kind"] | undefined): number {
+  if (previous === undefined) return 0;
+  switch (kind) {
+    case "user":
+      return previous === "user" ? 12 : 28;
+    case "turn":
+      return previous === "user" ? 14 : 28;
+    case "thinking":
+    case "activity":
+      return previous === "turn" ? 12 : 6;
+    case "reply":
+      return 14;
+    case "tail":
+      return 6;
+    default:
+      return 10;
+  }
+}
+
+/** The latest moment an item shows: when it ended, else when it started. */
+function lastTime(item: ChatItem): number | undefined {
+  if (item.kind === "message") return item.endedAt ?? item.createdAt;
+  if (item.kind === "tool") return item.endedAt ?? item.startedAt;
+  return undefined;
+}
+
 /**
- * Lay out `items` (in transcript order) as rows. Ids are stable while a
- * transcript grows: an activity keeps the id of its first step.
+ * Lay out `items` (in transcript order) as rows. `streaming`: OMP is still
+ * working on the last turn, also between its events. Ids are stable while a
+ * transcript grows: an activity keeps the id of its first step, a turn the id
+ * of its first item after the user's message.
  */
-export function layoutRows(items: readonly ChatItem[]): Row[] {
+export function layoutRows(items: readonly ChatItem[], streaming = false): Row[] {
   const rows: Row[] = [];
-  /** Whether the current turn already has its header. */
-  let headed = false;
+  let turn: Extract<Row, { kind: "turn" }> | undefined;
+  /** The current turn's user message time, and its items so far. */
+  let asked: number | undefined;
+  /** The current turn's user message id: the turn is named after it, so its divider can show before OMP answers. */
+  let askedId: string | undefined;
+  let turnItems: ChatItem[] = [];
   let activity: Extract<Row, { kind: "activity" }> | undefined;
 
-  const head = (anchor: string) => {
-    if (headed) return;
-    headed = true;
-    rows.push({ kind: "turn", id: `turn:${anchor}` });
+  const push = <K extends Row["kind"]>(row: Omit<Extract<Row, { kind: K }>, "gap">): Extract<Row, { kind: K }> => {
+    const value = { ...row, gap: gapBefore(row.kind, rows.at(-1)?.kind) } as Extract<Row, { kind: K }>;
+    rows.push(value);
+    return value;
   };
-  const close = () => {
+  const head = (anchor: string) => {
+    if (turn !== undefined) return turn;
+    const created = push<"turn">({ kind: "turn", id: `turn:${askedId ?? anchor}`, running: false, end: "done", startedAt: asked, members: 0 });
+    turn = created;
+    return created;
+  };
+  /** Finish the current turn: its times, how it ended, and its tail. */
+  const finish = (last: boolean) => {
+    const current = turn;
+    if (current !== undefined) {
+      const running = (last && streaming) || turnItems.some((item) => (item.kind === "tool" ? item.status === "running" : item.kind === "message" && item.streaming === true));
+      current.running = running;
+      const times = turnItems.map(lastTime).filter((time): time is number => time !== undefined);
+      current.startedAt ??= turnItems.map((item) => (item.kind === "message" ? item.createdAt : item.kind === "tool" ? item.startedAt : undefined)).find((time) => time !== undefined);
+      current.endedAt = times.length > 0 ? Math.max(...times) : undefined;
+      const answers = turnItems.filter((item): item is MessageItem => item.kind === "message" && item.role === "assistant");
+      const stop = answers.at(-1)?.stop;
+      current.end = stop === "error" ? "failed" : stop === "aborted" ? "stopped" : "done";
+      current.live = running ? liveOf(turnItems) : undefined;
+      const text = answers
+        .map((item) => item.text.trim())
+        .filter((value) => value !== "")
+        .join("\n\n");
+      if (!running && text !== "") push<"tail">({ kind: "tail", id: `tail:${current.id}`, text, at: current.endedAt });
+    }
+    turn = undefined;
+    turnItems = [];
+    asked = undefined;
+    askedId = undefined;
     activity = undefined;
   };
   const step = (value: Step, id: string) => {
     if (activity === undefined) {
-      head(id);
-      activity = { kind: "activity", id: `act:${id}`, steps: [], running: false, failed: 0 };
-      rows.push(activity);
+      const owner = head(id);
+      owner.members += 1;
+      activity = push<"activity">({ kind: "activity", id: `act:${id}`, turn: owner.id, steps: [], running: false, failed: 0 });
     }
-    activity.steps.push(value);
+    const current = activity;
+    current.steps.push(value);
     if (value.kind === "tool") {
-      if (value.tool.status === "running") activity.running = true;
-      if (value.tool.status === "error") activity.failed += 1;
+      if (value.tool.status === "running") current.running = true;
+      if (value.tool.status === "error") current.failed += 1;
     } else if (value.item.streaming === true) {
-      activity.running = true;
+      current.running = true;
     }
   };
 
   items.forEach((item, index) => {
     if (item.kind === "notice") {
-      close();
-      rows.push({ kind: "notice", id: item.id, item });
+      activity = undefined;
+      push<"notice">({ kind: "notice", id: item.id, item });
       return;
     }
+    if (item.kind === "message" && item.role === "user") {
+      finish(false);
+      asked = item.createdAt;
+      askedId = item.id;
+      push<"user">({ kind: "user", id: item.id, item });
+      return;
+    }
+    if (item.kind === "message" && item.role === "system") {
+      activity = undefined;
+      push<"notice">({ kind: "notice", id: item.id, item: { kind: "notice", id: item.id, level: "info", text: item.text } });
+      return;
+    }
+    turnItems.push(item);
     if (item.kind === "tool") {
       step({ kind: "tool", tool: item }, item.id);
       return;
     }
-    if (item.role === "user") {
-      close();
-      headed = false;
-      rows.push({ kind: "user", id: item.id, item });
-      return;
-    }
-    if (item.role === "system") {
-      close();
-      rows.push({ kind: "notice", id: item.id, item: { kind: "notice", id: item.id, level: "info", text: item.text } });
-      return;
-    }
     // Thinking with nothing to say, followed by a tool call, is part of the work, not the answer.
-    if (thinkingOnly(item) && items[index + 1]?.kind === "tool") {
+    if (thinkingOnly(item) && hasThinking(item) && items[index + 1]?.kind === "tool") {
       step({ kind: "thought", item }, item.id);
       return;
     }
-    close();
-    head(item.id);
-    rows.push({ kind: "reply", id: item.id, item });
+    activity = undefined;
+    const owner = head(item.id);
+    if (hasThinking(item)) {
+      owner.members += 1;
+      push<"thinking">({ kind: "thinking", id: `think:${item.id}`, turn: owner.id, item });
+    }
+    if (item.text.trim() !== "" || (item.images?.length ?? 0) > 0) {
+      push<"reply">({ kind: "reply", id: item.id, turn: owner.id, item });
+    } else if (item.stop === "error" && item.error !== undefined) {
+      push<"error">({ kind: "error", id: `err:${item.id}`, item });
+    }
   });
+  // A prompt OMP has not answered yet: its divider already says it is working.
+  if (streaming && turn === undefined && askedId !== undefined) head(askedId);
+  finish(true);
   return rows;
+}
+
+/** What a running turn is doing now: its running tool, else what its last message streams. */
+function liveOf(items: readonly ChatItem[]): Live {
+  for (let at = items.length - 1; at >= 0; at -= 1) {
+    const item = items[at];
+    if (item?.kind === "tool" && item.status === "running") return { kind: "tool", tool: item };
+  }
+  const last = items.at(-1);
+  if (last?.kind === "message" && last.streaming === true) {
+    return last.text.trim() !== "" ? { kind: "writing" } : hasThinking(last) ? { kind: "thinking" } : { kind: "working" };
+  }
+  return { kind: "working" };
+}
+
+/**
+ * A turn's length in words: "48s", "3m 12s", "1h 05m" ("48秒", "3分12秒",
+ * "1小时5分"). Under a second reads as a second.
+ */
+export function turnDuration(ms: number): string {
+  const total = Math.max(1, Math.round(ms / 1_000));
+  if (total < 60) return t("turn.seconds", { seconds: total });
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return t("turn.minutes", { minutes, seconds: total % 60 });
+  return t("turn.hours", { hours: Math.floor(minutes / 60), minutes: minutes % 60 });
+}
+
+/** The divider's line for a finished turn: "Done in 3m 12s", "Failed", "Stopped". */
+export function turnLabel(row: Pick<Extract<Row, { kind: "turn" }>, "end" | "startedAt" | "endedAt">): string {
+  if (row.end === "failed") return t("turn.failed");
+  if (row.end === "stopped") return t("turn.stopped");
+  if (row.startedAt === undefined || row.endedAt === undefined || row.endedAt < row.startedAt) return t("turn.done");
+  return t("turn.doneIn", { duration: turnDuration(row.endedAt - row.startedAt) });
+}
+
+/** The divider's live line while a turn runs: OMP's intent for the running call, else what kind of work it is. */
+export function liveLabel(live: Live | undefined): string {
+  if (live === undefined || live.kind === "working") return t("turn.working");
+  if (live.kind === "thinking") return t("turn.thinking");
+  if (live.kind === "writing") return t("turn.writing");
+  const intent = live.tool.intent?.trim();
+  if (intent !== undefined && intent !== "") return oneLine(intent, 80);
+  return t(`live.${toolKind(live.tool.name)}`);
 }
 
 /** What a tool does, for its icon and the activity summary. */
@@ -264,52 +415,48 @@ export function thoughtLabel(ms: number | undefined): string {
   return t("transcript.thoughtForLong", { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
 }
 
-/** Per kind: the summary's lead (counted) and the shorter form for the kinds after it. */
-const SUMMARY: Record<ToolKind, [first: Key, later: Key]> = {
-  read: ["summary.read", "summary.read.more"],
-  edit: ["summary.edit", "summary.edit.more"],
-  write: ["summary.write", "summary.write.more"],
-  run: ["summary.run", "summary.run.more"],
-  search: ["summary.search", "summary.search.more"],
-  web: ["summary.web", "summary.web.more"],
-  plan: ["summary.plan", "summary.plan.more"],
-  agent: ["summary.agent", "summary.agent.more"],
-  ask: ["summary.ask", "summary.ask.more"],
-  other: ["summary.other", "summary.other.more"],
-};
-
-const ORDER: ToolKind[] = ["edit", "write", "run", "read", "search", "web", "agent", "ask", "plan", "other"];
-
-/**
- * A finished stretch in one line, most consequential work first:
- * "Edited 2 files, ran 3, read 4". Edited files count once per path.
- */
-export function activitySummary(steps: readonly Step[]): string {
-  const counts = new Map<ToolKind, number>();
-  const edited = new Map<ToolKind, Set<string>>();
+/** The kinds of work an activity names, in the order it first did them. */
+export function activityKinds(steps: readonly Step[]): ToolKind[] {
+  const kinds: ToolKind[] = [];
   for (const value of steps) {
     if (value.kind !== "tool") continue;
     const kind = toolKind(value.tool.name);
-    const path = str(record(value.tool.args)?.path);
-    if ((kind === "edit" || kind === "write" || kind === "read") && path !== undefined) {
-      const seen = edited.get(kind) ?? new Set<string>();
-      seen.add(path);
-      edited.set(kind, seen);
-      counts.set(kind, seen.size);
-    } else {
-      counts.set(kind, (counts.get(kind) ?? 0) + 1);
-    }
+    if (!kinds.includes(kind)) kinds.push(kind);
   }
-  const parts = ORDER.filter((kind) => (counts.get(kind) ?? 0) > 0).map((kind, index) => {
-    const n = counts.get(kind) ?? 0;
-    const [first, later] = SUMMARY[kind];
-    return t(index === 0 ? first : later, { count: n });
-  });
-  if (parts.length === 0) return t("summary.thought");
-  return parts.slice(0, 3).join(listSeparator());
+  return kinds;
 }
 
-/** The step a running card shows on its head: the last tool still running, else the last step. */
+/** At most this many kinds are named; more end in "and more". */
+const NAMED_KINDS = 3;
+
+/**
+ * An activity row's title: the kinds of work, not how many calls —
+ * "Ran commands", "Read files, edited files, ran commands" ("执行了命令",
+ * "读取了文件、修改了文件").
+ */
+export function activityLabel(steps: readonly Step[]): string {
+  const kinds = activityKinds(steps);
+  if (kinds.length === 0) return t("transcript.thought");
+  const named = kinds.slice(0, NAMED_KINDS).map((kind, index) => t((index === 0 ? `activity.${kind}` : `activity.${kind}.more`) as Key));
+  const line = named.join(t("activity.join"));
+  return kinds.length > NAMED_KINDS ? t("activity.etc", { list: line }) : line;
+}
+
+/** A tool row's title: the kind of tool ("Run", "Read", "Edit"), or the tool's own name. */
+export function toolTitle(tool: ToolItem): string {
+  const kind = toolKind(tool.name);
+  return kind === "other" ? tool.name : t(`tool.kind.${kind}`);
+}
+
+/** A tool row's summary after its title: the command, path, pattern or query, else OMP's intent. */
+export function toolSummaryLine(tool: ToolItem, cwd?: string): string | undefined {
+  const target = stepTarget(tool, cwd);
+  if (target !== undefined) return target.replace(/^\$ /, "");
+  const intent = tool.intent?.trim();
+  return intent !== undefined && intent !== "" ? oneLine(intent) : undefined;
+}
+
+/** The step a running activity shows: the last tool still running, else the last step. */
 export function liveStep(steps: readonly Step[]): Step | undefined {
   for (let at = steps.length - 1; at >= 0; at -= 1) {
     const value = steps[at];
@@ -318,6 +465,12 @@ export function liveStep(steps: readonly Step[]): Step | undefined {
   return steps.at(-1);
 }
 
-export function toolCount(steps: readonly Step[]): number {
-  return steps.filter((value) => value.kind === "tool").length;
+/** The time under a turn: "19:31" today, "10/25 19:31" on another day (local time). */
+export function clockTime(at: number, now = Date.now()): string {
+  const date = new Date(at);
+  const today = new Date(now);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const sameDay = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
+  return sameDay ? time : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
 }
