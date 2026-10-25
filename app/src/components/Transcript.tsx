@@ -45,6 +45,11 @@ import {
 import { Markdown } from "./Markdown";
 import { Disclosure } from "./ui";
 
+/** The transcript's side margin, shared by the bubble, the header row, the cards and the prose. */
+const GUTTER = 16;
+/** The space under each row: one rhythm between a reply's prose, its cards and the next turn. */
+const ROW_GAP = 12;
+
 /** Steps an open card lists at first; longer stretches show the newest ones until "Show all" lists every one. */
 const INLINE_STEPS = 8;
 
@@ -482,9 +487,8 @@ function NoticeLine({ item }: { item: NoticeItem }): ReactNode {
 
 function createStyles(c: Palette) {
   const card = {
-    marginHorizontal: 16,
-    marginTop: 4,
-    marginBottom: 10,
+    marginHorizontal: GUTTER,
+    marginBottom: ROW_GAP,
     borderRadius: radius.lg + 2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: c.border,
@@ -497,8 +501,8 @@ function createStyles(c: Palette) {
   const notice = {
     flexDirection: "row",
     gap: 8,
-    marginHorizontal: 16,
-    marginVertical: 4,
+    marginHorizontal: GUTTER,
+    marginBottom: ROW_GAP,
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: radius.md,
@@ -507,11 +511,11 @@ function createStyles(c: Palette) {
   const noticeDot = { width: 5, height: 5, borderRadius: 3, marginTop: 6, backgroundColor: c.fgGhost } as const;
   const noticeText = { flex: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 17, color: c.fgFaint } as const;
   const badge = { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center" } as const;
-  const actTitle = { flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 13.5, lineHeight: 18, fontWeight: "400", color: c.fgMuted } as const;
+  const actTitle = { flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 14, lineHeight: 19, fontWeight: "400", color: c.fgMuted } as const;
   return {
     pressed: { backgroundColor: c.hover },
 
-    turn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, marginTop: 14, marginBottom: 8 },
+    turn: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: GUTTER, marginTop: 8, marginBottom: 8 },
     turnMark: {
       width: 20,
       height: 20,
@@ -524,21 +528,20 @@ function createStyles(c: Palette) {
     },
     turnName: { fontFamily: MONO, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgFaint },
 
-    userRow: { flexDirection: "row", justifyContent: "flex-end", paddingLeft: 56, paddingRight: 14, marginTop: 14, marginBottom: 4 },
+    userRow: { flexDirection: "row", justifyContent: "flex-end", paddingLeft: 48, paddingRight: GUTTER, marginTop: 16, marginBottom: 6 },
     bubble: {
       maxWidth: "100%",
       gap: 8,
       paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 20,
-      borderBottomRightRadius: 6,
+      paddingVertical: 9,
+      borderRadius: 18,
       backgroundColor: c.userBubble,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
     },
-    bubbleText: { fontFamily: SANS, fontSize: 16, lineHeight: 24, fontWeight: "400", color: c.fg },
+    bubbleText: { fontFamily: SANS, fontSize: 15, lineHeight: 23, fontWeight: "400", color: c.fg },
 
-    reply: { paddingHorizontal: 18, gap: 10, marginBottom: 10 },
+    reply: { paddingHorizontal: GUTTER, gap: 8, marginBottom: ROW_GAP },
     caret: { fontFamily: SANS, color: c.accent },
     thought: { gap: 6 },
     thoughtHead: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", paddingVertical: 2 },
