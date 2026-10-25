@@ -16,7 +16,7 @@ const TITLE_SCAN_BYTES = 512 * 1024;
 const CHUNK_BYTES = 64 * 1024;
 const LSOF_TIMEOUT_MS = 5_000;
 
-/** @typedef {{id: string, title: string, cwd: string, createdAt: number, updatedAt: number, sessionFile: string}} OmpSession */
+/** @typedef {{id: string, title: string, cwd: string, createdAt: number, updatedAt: number, size: number, sessionFile: string}} OmpSession */
 
 /** Text of an OMP message content field (string or content-part array). */
 function textOfContent(content) {
@@ -103,6 +103,8 @@ export async function readSessionFile(file) {
       cwd: header.cwd,
       createdAt: Number.isFinite(created) ? created : info.birthtimeMs,
       updatedAt: info.mtimeMs,
+      // With the time, what tells this daemon's own omp leaving the file from someone writing it.
+      size: info.size,
       sessionFile: file,
     };
   } finally {

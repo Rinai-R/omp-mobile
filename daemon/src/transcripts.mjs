@@ -37,15 +37,17 @@ export function fingerprint(message) {
 /**
  * Where a phone that holds the first `since` messages (the last of them
  * fingerprinted `last`) can continue: `since` when its copy lines up with
- * `messages` there, else 0 (send everything).
+ * `messages` there, else 0 (send everything). Indices are the transcript's:
+ * `messages` start at `base`, the count a long session dropped from its front.
  * @param {readonly any[]} messages
  * @param {number} since
  * @param {string} last
+ * @param {number} [base]
  */
-export function deltaFrom(messages, since, last) {
-  if (!Array.isArray(messages) || !Number.isSafeInteger(since) || since <= 0 || since > messages.length) return 0;
+export function deltaFrom(messages, since, last, base = 0) {
+  if (!Array.isArray(messages) || !Number.isSafeInteger(since) || since <= base || since > base + messages.length) return 0;
   if (typeof last !== "string" || last === "") return 0;
-  return fingerprint(messages[since - 1]) === last ? since : 0;
+  return fingerprint(messages[since - 1 - base]) === last ? since : 0;
 }
 
 /**
@@ -63,13 +65,18 @@ export function deltaQuery(searchParams) {
  * The body of a snapshot frame or a `/transcript` answer: the messages after
  * what the phone holds when its copy lines up, else all of them. `from` is the
  * index of the first message sent (0: the whole transcript), `total` how many
- * the daemon holds.
- * @param {{session: any, state: any, messages: any[]}} transcript
+ * the transcript has. A session past the daemon's cap holds only its last
+ * messages, from index `base` on: a delta is still cut at the phone's `since`,
+ * and everything is sent as a whole transcript of what is held, with `base`
+ * saying where in the session it starts.
+ * @param {{session: any, state: any, messages: any[], base?: number}} transcript
  * @param {{since: number, last: string}} [held]
  */
-export function deltaBody({ session, state, messages }, held = { since: 0, last: "" }) {
-  const from = deltaFrom(messages, held.since, held.last);
-  return { session, state, from, total: messages.length, messages: from === 0 ? messages : messages.slice(from) };
+export function deltaBody({ session, state, messages, base = 0 }, held = { since: 0, last: "" }) {
+  const start = Number.isSafeInteger(base) && base > 0 ? base : 0;
+  const from = deltaFrom(messages, held.since, held.last, start);
+  if (from > 0) return { session, state, from, total: start + messages.length, messages: messages.slice(from - start) };
+  return { session, state, from: 0, total: messages.length, messages, ...(start > 0 ? { base: start } : {}) };
 }
 
 function fileState(path) {
@@ -107,10 +114,10 @@ export class TranscriptStore {
    * call it once omp has exited, when the file is final. Best effort: a full
    * disk only loses the shortcut.
    * @param {string} id
-   * @param {{sessionFile?: string, messages: any[], state: any, session: any}} record
+   * @param {{sessionFile?: string, messages: any[], state: any, session: any, base?: number}} record
    * @returns {boolean} whether it was saved
    */
-  write(id, { sessionFile, messages, state, session }) {
+  write(id, { sessionFile, messages, state, session, base = 0 }) {
     if (typeof id !== "string" || id === "" || typeof sessionFile !== "string" || !Array.isArray(messages)) return false;
     const file = fileState(sessionFile);
     if (file === undefined) return false;
@@ -124,7 +131,9 @@ export class TranscriptStore {
       sessionFile,
       file,
       savedAt: Date.now(),
-      activeAt: Math.max(file.mtimeMs, Number(session?.updatedAt) || 0),
+      // When the session was last used: omp rewrites its file as it exits, so the file's time is not that.
+      activeAt: Number(session?.updatedAt) || file.mtimeMs,
+      base: Number.isSafeInteger(base) && base > 0 ? base : 0,
       messages,
       state: state !== null && typeof state === "object" ? { ...state, isStreaming: false } : state,
       session: { ...session, status: "idle", waiting: 0 },
@@ -146,8 +155,8 @@ export class TranscriptStore {
 
   /**
    * A saved transcript that still matches its session file, else undefined.
-   * Its session's `updatedAt` is at least the file's time: the file is what a
-   * session list dates the session by.
+   * Its session is dated by its last activity, not by the file: the file was
+   * last written by the omp exiting.
    * @param {string} id
    * @param {string | undefined} sessionFile the file the session is known by now, when known
    */
@@ -162,7 +171,7 @@ export class TranscriptStore {
     if (sessionFile !== undefined && record.sessionFile !== sessionFile) return undefined;
     if (!current(record)) return undefined;
     const session = record.session !== null && typeof record.session === "object" ? record.session : { id };
-    return { ...record, session: { ...session, updatedAt: Math.max(Number(session.updatedAt) || 0, record.file.mtimeMs) } };
+    return { ...record, session: { ...session, updatedAt: Number(session.updatedAt) || record.file.mtimeMs } };
   }
 
   /** @param {string} id */
