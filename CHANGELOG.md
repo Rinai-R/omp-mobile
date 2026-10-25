@@ -4,6 +4,18 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.4.2
+
+Opening a chat no longer says "connecting" on a phone that is already connected.
+
+- The chat header follows the session, not the computer. While the link is up and the daemon is starting the session (an omp resumes, a long transcript arrives), it says "opening…"; the first second of a chat shows no status word at all, so a session that opens in milliseconds does not flash a message. "connecting…" now means the socket really has not opened.
+
+### 中文
+
+打开对话时，不再在已经连上的手机上显示“连接中”。
+
+- 对话页标题下的状态改为跟随会话而不是电脑。连接已经建立、daemon 正在打开会话（恢复 omp、传输较长的记录）时显示“打开中…”；刚进入对话的一秒内不显示状态词，毫秒级打开不会闪一下提示。“连接中…”只在连接确实还没建立时出现。
+
 ## v0.4.1
 
 A session that cannot start says so at once, a busy link stops reconnecting in circles, and a quiet one is noticed.
