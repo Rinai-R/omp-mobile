@@ -4,6 +4,30 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.4.1
+
+A session that cannot start says so at once, a busy link stops reconnecting in circles, and a quiet one is noticed.
+
+- A session that cannot open fails fast. When omp could not start — its working directory was deleted, the binary was gone — the daemon waited out its 45 s start timeout and answered with a bare 500, and the phone retried while the WebSocket handshake hung. The reason now comes back immediately, and the app shows it.
+- A session whose directory was removed (a session in `/tmp`) has that directory recreated, instead of never opening.
+- The session socket opens before the daemon has started its omp. A phone's WebSocket client gave up after about 10 s and retried, starting another omp each time; the transcript now arrives on the open socket when it is ready, and a session that cannot open still says why and stops retrying.
+- Session sockets are beaten every 20 s. A client that misses a beat is dropped, and the app treats a link with no frame for 60 s as gone and reconnects: an idle session no longer dies silently behind a phone network's NAT.
+- Listing sessions reuses one scan of OMP's session directory and one owner lookup for a few seconds, so the app's 15 s probe no longer re-reads hundreds of session files every round.
+- Taking a session over waits less: the extension answers within a second or two, OMP leaves on `SIGINT` promptly, and the signal fallbacks are 5 s each instead of 10 s.
+- A session no phone has looked at for 30 minutes is closed and its omp process freed; opening it again resumes it.
+
+### 中文
+
+打不开的会话现在会立刻说明原因，忙时不再反复重连，闲时也能发现断链。
+
+- 打不开的会话会立即失败。omp 起不来时（工作目录被删、二进制不存在），daemon 以前会等满 45 秒启动超时再返回一个裸的 500，期间 WebSocket 握手一直挂着，手机就不断重连。现在原因立刻返回，并在 App 里显示。
+- 工作目录已被删除的会话（比如 `/tmp` 下的会话）会自动重建目录，而不是永远打不开。
+- 会话的 WebSocket 在 daemon 拉起 omp 之前就完成握手。手机的 WebSocket 客户端大约 10 秒就放弃并重试，每次重试又起一个 omp；现在记录准备好后通过已建立的连接推过来，打不开的会话也仍会说明原因并停止重试。
+- 会话连接每 20 秒有一拍心跳，漏拍的连接会被断开；App 侧超过 60 秒没有任何帧就当作断链并重连：空闲会话不再被手机网络的 NAT 悄悄掐断。
+- 列会话时会复用同一次目录扫描和同一次占用查询几秒钟，App 每 15 秒的探测不再每轮重读几百个会话文件。
+- 接管会话等待更短：扩展一两秒内就会响应，OMP 收到 `SIGINT` 会很快退出，信号兜底也从每个 10 秒缩短为 5 秒。
+- 30 分钟没有手机查看的会话会被关闭并释放 omp 进程，再次打开时自动恢复。
+
 ## v0.4.0
 
 Chinese and English, replies that read well, thinking that stays, taking over a terminal's session, and less text on every screen.

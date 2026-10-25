@@ -109,6 +109,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const link = `${machine.id}\n${machine.url}\n${machine.token}`;
   const machineRef = useRef(machine);
   machineRef.current = machine;
+  /** The daemon's features as last fetched, read where the socket is (re)built. */
+  const featuresRef = useRef<string[]>([]);
+  featuresRef.current = features;
 
   // The saved transcript shows at once, offline too, until the daemon's snapshot arrives.
   useEffect(() => {
@@ -126,7 +129,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     if (!connected && features.length > 0) return undefined;
     let cancelled = false;
     void daemonFeatures(machineRef.current).then((list) => {
-      if (!cancelled && list.length > 0) setFeatures(list);
+      if (cancelled || list.length === 0) return;
+      setFeatures(list);
+      // A daemon that beats: silence means the socket died, not that the session is quiet.
+      if (list.includes("heartbeat")) socketRef.current?.watchSilence();
     });
     return () => {
       cancelled = true;
@@ -253,6 +259,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       },
     );
     socketRef.current = socket;
+    if (featuresRef.current.includes("heartbeat")) socket.watchSilence();
     socket.connect();
     // Back in the foreground: reconnect now rather than at the end of a backoff.
     // A session that could not open stays down until Retry, as the error card says.

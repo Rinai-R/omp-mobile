@@ -142,7 +142,15 @@ export class RpcSession extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
-    child.on("error", (error) => this.#fail(error));
+    // A process that never started (missing binary, a cwd that was removed)
+    // emits `error` and no `exit`, so `closed` never comes: without its own
+    // signal the `ready` wait would sit out the whole start timeout.
+    child.on("error", (error) => {
+      this.closed = true;
+      this.lastError = error;
+      this.emit("start-error", error);
+      this.#fail(error);
+    });
     child.on("exit", (code, signal) => {
       this.closed = true;
       // Nothing can answer the dialogs of a process that is gone.
@@ -157,7 +165,10 @@ export class RpcSession extends EventEmitter {
     });
     const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
     const ready = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("omp RPC did not become ready")), START_TIMEOUT_MS);
+      const timer = setTimeout(
+        () => reject(new Error(`omp RPC did not become ready in ${Math.round(START_TIMEOUT_MS / 1000)}s: ${this.stderr.trim().slice(-500) || "no output"}`)),
+        START_TIMEOUT_MS,
+      );
       const onReady = (message) => {
         clearTimeout(timer);
         this.off("ready", onReady);
@@ -167,6 +178,14 @@ export class RpcSession extends EventEmitter {
       this.once("closed", () => {
         clearTimeout(timer);
         reject(new Error(`omp exited before ready: ${this.stderr.slice(-500)}`));
+      });
+      // `start()` is called from the daemon's request path: the reason a process
+      // cannot start (no omp on PATH, the session's directory is gone) has to
+      // reach the phone instead of a generic timeout.
+      this.once("start-error", (error) => {
+        clearTimeout(timer);
+        this.off("ready", onReady);
+        reject(new Error(`omp could not start in ${this.cwd}: ${error?.message ?? String(error)}`));
       });
     });
     lines.on("line", (line) => this.#onLine(line));

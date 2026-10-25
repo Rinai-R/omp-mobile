@@ -98,3 +98,21 @@ test("close falls back to SIGTERM and never sends SIGKILL", async () => {
   assert.equal(await stuck.close(), "running");
   process.kill(stuck.child.pid, "SIGKILL");
 });
+
+test("a process that cannot start rejects at once, with why, instead of waiting out the timeout", async () => {
+  // A session whose directory was cleaned up: OMP exits before `ready`, and
+  // `spawn` itself fails with ENOENT because the cwd is gone.
+  const gone = join(tmpdir(), `omp-mobile-gone-${process.pid}-${Date.now()}`);
+  const started = Date.now();
+  const rpc = new RpcSession({ cwd: gone, ompBin: process.execPath });
+  await assert.rejects(rpc.start(), /omp could not start in .*omp-mobile-gone-.*ENOENT/);
+  assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms`);
+  assert.equal(rpc.closed, true);
+});
+
+test("a missing omp binary rejects at once too", async () => {
+  const started = Date.now();
+  const rpc = new RpcSession({ cwd: tmpdir(), ompBin: join(tmpdir(), "no-such-omp") });
+  await assert.rejects(rpc.start(), /omp could not start in .*no-such-omp/);
+  assert.ok(Date.now() - started < 5_000, `took ${Date.now() - started} ms`);
+});

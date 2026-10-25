@@ -24,15 +24,20 @@ import { execFile } from "node:child_process";
 import { closeSync, constants, openSync, readdirSync, readSync, renameSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-/** How long each step waits before the next, in milliseconds. */
+/**
+ * How long each step waits before the next, in milliseconds. The extension
+ * path (a terminal with the plugin loaded) answers within a second or two;
+ * the signal path is the fallback for an omp that predates the extension, and
+ * OMP leaves on SIGINT promptly, so the waits are short rather than generous.
+ */
 export const TAKEOVER_TIMINGS = {
-  /** For the extension to pick up the request (it polls every second). */
-  ack: 2_500,
+  /** For the extension to pick up the request (it polls every 500 ms). */
+  ack: 1_500,
   /** For an owner whose extension took the request to exit (OMP closes once its session is idle). */
   extensionExit: 10_000,
   /** After `SIGINT`, then after `SIGTERM`. */
-  sigint: 10_000,
-  sigterm: 10_000,
+  sigint: 5_000,
+  sigterm: 5_000,
   poll: 100,
 };
 
