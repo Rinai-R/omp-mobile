@@ -153,11 +153,22 @@ export interface Hello {
   features?: string[];
 }
 
-export interface Snapshot {
-  type: "snapshot";
+/**
+ * A session's transcript as the daemon sends it: a socket's `snapshot` frame
+ * and `GET /sessions/:id/transcript` (`transcript-sync` feature). `from` is the
+ * index of the first message carried (0 or absent: the whole transcript),
+ * `total` how many the daemon holds; both are absent on older daemons.
+ */
+export interface Transcript {
   session: SessionSummary;
   state: SessionState;
+  from?: number;
+  total?: number;
   messages: AgentMessage[];
+}
+
+export interface Snapshot extends Transcript {
+  type: "snapshot";
 }
 
 export interface ServerEvent {

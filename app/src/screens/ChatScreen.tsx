@@ -15,7 +15,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
-import { HttpError, SessionSocket, daemonFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
+import { HttpError, SessionSocket, daemonFeatures, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
+import { heldOf, mergeTranscript, type Held } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
@@ -33,8 +34,10 @@ import { layoutRows, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
-import { loadTranscript, saveTranscript } from "../transcripts";
+import { refreshTranscript } from "../sync";
+import { loadCached, markViewed, saveCached } from "../transcripts";
 import type {
+  AgentMessage,
   ApprovalRequest,
   ChatItem as Item,
   Machine,
@@ -104,9 +107,18 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [settled, setSettled] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const [confirmTake, setConfirmTake] = useState(false);
-  /** The daemon's snapshot has replaced whatever the saved transcript showed; from then on the items are worth saving. */
+  /** The daemon's snapshot has replaced whatever the saved transcript showed. */
   const live = useRef(false);
-  const itemsRef = useRef<Item[]>([]);
+  /** The transcript's messages as the daemon sent them (the cached copy until a snapshot merges in): what `since`/`last` describe. */
+  const messagesRef = useRef<AgentMessage[]>([]);
+  /** What the current socket was opened with, and the copy that described: a snapshot is merged against exactly these. */
+  const sentRef = useRef<{ held: Held | undefined; base: AgentMessage[] }>({ held: undefined, base: [] });
+  /** A snapshot did not fit the copy: the next connect asks for the whole transcript. */
+  const wholeRef = useRef(false);
+  /** The copy as last saved or read, to skip rewriting it when a snapshot brings nothing new. */
+  const savedStateRef = useRef<string | undefined>(undefined);
+  /** A save waiting for the screen to settle; run at once when the chat is left. */
+  const saveRef = useRef<(() => void) | null>(null);
   /** A prompt the daemon has not accepted yet, restored to the box if it refuses it. */
   const pending = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   /** Effects follow the computer by how it is reached, not by object: a rename must not reconnect. */
@@ -116,17 +128,6 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   /** The daemon's features as last fetched, read where the socket is (re)built. */
   const featuresRef = useRef<string[]>([]);
   featuresRef.current = features;
-
-  // The saved transcript shows at once, offline too, until the daemon's snapshot arrives.
-  useEffect(() => {
-    let cancelled = false;
-    void loadTranscript(machine.id, initialSession.id).then((saved) => {
-      if (!cancelled && !live.current && saved !== undefined) setItems(saved);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [initialSession.id, machine.id]);
 
   // Asked again whenever the link comes up: the computer may not have been reachable when the chat opened.
   useEffect(() => {
@@ -145,18 +146,15 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [link, connected]);
 
-  // Saved once the chat has been quiet for a moment (not on every streamed delta), and on leaving it.
-  useEffect(() => {
-    itemsRef.current = items;
-    if (!live.current || items.length === 0) return undefined;
-    const timer = setTimeout(() => saveTranscript(machine.id, initialSession.id, items), 1_500);
-    return () => clearTimeout(timer);
-  }, [initialSession.id, items, machine.id]);
+  // Leaving the chat: the pending save first, then the copy is brought up to date
+  // with what arrived live (the daemon's slim messages, not the live events).
   useEffect(
     () => () => {
-      if (live.current && itemsRef.current.length > 0) saveTranscript(machine.id, initialSession.id, itemsRef.current);
+      saveRef.current?.();
+      saveRef.current = null;
+      if (live.current) void refreshTranscript(machineRef.current, initialSession.id).catch(() => undefined);
     },
-    [initialSession.id, machine.id],
+    [initialSession.id],
   );
 
   useEffect(() => {
@@ -167,12 +165,35 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       initialSession.id,
       (message: ServerMessage) => {
         switch (message.type) {
-          case "snapshot":
+          case "snapshot": {
+            const sent = sentRef.current;
+            const merged = mergeTranscript(sent.base, sent.held, message);
+            if (merged === undefined) {
+              // It does not fit the copy it was asked against: keep showing the copy and ask for everything.
+              wholeRef.current = true;
+              socket.restart();
+              break;
+            }
             live.current = true;
+            messagesRef.current = merged;
             setSession(message.session);
             setState(message.state);
-            setItems(snapshotItems(message.messages));
+            setItems(snapshotItems(merged));
+            const state = JSON.stringify(message.state ?? null);
+            const changed = (message.from ?? 0) === 0 || message.messages.length > 0 || state !== savedStateRef.current;
+            if (changed) {
+              savedStateRef.current = state;
+              const copy = { updatedAt: message.session.updatedAt, session: message.session, state: message.state ?? null, messages: merged };
+              // After the transcript is on screen: writing a long one takes a moment.
+              const save = () => {
+                if (saveRef.current === save) saveRef.current = null;
+                saveCached(machine.id, initialSession.id, copy, true);
+              };
+              saveRef.current = save;
+              setTimeout(save, 800);
+            }
             break;
+          }
           case "event": {
             setItems((current) => applyEvent(current, message.event));
             if (message.event.type === "turn_end" || message.event.type === "agent_end") {
@@ -266,16 +287,43 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       },
       // The upgrade landed: the phone is connected, the session itself may still be starting.
       () => setOpening(true),
+      // What the phone holds, for a daemon that sends deltas; asked at every (re)connect.
+      () => {
+        const base = messagesRef.current;
+        const whole = wholeRef.current;
+        wholeRef.current = false;
+        const syncs = featuresRef.current.includes("transcript-sync") || knownFeatures(machine).includes("transcript-sync");
+        const held = whole || !syncs ? undefined : heldOf(base);
+        sentRef.current = { held, base };
+        return held;
+      },
     );
     socketRef.current = socket;
     if (featuresRef.current.includes("heartbeat")) socket.watchSilence();
-    socket.connect();
+    // The saved copy shows at once, offline too; the socket connects once it is read, so it can
+    // ask for only what is new and the snapshot never lands before the copy it extends.
+    let disposed = false;
+    void loadCached(machine.id, initialSession.id)
+      .catch(() => undefined)
+      .then((saved) => {
+        if (disposed) return;
+        if (saved !== undefined && !live.current) {
+          messagesRef.current = saved.messages;
+          savedStateRef.current = JSON.stringify(saved.state ?? null);
+          setItems(snapshotItems(saved.messages));
+          if (saved.state !== null) setState(saved.state);
+          setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
+          markViewed(machine.id, initialSession.id);
+        }
+        socket.connect();
+      });
     // Back in the foreground: reconnect now rather than at the end of a backoff.
     // A session that could not open stays down until Retry, as the error card says.
     const subscription = AppState.addEventListener("change", (next) => {
       if (next === "active" && !failedRef.current) socket.reconnect();
     });
     return () => {
+      disposed = true;
       subscription.remove();
       socket.close();
       socketRef.current = null;

@@ -59,12 +59,13 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 | Route | Answer |
 | --- | --- |
-| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user, features}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`, `features` what the daemon supports beyond protocol 1 (`prompt-images`: `prompt` frames carry images; `takeover`: `POST /sessions/:id/takeover`). The app offers a feature only to a daemon that lists it. |
+| `GET /hello` | `{name, os, version, protocol, sessionCount, cwd, user, features}`; `protocol` is `1`, `sessionCount` the live sessions, `user` the node's Tailscale login name or `null`, `features` what the daemon supports beyond protocol 1 (`prompt-images`: `prompt` frames carry images; `takeover`: `POST /sessions/:id/takeover`; `heartbeat`: a `ping` frame every 20 s; `transcript-sync`: delta snapshots and `GET /sessions/:id/transcript`). The app offers a feature only to a daemon that lists it. |
 | `GET /sessions` | `{sessions: [...]}`: live sessions, then dormant ones this daemon created, then terminal sessions. Each has `id`, `title`, `cwd`, `status` (`idle` or `streaming`), `model`, `createdAt`, `updatedAt`, `sessionFile`, `origin` (`daemon` or `omp`), `openElsewhere` when another omp process holds it with `owner` `{pid, busy, terminal}` (`busy`: mid-turn by the session file's last message; `terminal`: it has a controlling terminal), and for live sessions `waiting`: OMP questions and approvals still open. |
 | `POST /sessions` | Body `{cwd?, prompt?}`. Starts a session in `cwd` (default `--cwd`), sends `prompt` if given; `201 {session}`, `400` when `cwd` is not a directory. |
 | `GET /sessions/:id` | The session's snapshot `{session, state, messages}`, resuming it first if it is not live. `404` unknown, `410` session file gone, `409` held by another omp process (with `owner`). |
 | `POST /sessions/:id/takeover` | Body `{device?}`. Takes the session from the omp process that holds it (see Sessions), then opens it: the snapshot plus `takeover: {pid, via, waitedMs, busy, forks}`, `via` being `extension`, `SIGINT`, `SIGTERM`, `exited`, `free` (nobody held it) or `live` (already the daemon's). `504` when the holder did not exit (it keeps the session), `409` when the holder is not omp, `503` without `lsof`. Concurrent takeovers of one session share one attempt. |
-| `DELETE /sessions/:id` | Stops its OMP process and forgets it; the OMP session file stays. |
+| `GET /sessions/:id/transcript?since=&last=` | `transcript-sync`. The session's transcript `{session, state, from, total, messages}` (see delta snapshots below), **without starting an omp**: a live session answers from memory, a closed one from the transcript saved when its omp exited, while its session file still has the modification time and size it had then. Otherwise `404 {"error": "not cached"}`. |
+| `DELETE /sessions/:id` | Stops its OMP process and forgets it, and its saved transcript; the OMP session file stays. |
 | `GET /events` | The attention stream (Server-Sent Events), see below. |
 | `GET /blobs/<sha256>` | One image from OMP's content-addressed store (`<omp home>/agent/blobs`), typed from its bytes. |
 | `GET /status` | `{pid, version, startedAt, url, liveSessions, eventStreams, lastPhone}`; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
@@ -72,7 +73,11 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 ### Session socket
 
-On connect the daemon sends `{type: "snapshot", session, state, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error, owner?}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
+**Delta snapshots** (`transcript-sync`). A phone that holds the first `n` messages of a transcript connects with `?since=n&last=<fingerprint of message n-1>`, where a message's fingerprint is `${role}:${timestamp}:${toolCallId ?? responseId ?? ""}`. When the daemon's message `n-1` has that fingerprint, the snapshot carries only the messages after it: `from` is the index of its first message (`0`: the whole transcript) and `total` how many the daemon holds. Anything else (no parameters, a different message there, more than the daemon holds) gets everything with `from: 0`.
+
+**Saved transcripts.** When a session's omp exits (the idle reaper, the daemon stopping, omp leaving on its own), its slim messages, state and summary are written to `transcripts/<id>.json` next to the registry (`~/.omp-mobile/transcripts/`), with the session file's modification time and size. `/transcript` serves one only while the file still has them; anything that writes the session since (a terminal omp) makes it stale. Records whose session was quiet for 24 hours, or that went stale, are deleted when the daemon starts; nothing is evicted by count.
+
+On connect the daemon sends `{type: "snapshot", session, state, from, total, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error, owner?}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
 
 | From the daemon | Meaning |
 | --- | --- |
@@ -133,7 +138,7 @@ The app's text lives in two catalogs, `app/src/i18n/en.ts` and `app/src/i18n/zh-
 ## Phone storage
 
 - Paired machines and settings: AsyncStorage.
-- Each session's transcript (the last 400 items, tool arguments and output cut to 4 000 characters, the 40 most recently saved sessions) and each machine's session list, under `<documents>/transcripts/`. A reopen shows them at once, also offline, until the daemon's snapshot arrives. Deleting a session drops its transcript; removing a machine drops everything kept for it.
+- A copy of every session active in the last 24 hours (its `updatedAt`, or when it was last viewed on the phone; no count limit): the daemon's slim messages, state and session summary (`c-*.json`), an index of how current each copy is (`index.json`), and each machine's session list (`s-*.json`), under `<documents>/transcripts/`. A chat renders from its copy at once (transcript, model, todos), also offline, then connects with `since`/`last` and merges the snapshot at its `from`; a snapshot that does not fit the copy is asked for again whole. With a daemon that offers `transcript-sync`, the home keeps the copies current without opening them: after each session-list load, every 60 s in the foreground (the list is refreshed quietly first), on return to the foreground and when a chat is left, each copy older than its session is extended with `GET /sessions/:id/transcript?since&last`, one request at a time; a `404` is skipped for 5 minutes. Copies of sessions quiet for 24 hours, and the item caches of 0.4 (`t-*`), are deleted. Writes are best effort and a damaged file reads as no copy. Deleting a session drops its copy; removing a machine drops everything kept for it.
 
 ## Not covered
 

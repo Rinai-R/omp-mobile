@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createSession, deleteSession } from "../api";
 import { GradientFill, LiveDot, PulseDot, Wordmark } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
-import { SessionGroups, useMachineSessions } from "../components/SessionList";
+import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
 import { displayName } from "../machines";
 import { Banner, Button, ConfirmSheet, Field, IconButton, Sheet } from "../components/ui";
 import { reasonText, type Probe } from "../probe";
@@ -32,6 +32,7 @@ export function HomeScreen({ machine, probe, onOpen, onPickMachine, onSettings, 
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sessions, loading, error, refresh, setSessions } = useMachineSessions(machine);
+  useTranscriptSync(machine, sessions, refresh);
   const [creating, setCreating] = useState(false);
   const [cwd, setCwd] = useState("");
   const [busy, setBusy] = useState(false);

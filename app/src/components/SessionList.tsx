@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { listSessions } from "../api";
 import { age, folderOf, type SessionGroup } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { heldDetail } from "../takeover";
+import { syncSessions } from "../sync";
 import { loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
@@ -27,10 +28,11 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
   machineRef.current = machine;
   const link = machine === undefined ? "" : `${machine.id}\n${machine.url}\n${machine.token}`;
 
-  const refresh = useCallback(async () => {
+  /** Ask the daemon again; `quiet` (a background refresh) shows no spinner. */
+  const refresh = useCallback(async (quiet = false) => {
     const machine = machineRef.current;
     if (machine === undefined) return;
-    setLoading(true);
+    if (!quiet) setLoading(true);
     // An answer for a computer no longer shown (a tab switched while it was in flight) is dropped.
     const current = () => machineRef.current?.id === machine.id;
     try {
@@ -43,7 +45,7 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
     } catch (cause) {
       if (current()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (current()) setLoading(false);
+      if (current() && !quiet) setLoading(false);
     }
     // `link` changes only when the computer or how to reach it does.
   }, [link]);
@@ -64,6 +66,45 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
   }, [active, machineId, refresh]);
 
   return { sessions, loading, error, refresh, setSessions };
+}
+
+/** How often the home refreshes its list, and with it the cached transcripts, while the app is in the foreground. */
+const SYNC_INTERVAL_MS = 60_000;
+
+/**
+ * Keep the cached transcripts of a computer's recent sessions current
+ * (issue #43): after each session-list load, every 60 s while the app is in
+ * the foreground (the list is asked again quietly first), and when the app
+ * comes back to the foreground.
+ */
+export function useTranscriptSync(
+  machine: Machine,
+  sessions: readonly SessionSummary[] | undefined,
+  refresh: (quiet?: boolean) => Promise<void>,
+): void {
+  const machineRef = useRef(machine);
+  machineRef.current = machine;
+  const link = `${machine.id}\n${machine.url}\n${machine.token}`;
+  useEffect(() => {
+    if (sessions === undefined) return undefined;
+    let current = true;
+    void syncSessions(machineRef.current, sessions, () => current && AppState.currentState !== "background");
+    return () => {
+      current = false;
+    };
+  }, [link, sessions]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (AppState.currentState === "active") void refresh(true);
+    }, SYNC_INTERVAL_MS);
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void refresh(true);
+    });
+    return () => {
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [refresh]);
 }
 
 export function SessionRow({
