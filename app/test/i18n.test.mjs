@@ -12,7 +12,7 @@ import {
   t,
   translate,
 } from "../src/i18n/index.ts";
-import { activitySummary } from "../src/rows.ts";
+import { activityLabel, turnLabel } from "../src/rows.ts";
 import { age } from "../src/sessionGroups.ts";
 
 const en = CATALOGS.en;
@@ -89,7 +89,9 @@ test("switching the language tells subscribers and changes composed text", () =>
     assert.equal(t("group.waiting"), "需要你");
     const read = (id, path) => ({ kind: "tool", tool: { kind: "tool", id, name: "read", args: { path }, status: "done" } });
     const run = (id) => ({ kind: "tool", tool: { kind: "tool", id, name: "bash", args: { command: "ls" }, status: "done" } });
-    assert.equal(activitySummary([run("a"), run("b"), read("c", "/a"), read("d", "/b")]), "运行了 2 条命令，读取 2 个");
+    assert.equal(activityLabel([run("a"), run("b"), read("c", "/a"), read("d", "/b")]), "执行了命令、读取了文件");
+    assert.equal(turnLabel({ end: "done", startedAt: 0, endedAt: 192_000 }), "已完成，用时 3分12秒");
+    assert.equal(turnLabel({ end: "failed", startedAt: 0, endedAt: 1 }), "处理失败");
     const now = new Date(2026, 9, 24, 12).getTime();
     assert.equal(age(now - 5 * 60_000, now), "5分钟");
     assert.equal(age(new Date(2026, 8, 3).getTime(), now), "9月3日");

@@ -1,54 +1,117 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  activitySummary,
+  activityLabel,
+  clockTime,
   duration,
   editCounts,
+  gapBefore,
   layoutRows,
+  liveLabel,
   liveStep,
   shortPath,
   stepStat,
   stepTarget,
   stepTitle,
   toolKind,
+  toolSummaryLine,
+  toolTitle,
+  turnDuration,
+  turnLabel,
 } from "../src/rows.ts";
 
-const user = (id, text) => ({ kind: "message", id, role: "user", text });
+const user = (id, text, extra = {}) => ({ kind: "message", id, role: "user", text, ...extra });
 const reply = (id, text, extra = {}) => ({ kind: "message", id, role: "assistant", text, ...extra });
 const tool = (id, name, args, extra = {}) => ({ kind: "tool", id, name, args, status: "done", ...extra });
 
-test("a turn is a header, its prose, and each stretch of tools as one activity", () => {
+test("a turn is a divider, its work rows, its prose and a tail", () => {
   const rows = layoutRows([
     user("u1", "Fix the test"),
     reply("r1", "", { thinking: "look first" }),
     tool("t1", "read", { path: "/a.ts" }),
     tool("t2", "grep", { pattern: "x" }),
-    reply("r2", "Found it."),
-    tool("t3", "edit", { path: "/a.ts" }, { status: "running" }),
-    reply("r3", "", { thinking: "now run", streaming: true }),
+    reply("r2", "Found it.", { thinking: "it is the import" }),
+    tool("t3", "edit", { path: "/a.ts" }),
+    reply("r3", "Fixed."),
   ]);
   assert.deepEqual(
     rows.map((row) => `${row.kind}:${row.id}`),
-    ["user:u1", "turn:turn:r1", "activity:act:r1", "reply:r2", "activity:act:t3", "reply:r3"],
+    ["user:u1", "turn:turn:r1", "activity:act:r1", "thinking:think:r2", "reply:r2", "activity:act:t3", "reply:r3", "tail:tail:turn:r1"],
   );
-  const first = rows[2];
-  assert.equal(first.kind, "activity");
   assert.deepEqual(
-    first.steps.map((step) => step.kind),
+    rows[2].steps.map((step) => step.kind),
     ["thought", "tool", "tool"],
     "thinking that only leads into a tool call belongs to the stretch",
   );
-  assert.equal(first.running, false);
-  assert.equal(rows[4].running, true);
-  assert.equal(rows[5].kind, "reply", "thinking at the end of the transcript stays a reply: it may become an answer");
+  for (const row of rows.filter((row) => row.kind === "activity" || row.kind === "thinking")) assert.equal(row.turn, "turn:r1");
+  assert.equal(rows[1].members, 3);
+  assert.equal(rows.at(-1).text, "Found it.\n\nFixed.", "the tail copies the whole reply");
 });
 
-test("each user message starts a new turn with its own header", () => {
+test("a running turn has no tail and says what it is doing", () => {
+  const streaming = layoutRows([user("u1", "go"), reply("r1", "", { thinking: "hmm", streaming: true })]);
+  assert.deepEqual(streaming.map((row) => row.kind), ["user", "turn", "thinking"]);
+  assert.equal(streaming[1].running, true);
+  assert.deepEqual(streaming[1].live, { kind: "thinking" });
+  const between = layoutRows([user("u1", "go"), tool("t1", "bash", { command: "ls" })], true);
+  assert.equal(between[1].running, true, "OMP working between events keeps the last turn running");
+  assert.deepEqual(between[1].live, { kind: "working" });
+  const running = layoutRows([user("u1", "go"), tool("t1", "bash", { command: "ls" }, { status: "running", intent: "Listing files" })]);
+  assert.equal(running[1].live.kind, "tool");
+  assert.equal(liveLabel(running[1].live), "Listing files");
+  assert.equal(liveLabel({ kind: "tool", tool: tool("t", "bash", {}, { status: "running" }) }), "Running a command");
+  const earlier = layoutRows([user("u1", "a"), reply("r1", "b"), user("u2", "c")], true);
+  assert.equal(earlier[1].running, false, "only the last turn runs");
+});
+
+test("a turn's time runs from the user's message to its last item", () => {
+  const rows = layoutRows([
+    user("u1", "go", { createdAt: 1_000 }),
+    tool("t1", "bash", { command: "ls" }, { endedAt: 60_000 }),
+    reply("r1", "done", { createdAt: 62_000 }),
+    reply("r2", "really", { createdAt: 70_000, endedAt: 193_000 }),
+  ]);
+  const turn = rows[1];
+  assert.equal(turn.startedAt, 1_000);
+  assert.equal(turn.endedAt, 193_000);
+  assert.equal(turnLabel(turn), "Done in 3m 12s");
+  assert.equal(rows.at(-1).at, 193_000);
+  assert.equal(turnLabel({ end: "done" }), "Done", "no times, no duration");
+  assert.equal(turnDuration(400), "1s");
+  assert.equal(turnDuration(48_000), "48s");
+  assert.equal(turnDuration(3_725_000), "1h 2m");
+});
+
+test("a turn that ended on an error or a stop says so", () => {
+  const failed = layoutRows([user("u1", "go"), reply("r1", "", { stop: "error", error: "overloaded" })]);
+  assert.deepEqual(failed.map((row) => row.kind), ["user", "turn", "error"]);
+  assert.equal(failed[1].end, "failed");
+  assert.equal(turnLabel(failed[1]), "Failed");
+  const stopped = layoutRows([user("u1", "go"), reply("r1", "Half an ans", { stop: "aborted" })]);
+  assert.equal(turnLabel(stopped[1]), "Stopped");
+});
+
+test("each user message starts a new turn with its own divider", () => {
   const rows = layoutRows([user("u1", "a"), reply("r1", "b"), user("u2", "c"), reply("r2", "d")]);
   assert.deepEqual(
     rows.map((row) => row.kind),
-    ["user", "turn", "reply", "user", "turn", "reply"],
+    ["user", "turn", "reply", "tail", "user", "turn", "reply", "tail"],
   );
+});
+
+test("rows keep one rhythm: tight work rows, room around prose and between turns", () => {
+  const rows = layoutRows([
+    user("u1", "a"),
+    tool("t1", "bash", { command: "x" }),
+    reply("r1", "", { thinking: "t" }),
+    reply("r2", "b"),
+    user("u2", "c"),
+  ]);
+  assert.deepEqual(
+    rows.map((row) => `${row.kind}:${row.gap}`),
+    ["user:0", "turn:14", "activity:12", "thinking:6", "reply:10", "tail:6", "user:28"],
+  );
+  assert.equal(gapBefore("reply", "turn"), 14);
 });
 
 test("a notice ends a stretch and failed steps are counted", () => {
@@ -68,6 +131,12 @@ test("activity ids stay stable while the stretch grows", () => {
   const before = layoutRows([tool("t1", "read", {})]);
   const after = layoutRows([tool("t1", "read", {}), tool("t2", "read", {})]);
   assert.equal(before[1].id, after[1].id);
+});
+
+test("the time under a turn is the clock today, with the date on other days", () => {
+  const now = new Date(2026, 9, 25, 20, 0).getTime();
+  assert.equal(clockTime(new Date(2026, 9, 25, 9, 5).getTime(), now), "09:05");
+  assert.equal(clockTime(new Date(2026, 9, 24, 19, 31).getTime(), now), "10/24 19:31");
 });
 
 test("step titles prefer OMP's intent line, else describe the call", () => {
@@ -112,19 +181,28 @@ test("durations read like a stopwatch", () => {
   assert.equal(duration(63_000), "1m 03s");
 });
 
-test("a finished stretch summarizes the most consequential work first", () => {
+test("an activity names the kinds of work, not how many calls", () => {
   const steps = [
     { kind: "tool", tool: tool("1", "read", { path: "/a" }) },
-    { kind: "tool", tool: tool("2", "read", { path: "/a" }) },
+    { kind: "tool", tool: tool("2", "edit", { path: "/a" }) },
     { kind: "tool", tool: tool("3", "read", { path: "/b" }) },
-    { kind: "tool", tool: tool("4", "edit", { path: "/a" }) },
-    { kind: "tool", tool: tool("5", "edit", { path: "/a" }) },
-    { kind: "tool", tool: tool("6", "bash", { command: "x" }) },
-    { kind: "tool", tool: tool("7", "bash", { command: "y" }) },
+    { kind: "tool", tool: tool("4", "bash", { command: "x" }) },
   ];
-  assert.equal(activitySummary(steps), "Edited a file, ran 2, read 2");
-  assert.equal(activitySummary([{ kind: "tool", tool: tool("1", "bash", {}) }]), "Ran a command");
-  assert.equal(activitySummary([{ kind: "thought", item: reply("r", "", { thinking: "x" }) }]), "Thought it through");
+  assert.equal(activityLabel(steps), "Read files, edited files, ran commands");
+  assert.equal(activityLabel([{ kind: "tool", tool: tool("1", "bash", {}) }]), "Ran commands");
+  assert.equal(
+    activityLabel([...steps, { kind: "tool", tool: tool("5", "grep", { pattern: "x" }) }]),
+    "Read files, edited files, ran commands and more",
+  );
+  assert.equal(activityLabel([{ kind: "thought", item: reply("r", "", { thinking: "x" }) }]), "Thought");
+});
+
+test("a tool row reads as its kind and what it acted on", () => {
+  assert.equal(toolTitle(tool("t", "bash", { command: "ls -la" })), "Run");
+  assert.equal(toolSummaryLine(tool("t", "bash", { command: "ls -la" })), "ls -la");
+  assert.equal(toolTitle(tool("t", "mystery", {})), "mystery");
+  assert.equal(toolSummaryLine(tool("t", "mystery", {}, { intent: "Doing a thing" })), "Doing a thing");
+  assert.equal(toolSummaryLine(tool("t", "todo", {})), undefined);
 });
 
 test("the live step is the last running call", () => {
