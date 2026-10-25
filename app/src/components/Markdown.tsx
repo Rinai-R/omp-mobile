@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { parseInline, parseMarkdown, type Align, type Block, type Inline, type ListItem } from "../markdown";
-import { columnWidths, type Run } from "../tableLayout";
+import { columnWidths, shrinkColumns, type Run } from "../tableLayout";
 import { t } from "../i18n/index.ts";
 import { SANS, MONO, SCALE, radius, useColors, useStyles, type Palette } from "../theme";
 import { CheckGlyph, CopyGlyph, WrapGlyph } from "./icons";
@@ -434,10 +434,20 @@ function TableBlock({ block, styles }: { block: Extract<Block, { kind: "table" }
     return natural.map((width, column) => width - (column === 0 ? styles.table.side : 0) - (column === natural.length - 1 ? styles.table.side : 0));
   }, [parsed, styles]);
   const scroll = useMoreRight();
+  const [available, setAvailable] = useState(0);
+  const onLayout = scroll.onLayout;
+  const measure = useCallback(
+    (event: LayoutChangeEvent) => {
+      setAvailable(Math.floor(event.nativeEvent.layout.width));
+      onLayout(event);
+    },
+    [onLayout],
+  );
+  const sized = shrinkColumns(widths, available);
   const align = (column: number): Align => block.aligns[column] ?? "left";
   const last = parsed.header.length - 1;
   const cell = (column: number) => [
-    { width: widths[column], textAlign: align(column) },
+    { width: sized[column], textAlign: align(column) },
     column === 0 && styles.cellFirst,
     column === last && styles.cellLast,
   ];
@@ -448,7 +458,7 @@ function TableBlock({ block, styles }: { block: Extract<Block, { kind: "table" }
         showsHorizontalScrollIndicator={false}
         bounces={false}
         nestedScrollEnabled
-        onLayout={scroll.onLayout}
+        onLayout={measure}
         onContentSizeChange={scroll.onContentSizeChange}
         onScroll={scroll.onScroll}
         scrollEventThrottle={32}

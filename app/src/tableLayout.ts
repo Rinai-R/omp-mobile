@@ -80,3 +80,16 @@ export function fitColumns(widths: number[], available: number): number[] {
   fitted[fitted.length - 1] = (fitted[fitted.length - 1] ?? 0) + Math.max(0, rest);
   return fitted;
 }
+
+/**
+ * Widths pulled in to `available` when they overshoot it by no more than
+ * `slack` (a share of it): the estimate errs wide, and a table that nearly fits
+ * reads better whole than scrolled a few points. Wider tables keep their
+ * widths and scroll.
+ */
+export function shrinkColumns(widths: number[], available: number, slack = 0.15): number[] {
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  if (available <= 0 || total <= available || total > available * (1 + slack)) return widths;
+  const scale = available / total;
+  return widths.map((width) => Math.floor(width * scale));
+}

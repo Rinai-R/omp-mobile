@@ -48,3 +48,10 @@ test("wide characters take their own width when the metrics give one", () => {
   assert.equal(cellWidth("时间ab", cjk), 2 * 10 + 2 * 7);
   assert.equal(cellWidth("时间ab", metrics), 4 * 7 + 2 * 7);
 });
+
+test("a table that nearly fits is pulled in; a wide one keeps its widths", async () => {
+  const { shrinkColumns } = await import("../src/tableLayout.ts");
+  assert.deepEqual(shrinkColumns([200, 200], 380), [190, 190]);
+  assert.deepEqual(shrinkColumns([300, 300], 380), [300, 300]);
+  assert.deepEqual(shrinkColumns([100, 100], 380), [100, 100], "a narrow table is not stretched");
+});
