@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
-import { diffLines, editInput, editSides, type DiffLine } from "../diff";
+import { editDiff } from "../diff";
 import { resultText } from "../messages";
 import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -28,27 +28,6 @@ function restArgs(args: unknown): unknown {
   delete rest.i;
   delete rest.command;
   return Object.keys(rest).length === 0 ? undefined : rest;
-}
-
-/** An edit's lines: OMP's own result diff, the call's two sides diffed, or its preformatted input. */
-function editDiff(args: unknown, result: unknown): DiffLine[] | undefined {
-  const details = result !== null && typeof result === "object" ? (result as { details?: { diff?: unknown } }).details : undefined;
-  if (typeof details?.diff === "string" && details.diff.trim() !== "") {
-    return details.diff.split("\n").map((line): DiffLine => {
-      if (/^\+\s*\d+\|/.test(line)) return { kind: "add", text: line.slice(1) };
-      if (/^-\s*\d+\|/.test(line)) return { kind: "remove", text: line.slice(1) };
-      return { kind: "same", text: line.replace(/^ /, "") };
-    });
-  }
-  const sides = editSides(args);
-  if (sides !== undefined) return diffLines(sides.before, sides.after);
-  const input = editInput(args);
-  if (input === undefined) return undefined;
-  return input.split("\n").map((line): DiffLine => {
-    if (line.startsWith("+")) return { kind: "add", text: line.slice(1) };
-    if (line.startsWith("-")) return { kind: "remove", text: line.slice(1) };
-    return { kind: "same", text: line };
-  });
 }
 
 /** Long outputs are cut so the sheet stays responsive; the computer keeps the whole result. */
