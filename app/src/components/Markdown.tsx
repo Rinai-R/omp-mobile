@@ -2,6 +2,7 @@ import * as Clipboard from "expo-clipboard";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Linking,
+  PixelRatio,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,10 +15,10 @@ import {
 } from "react-native";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 import { parseInline, parseMarkdown, type Align, type Block, type Inline, type ListItem } from "../markdown";
-import { columnWidths, fitColumns, type Run } from "../tableLayout";
+import { columnWidths, type Run } from "../tableLayout";
 import { t } from "../i18n/index.ts";
-import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
-import { CheckGlyph, CopyGlyph } from "./icons";
+import { SANS, MONO, SCALE, radius, useColors, useStyles, type Palette } from "../theme";
+import { CheckGlyph, CopyGlyph, WrapGlyph } from "./icons";
 
 /**
  * Renders the blocks `parseMarkdown` produces: a reply's prose at reading size,
@@ -32,8 +33,10 @@ type Styles = ReturnType<typeof createReplyStyles>;
 
 interface Context {
   styles: Styles;
-  /** Inside a block quote: prose takes the quote's quieter colour. */
+  /** Inside a block quote. */
   quoted: boolean;
+  /** Inside a done task: prose takes a quieter colour. */
+  dim?: boolean;
   /** Inside a list item: a nested list sits close under the item's text. */
   inItem?: boolean;
 }
@@ -118,8 +121,9 @@ function spaceBefore(block: Block, previous: Block | undefined, ctx: Context): n
   if (previous === undefined) return 0;
   const { space } = ctx.styles;
   if (ctx.inItem === true && block.kind === "list" && previous.kind === "paragraph") return space.nested;
-  if (block.kind === "heading") return space.heading;
-  if (previous.kind === "heading") return space.afterHeading;
+  if (block.kind === "rule" || previous.kind === "rule") return space.rule;
+  if (block.kind === "heading") return block.level <= 3 ? space.heading : space.block;
+  if (previous.kind === "heading") return block.kind === "list" && previous.level >= 4 ? space.nested * 2 : space.afterHeading;
   return space.block;
 }
 
@@ -133,7 +137,11 @@ function Blocks({ blocks, ctx, tail }: { blocks: Block[]; ctx: Context; tail?: R
           <BlockView block={block} ctx={ctx} tail={index === last && inline ? tail : undefined} />
         </View>
       ))}
-      {tail !== undefined && !inline ? <Text style={[ctx.styles.paragraph, last >= 0 && { marginTop: ctx.styles.space.nested }]}>{tail}</Text> : null}
+      {tail !== undefined && !inline ? (
+        <Text style={[ctx.styles.paragraph, last >= 0 && { marginTop: ctx.styles.space.nested }]} maxFontSizeMultiplier={ctx.styles.scale.body}>
+          {tail}
+        </Text>
+      ) : null}
     </>
   );
 }
@@ -143,14 +151,14 @@ function BlockViewImpl({ block, ctx, tail }: { block: Block; ctx: Context; tail?
   switch (block.kind) {
     case "paragraph":
       return (
-        <Text style={ctx.quoted ? styles.quoteText : styles.paragraph} selectable>
+        <Text style={ctx.dim === true ? styles.dimText : styles.paragraph} selectable maxFontSizeMultiplier={styles.scale.body}>
           {renderInline(parseInline(block.text), styles)}
           {tail}
         </Text>
       );
     case "heading":
       return (
-        <Text style={styles[`h${block.level}`]} selectable accessibilityRole="header">
+        <Text style={styles[`h${block.level}`]} selectable accessibilityRole="header" maxFontSizeMultiplier={styles.scale.heading}>
           {renderInline(parseInline(block.text), styles)}
           {tail}
         </Text>
@@ -185,6 +193,7 @@ const BlockView = memo(
     prev.ctx.styles === next.ctx.styles &&
     prev.ctx.quoted === next.ctx.quoted &&
     prev.ctx.inItem === next.ctx.inItem &&
+    prev.ctx.dim === next.ctx.dim &&
     prev.tail === next.tail &&
     (prev.block === next.block || JSON.stringify(prev.block) === JSON.stringify(next.block)),
 );
@@ -192,7 +201,7 @@ const BlockView = memo(
 const BULLETS = ["•", "◦", "▪"];
 
 function itemCtx(ctx: Context, done: boolean): Context {
-  return { ...ctx, inItem: true, quoted: ctx.quoted || done };
+  return { ...ctx, inItem: true, dim: ctx.dim === true || done };
 }
 
 function ListBlock({ block, ctx, tail }: { block: Extract<Block, { kind: "list" }>; ctx: Context; tail?: ReactNode }): ReactNode {
@@ -200,7 +209,7 @@ function ListBlock({ block, ctx, tail }: { block: Extract<Block, { kind: "list" 
   const depth = useListDepth();
   const lastNumber = block.start + block.items.length - 1;
   // Wide enough for the longest number, so the items' text lines up.
-  const markerWidth = block.ordered ? Math.max(18, String(lastNumber).length * styles.digitWidth + styles.digitWidth) : 16;
+  const markerWidth = block.ordered ? Math.max(18, String(lastNumber).length * styles.digitWidth + styles.digitWidth) : 18;
   return (
     <ListDepth value={depth + 1}>
       <View style={styles.list}>
@@ -249,13 +258,13 @@ function ItemMarker({
         accessibilityLabel={item.checked ? t("markdown.taskDone") : t("markdown.taskOpen")}
       >
         <View style={item.checked ? styles.taskOn : styles.task}>
-          {item.checked ? <CheckGlyph size={11} color={colors.accentFg} /> : null}
+          {item.checked ? <CheckGlyph size={11} color={colors.bg} /> : null}
         </View>
       </View>
     );
   }
   return (
-    <Text style={[ordered ? styles.number : styles.bullet, { width }]} importantForAccessibility="no">
+    <Text style={[ordered ? styles.number : styles.bullet, { width }]} importantForAccessibility="no" maxFontSizeMultiplier={styles.scale.body}>
       {label}
     </Text>
   );
@@ -323,14 +332,14 @@ function EdgeFade({ color, width = 32 }: { color: string; width?: number }): Rea
 }
 
 /**
- * A fenced code block: a soft surface, no title bar. A language, when the
- * fence names one, is a small tag above the code; the copy action sits at the
- * top right either way. Long lines scroll sideways, and a fade at the edge
- * says so.
+ * A fenced code block: a soft rounded panel. Its header, on the same fill,
+ * names the language (or just "Code") and holds a wrap toggle and copy. Lines
+ * wrap by default; unwrapped they scroll sideways under a fade at the edge.
  */
 function CodeBlock({ lang, text, styles }: { lang: string; text: string; styles: Styles }): ReactNode {
   const colors = useColors();
   const [copied, setCopied] = useState(false);
+  const [wrap, setWrap] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = useCallback(() => {
@@ -338,60 +347,69 @@ function CodeBlock({ lang, text, styles }: { lang: string; text: string; styles:
       .then(() => {
         setCopied(true);
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(false), 1_600);
+        timer.current = setTimeout(() => setCopied(false), 1_200);
       })
       .catch(() => undefined);
   }, [text]);
   const scroll = useMoreRight();
-  const tagged = lang !== "";
-  const button = (
-    <Pressable
-      onPress={copy}
-      hitSlop={8}
-      style={({ pressed }) => [styles.copy, pressed && styles.copyPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={copied ? t("markdown.copied") : t("markdown.copyCode")}
-    >
-      {copied ? <CheckGlyph size={13} color={colors.ok} /> : <CopyGlyph size={13} color={colors.fgFaint} />}
-    </Pressable>
+  const code = (
+    <Text style={styles.codeText} selectable maxFontSizeMultiplier={styles.scale.code}>
+      {text === "" ? " " : text}
+    </Text>
   );
   return (
     <View style={styles.codeBox}>
-      {tagged ? (
-        <View style={styles.codeHead}>
-          <Text style={styles.codeLang} numberOfLines={1}>
-            {lang}
-          </Text>
-          {button}
-        </View>
-      ) : null}
-      <View style={styles.codeBody}>
-        <View style={styles.codeLines}>
+      <View style={styles.codeHead}>
+        <Text style={styles.codeLang} numberOfLines={1} maxFontSizeMultiplier={SCALE.ui}>
+          {lang !== "" ? lang : t("markdown.code")}
+        </Text>
+        <Pressable
+          onPress={() => setWrap((value) => !value)}
+          hitSlop={6}
+          style={({ pressed }) => [wrap ? styles.codeButtonOn : styles.codeButton, pressed && styles.codeButtonPressed]}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: wrap }}
+          accessibilityLabel={t("markdown.wrap")}
+        >
+          <WrapGlyph size={14} color={wrap ? colors.fgMuted : colors.fgFaint} />
+        </Pressable>
+        <Pressable
+          onPress={copy}
+          hitSlop={6}
+          style={({ pressed }) => [styles.codeButton, pressed && styles.codeButtonPressed]}
+          accessibilityRole="button"
+          accessibilityLabel={copied ? t("markdown.copied") : t("markdown.copyCode")}
+        >
+          {copied ? <CheckGlyph size={14} color={colors.ok} /> : <CopyGlyph size={14} color={colors.fgFaint} />}
+        </Pressable>
+      </View>
+      {wrap ? (
+        <View style={styles.codeWrapped}>{code}</View>
+      ) : (
+        <View>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={tagged ? styles.codeScrollTagged : styles.codeScroll}
+            contentContainerStyle={styles.codeScroll}
             onLayout={scroll.onLayout}
             onContentSizeChange={scroll.onContentSizeChange}
             onScroll={scroll.onScroll}
             scrollEventThrottle={32}
           >
-            <Text style={styles.codeText} selectable>
-              {text === "" ? " " : text}
-            </Text>
+            {code}
           </ScrollView>
           {scroll.more ? <EdgeFade color={colors.codeBg} width={24} /> : null}
         </View>
-        {tagged ? null : <View style={styles.copyColumn}>{button}</View>}
-      </View>
+      )}
     </View>
   );
 }
 
 /**
- * A pipe table, a step smaller than the prose: a quiet header, hairline rules
- * between rows, columns sized to their text within a minimum and a maximum.
- * A wide table scrolls sideways under a fade at its right edge.
+ * A pipe table, a step smaller than the prose: horizontal hairlines only (a
+ * firmer one under the header), roomy cells, the first and last columns flush
+ * with the prose. Columns take their text's width within a minimum and a
+ * maximum, and a wide table scrolls sideways under a fade at its right edge.
  */
 function TableBlock({ block, styles }: { block: Extract<Block, { kind: "table" }>; styles: Styles }): ReactNode {
   const colors = useColors();
@@ -399,54 +417,60 @@ function TableBlock({ block, styles }: { block: Extract<Block, { kind: "table" }
     () => ({ header: block.header.map((cell) => parseInline(cell)), rows: block.rows.map((row) => row.map((cell) => parseInline(cell))) }),
     [block],
   );
-  const widths = useMemo(
-    () => columnWidths(parsed.header.map(runs), parsed.rows.map((row) => row.map(runs)), styles.table),
-    [parsed, styles],
-  );
-  const [available, setAvailable] = useState(0);
+  const widths = useMemo(() => {
+    // The text grows with the system font size up to the table's cap; so do the columns.
+    const k = Math.min(Math.max(1, PixelRatio.getFontScale()), styles.scale.table);
+    const metrics = {
+      ...styles.table,
+      charWidth: styles.table.charWidth * k,
+      wideWidth: styles.table.wideWidth * k,
+      monoWidth: styles.table.monoWidth * k,
+      maxColumn: styles.table.maxColumn * k,
+    };
+    const natural = columnWidths(parsed.header.map(runs), parsed.rows.map((row) => row.map(runs)), metrics);
+    // The outer columns drop their outer padding.
+    return natural.map((width, column) => width - (column === 0 ? styles.table.side : 0) - (column === natural.length - 1 ? styles.table.side : 0));
+  }, [parsed, styles]);
   const scroll = useMoreRight();
-  const onLayout = scroll.onLayout;
-  const measure = useCallback(
-    (event: LayoutChangeEvent) => {
-      setAvailable(Math.round(event.nativeEvent.layout.width));
-      onLayout(event);
-    },
-    [onLayout],
-  );
-  // The box draws a hairline on both sides; the columns fill what is inside it.
-  const sized = fitColumns(widths, available - 2 * StyleSheet.hairlineWidth - 1);
   const align = (column: number): Align => block.aligns[column] ?? "left";
+  const last = parsed.header.length - 1;
+  const cell = (column: number) => [
+    { width: widths[column], textAlign: align(column) },
+    column === 0 && styles.cellFirst,
+    column === last && styles.cellLast,
+  ];
   return (
     <View>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         bounces={false}
-        onLayout={measure}
+        nestedScrollEnabled
+        onLayout={scroll.onLayout}
         onContentSizeChange={scroll.onContentSizeChange}
         onScroll={scroll.onScroll}
         scrollEventThrottle={32}
       >
-        <View style={styles.tableBox}>
+        <View>
           <View style={styles.tableHead}>
-            {parsed.header.map((cell, column) => (
-              <Text key={column} style={[styles.tableHeadCell, { width: sized[column], textAlign: align(column) }]} selectable>
-                {renderInline(cell, styles, "c", styles.tableCode)}
+            {parsed.header.map((value, column) => (
+              <Text key={column} style={[styles.tableHeadCell, ...cell(column)]} selectable maxFontSizeMultiplier={styles.scale.table}>
+                {renderInline(value, styles, "c", styles.tableCode)}
               </Text>
             ))}
           </View>
           {parsed.rows.map((row, rowIndex) => (
-            <View key={rowIndex} style={rowIndex === 0 ? styles.tableRow : [styles.tableRow, styles.tableRule]}>
-              {row.map((cell, column) => (
-                <Text key={column} style={[styles.tableCell, { width: sized[column], textAlign: align(column) }]} selectable>
-                  {renderInline(cell, styles, "c", styles.tableCode)}
+            <View key={rowIndex} style={styles.tableRow}>
+              {row.map((value, column) => (
+                <Text key={column} style={[styles.tableCell, ...cell(column)]} selectable maxFontSizeMultiplier={styles.scale.table}>
+                  {renderInline(value, styles, "c", styles.tableCode)}
                 </Text>
               ))}
             </View>
           ))}
         </View>
       </ScrollView>
-      {scroll.more ? <EdgeFade color={colors.panel} width={40} /> : null}
+      {scroll.more ? <EdgeFade color={colors.bg} width={40} /> : null}
     </View>
   );
 }
@@ -465,147 +489,123 @@ function MarkdownImpl({ text, caret, variant = "reply" }: { text: string; caret?
 export const Markdown = memo(MarkdownImpl);
 
 /**
- * Type for a chat on a phone: 15/24 body (1.6, so mixed Chinese and Latin
- * lines do not crowd), headings only a step or two above it in one weight,
- * tables two steps below it and code a little smaller still, in JetBrains Mono.
- * CJK falls back to the system face inside the same line height. Blocks follow
- * one vertical step (`space.block`), headings a step and a half above.
+ * Type for a chat on a phone: 15/24 prose (mixed Chinese and Latin lines need
+ * the room), headings in one weight a few steps above it with generous space
+ * over them, list items close together, tables two steps below the prose and
+ * code smaller still, in JetBrains Mono. `quiet` is a thought's compact form:
+ * 13/20 and grey, its headings only bold.
  */
-function createStyles(c: Palette, size: number, line: number, quiet: boolean) {
+function createStyles(c: Palette, quiet: boolean) {
+  const size = quiet ? 13 : 15;
+  const line = quiet ? 20 : 24;
   const fg = quiet ? c.fgFaint : c.fg;
   const body = { fontFamily: SANS, fontSize: size, lineHeight: line, color: fg } as const;
   const heading = { fontFamily: SANS, fontWeight: "600", color: quiet ? c.fgMuted : c.fg } as const;
-  const k = size / 15;
-  const half = (n: number) => Math.round(n * k * 2) / 2;
-  const codeSize = half(12.5);
-  const tableSize = half(13);
+  const minor = { ...heading, fontSize: size, lineHeight: line } as const;
+  const tableSize = quiet ? 12 : 13;
+  const side = quiet ? 8 : 16;
   const task = {
     width: 15,
     height: 15,
-    borderRadius: 4.5,
+    borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1.5,
-    borderColor: c.borderStrong,
+    borderColor: c.fgGhost,
   } as const;
-  const cellPad = { paddingHorizontal: 10, paddingVertical: 6 } as const;
-  const copy = { alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: radius.sm + 2 } as const;
+  const cell = { paddingHorizontal: side, paddingVertical: quiet ? 4 : 10 } as const;
+  const button = { alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: radius.sm } as const;
   return {
-    space: {
-      block: Math.round(12 * k),
-      heading: Math.round(18 * k),
-      afterHeading: Math.round(4 * k),
-      nested: Math.round(4 * k),
-    },
+    scale: quiet
+      ? { body: SCALE.meta, heading: SCALE.meta, table: SCALE.meta, code: SCALE.code }
+      : { body: SCALE.body, heading: SCALE.heading, table: SCALE.table, code: SCALE.code },
+    space: quiet
+      ? { block: 6, heading: 10, afterHeading: 4, nested: 4, rule: 10 }
+      : { block: 14, heading: 28, afterHeading: 12, nested: 4, rule: 28 },
     digitWidth: Math.round(size * 0.6),
     paragraph: body,
-    h1: { ...heading, fontSize: half(17.5), lineHeight: Math.round(25 * k), letterSpacing: -0.2 },
-    h2: { ...heading, fontSize: half(16.5), lineHeight: Math.round(24 * k), letterSpacing: -0.1 },
-    h3: { ...heading, fontSize: half(15.5), lineHeight: Math.round(23 * k) },
-    h4: { ...heading, fontSize: size, lineHeight: line },
-    h5: { ...heading, fontSize: size, lineHeight: line, color: quiet ? c.fgFaint : c.fgMuted },
-    h6: { ...heading, fontSize: size - 1, lineHeight: line - 2, color: c.fgFaint },
+    dimText: { ...body, color: c.fgFaint },
+    h1: quiet ? minor : { ...heading, fontSize: 22, lineHeight: 31, letterSpacing: -0.2 },
+    h2: quiet ? minor : { ...heading, fontSize: 20, lineHeight: 29, letterSpacing: -0.2 },
+    h3: quiet ? minor : { ...heading, fontSize: 18, lineHeight: 27 },
+    h4: minor,
+    h5: minor,
+    h6: minor,
     bold: { fontWeight: "600", color: quiet ? c.fgMuted : c.fg },
     italic: { fontStyle: "italic" },
     strike: { textDecorationLine: "line-through", color: c.fgFaint },
-    link: { color: c.accent, textDecorationLine: "underline" },
-    // A size and a half under the prose and a faint tint: a span, not a block, inside CJK lines.
-    inlineCode: { fontFamily: MONO, fontSize: half(13), color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
+    link: quiet
+      ? ({ color: c.fgMuted, textDecorationLine: "underline", textDecorationStyle: "dotted" } as const)
+      : ({ color: c.accentB, fontWeight: "500" } as const),
+    // A light pill in prose (nested text cannot have padding: thin spaces stand in for it).
+    inlineCode: { fontFamily: MONO, fontSize: quiet ? 12 : (13 as number), color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
 
-    list: { gap: Math.round(4 * k) },
+    list: { gap: quiet ? 2 : 6 },
     item: { flexDirection: "row" },
     itemBody: { flex: 1, minWidth: 0 },
-    bullet: { ...body, color: c.fgGhost, textAlign: "center", marginRight: 4 },
+    bullet: { ...body, color: c.fgMuted, textAlign: "left" },
     number: {
       ...body,
-      color: c.fgFaint,
-      textAlign: "right",
-      marginRight: 7,
+      color: c.fgMuted,
+      textAlign: "left",
       fontVariant: ["tabular-nums"] as FontVariant[],
     },
-    markerBox: { height: line, justifyContent: "center", alignItems: "flex-start", marginRight: 4 },
+    markerBox: { height: line, justifyContent: "center", alignItems: "flex-start" },
     task,
-    taskOn: { ...task, borderColor: c.accent, backgroundColor: c.accent },
+    taskOn: { ...task, borderColor: c.fgMuted, backgroundColor: c.fgMuted },
 
-    quote: { borderLeftWidth: 2, borderLeftColor: c.borderStrong, paddingLeft: 12 },
-    quoteText: { ...body, color: quiet ? c.fgGhost : c.fgMuted },
-    rule: { height: StyleSheet.hairlineWidth, backgroundColor: c.borderStrong, marginVertical: Math.round(4 * k) },
+    quote: { borderLeftWidth: 2, borderLeftColor: c.fgGhost, paddingLeft: 14 },
+    rule: { height: StyleSheet.hairlineWidth, backgroundColor: c.borderStrong },
 
     codeBox: {
-      borderRadius: radius.md + 2,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
+      borderRadius: radius.lg,
       backgroundColor: c.codeBg,
+      // On the light page the panel is white: a hairline keeps it from melting into the page.
+      borderWidth: c.dark ? 0 : StyleSheet.hairlineWidth,
+      borderColor: c.border,
       overflow: "hidden",
     },
-    codeHead: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12,
-      paddingLeft: 12,
-      paddingRight: 4,
-      paddingTop: 4,
-    },
-    codeLang: { flexShrink: 1, fontFamily: MONO, fontSize: 10.5, lineHeight: 14, letterSpacing: 0.3, color: c.fgFaint },
-    copy,
-    copyColumn: { paddingTop: 5, paddingRight: 4 },
-    copyPressed: { backgroundColor: c.hover },
-    codeBody: { flexDirection: "row" },
-    codeLines: { flex: 1, minWidth: 0 },
-    codeScroll: { paddingLeft: 12, paddingRight: 12, paddingVertical: 10 },
-    codeScrollTagged: { paddingLeft: 12, paddingRight: 12, paddingTop: 2, paddingBottom: 10 },
-    codeText: { fontFamily: MONO, fontSize: codeSize, lineHeight: Math.round(codeSize * 1.6), color: quiet ? c.fgMuted : c.fg },
+    codeHead: { flexDirection: "row", alignItems: "center", gap: 2, minHeight: 36, paddingLeft: 16, paddingRight: 6, paddingTop: 2 },
+    codeLang: { flex: 1, fontFamily: MONO, fontSize: 11, lineHeight: 16, color: c.fgFaint },
+    codeButton: button,
+    codeButtonOn: button,
+    codeButtonPressed: { backgroundColor: c.hover },
+    codeWrapped: { paddingTop: 2, paddingHorizontal: 16, paddingBottom: 16 },
+    codeScroll: { paddingTop: 2, paddingHorizontal: 16, paddingBottom: 16 },
+    codeText: { fontFamily: MONO, fontSize: 12, lineHeight: 19, color: quiet ? c.fgMuted : c.fg },
 
-    tableCode: { fontFamily: MONO, fontSize: tableSize - 1, color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
+    tableCode: { fontFamily: MONO, fontSize: tableSize - 1.5, color: quiet ? c.fgMuted : c.fg, backgroundColor: c.inlineCode },
     table: {
-      minColumn: 52,
-      maxColumn: 232,
+      minColumn: quiet ? 64 : 100,
+      maxColumn: 240,
       // Geist's digits and capitals run near 0.62 em; CJK sets on the full em.
-      charWidth: tableSize * 0.62,
+      charWidth: tableSize * 0.6,
       wideWidth: tableSize * 1.04,
-      monoWidth: (tableSize - 1) * 0.66,
+      monoWidth: (tableSize - 1.5) * 0.62,
       // Both paddings and a little slack, so a cell sized to its text never breaks its last character.
-      padding: 2 * cellPad.paddingHorizontal + 8,
+      padding: 2 * side + 6,
+      side,
     },
-    tableBox: {
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.borderStrong,
-      borderRadius: radius.md,
-      backgroundColor: c.panel,
-      overflow: "hidden",
-    },
-    tableHead: {
-      flexDirection: "row",
-      backgroundColor: c.hover,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.borderStrong,
-    },
-    tableRow: { flexDirection: "row" },
-    tableRule: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
-    tableHeadCell: {
-      fontFamily: SANS,
-      fontWeight: "500",
-      fontSize: tableSize - 0.5,
-      lineHeight: Math.round(tableSize * 1.38),
-      color: c.fgMuted,
-      ...cellPad,
-    },
+    tableHead: { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.fgGhost },
+    tableRow: { flexDirection: "row", borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.borderStrong },
+    tableHeadCell: { fontFamily: SANS, fontWeight: "500", fontSize: tableSize, lineHeight: 20, color: fg, ...cell },
     tableCell: {
       fontFamily: SANS,
       fontSize: tableSize,
-      lineHeight: Math.round(tableSize * 1.42),
-      color: quiet ? c.fgFaint : c.fg,
+      lineHeight: 20,
+      color: fg,
       fontVariant: ["tabular-nums"] as FontVariant[],
-      ...cellPad,
+      ...cell,
     },
+    cellFirst: { paddingLeft: 0 },
+    cellLast: { paddingRight: 0 },
   } as const;
 }
 
 function createReplyStyles(c: Palette) {
-  return createStyles(c, 15, 24, false);
+  return createStyles(c, false);
 }
 
 function createThoughtStyles(c: Palette): Styles {
-  return createStyles(c, 13.5, 21, true);
+  return createStyles(c, true);
 }
