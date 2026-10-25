@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Opening a chat downloads only what is new (#42). The app tells the daemon how much of the transcript it already holds (`since`, and a fingerprint of the last message), and the snapshot carries only the messages after it; when the copies do not line up, it carries everything, as before. A new `GET /sessions/:id/transcript` answers the same without ever starting an omp: a live session from memory, a closed one from the transcript the daemon saves when its omp exits (idle, the daemon stopping, omp leaving), as long as the session file has not changed since. Saved transcripts are kept while their session was active in the last 24 hours. Daemons list this as the `transcript-sync` feature.
+- Every session active in the last 24 hours stays cached on the phone and up to date, so chats open at once (#43). The cache holds the daemon's own messages, state and summary instead of rendered items, kept by time (no 40-session or 400-item limit, no clipped tool output). With a daemon that has `transcript-sync`, the app refreshes stale copies in the background, one at a time and only with what is new: after the session list loads, every minute in the foreground, when it comes back to the foreground and when a chat is left. A chat shows its copy (transcript, model, todos) first, then merges the daemon's delta; a delta that does not fit is fetched again whole, never spliced. The old item caches are deleted.
+
+### 中文
+
+- 打开对话只下载新增的部分（#42）。App 告诉 daemon 自己已有多少条消息（`since`，以及最后一条消息的指纹），快照就只带其后的消息；两边对不上时照旧发送全部。新增 `GET /sessions/:id/transcript`，返回同样的内容，且从不为此启动 omp：活动会话从内存返回，已关闭的会话从 omp 退出时（空闲回收、daemon 停止、omp 自行退出）保存的记录返回，前提是会话文件此后没有变化。保存的记录在会话最近 24 小时内有活动时保留。daemon 以 `transcript-sync` 功能声明这一点。
+- 最近 24 小时内有活动的会话都缓存在手机上并保持最新，对话即开即显（#43）。缓存保存的是 daemon 的消息、状态和会话摘要，而不是渲染后的条目，按时间保留（不再限 40 个会话、400 条，也不再截断工具输出）。对支持 `transcript-sync` 的 daemon，App 在后台逐个刷新过期的副本，只取新增部分：会话列表加载后、前台时每分钟、回到前台时、离开对话时。打开对话先显示缓存（记录、模型、待办），再合并 daemon 的增量；对不上的增量会重新整份获取，绝不拼接出错的记录。旧的条目缓存会被删除。
+
 ## v0.4.2
 
 Chats open several times faster, and no longer say "connecting" on a phone that is already connected.
