@@ -1,6 +1,6 @@
 {
   "name": "omp-mobile",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "The computer side of OMP Mobile: runs oh-my-pi sessions and serves them to the phone app over Tailscale.",
   "keywords": [
     "mobile",
