@@ -21,6 +21,7 @@ export function Composer({
   canAttach,
   streaming,
   connected,
+  offline = false,
   readOnly,
   onSend,
   onStop,
@@ -40,6 +41,8 @@ export function Composer({
   canAttach: boolean;
   streaming: boolean;
   connected: boolean;
+  /** The computer has not been reached for a while: nothing can be sent until it is. */
+  offline?: boolean;
   /** The session cannot take messages (it failed to open). */
   readOnly: boolean;
   onSend: () => void;
@@ -124,7 +127,15 @@ export function Composer({
             }}
             onBlur={() => setFocused(false)}
             editable={!readOnly}
-            placeholder={readOnly ? t("composer.placeholder.closed") : streaming ? t("composer.placeholder.steer") : t("composer.placeholder")}
+            placeholder={
+              readOnly
+                ? t("composer.placeholder.closed")
+                : offline
+                  ? t("composer.placeholder.offline")
+                  : streaming
+                    ? t("composer.placeholder.steer")
+                    : t("composer.placeholder")
+            }
             placeholderTextColor={colors.fgGhost}
             selectionColor={colors.ring}
             cursorColor={colors.accent}

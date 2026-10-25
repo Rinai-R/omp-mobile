@@ -34,7 +34,8 @@ import { layoutRows, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
-import { refreshTranscript } from "../sync";
+import { keepLive, prependHistory } from "../liveRows";
+import { refreshTranscript, setSyncOnScreen } from "../sync";
 import { loadCached, loadTail, markViewed, saveCached } from "../transcripts";
 import type {
   AgentMessage,
@@ -57,6 +58,8 @@ interface Props {
 
 /** Connection attempts without an open after which the screen asks the daemon over HTTP why. */
 const ASK_AFTER = 3;
+/** How long a chat waits for its socket before it says the computer cannot be reached. */
+const UNREACHABLE_AFTER_MS = 5_000;
 /** How far from the newest message (px) still counts as "at the bottom". */
 const NEAR_BOTTOM = 160;
 
@@ -105,6 +108,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [opening, setOpening] = useState(false);
   /** A chat just opened: no status word for the first second, so a 3 ms socket does not flash "connecting". */
   const [settled, setSettled] = useState(false);
+  /** The socket has not opened for a while: the computer is out of reach and the chat shows its saved copy. */
+  const [unreachable, setUnreachable] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const [confirmTake, setConfirmTake] = useState(false);
   /** The daemon's snapshot has replaced whatever the saved transcript showed. */
@@ -124,6 +129,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const quietRef = useRef(false);
   /** A snapshot did not fit the copy: the next connect asks for the whole transcript. */
   const wholeRef = useRef(false);
+  /**
+   * The window is only the end of a session past the daemon's message cap (a whole
+   * answer with `base`): a cached copy that does not reach it is no reason to ask again.
+   */
+  const cappedRef = useRef(false);
   /** The copy as last saved or read, to skip rewriting it when a snapshot brings nothing new. */
   const savedStateRef = useRef<string | undefined>(undefined);
   /** A save waiting for the screen to settle; run at once when the chat is left. */
@@ -166,10 +176,15 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     [initialSession.id],
   );
 
-  /** Put a window on screen; ids are those of the whole transcript, so the rows a tail showed keep theirs. */
-  const show = useCallback((window: TranscriptWindow) => {
+  /**
+   * Put a window on screen; ids are those of the whole transcript, so the rows a tail showed keep theirs.
+   * `streaming`: the session is mid-turn, so rows only live events know (the reply being written,
+   * a running tool) stay on screen until the snapshot holds them.
+   */
+  const show = useCallback((window: TranscriptWindow, streaming = false) => {
     windowRef.current = window;
-    setItems(snapshotItems(window.messages, window.offset));
+    const rebuilt = snapshotItems(window.messages, window.offset);
+    setItems((current) => keepLive(rebuilt, current, streaming));
   }, []);
   /** Save what a snapshot brought, once the screen settled and the whole transcript is known. */
   const scheduleSave = useCallback(() => {
@@ -179,7 +194,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       const window = windowRef.current;
       if (meta === null || window.offset !== 0) return;
       unsavedRef.current = null;
-      saveCached(machineRef.current.id, initialSession.id, { ...meta, messages: window.messages }, true);
+      void saveCached(machineRef.current.id, initialSession.id, { ...meta, messages: window.messages }, true);
     };
     saveRef.current = save;
     setTimeout(save, 800);
@@ -196,9 +211,13 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           case "snapshot": {
             const sent = sentRef.current;
             let merged = mergeWindow(sent.window, sent.held, message);
+            // A whole answer that starts past 0: the daemon holds only the session's end (its message cap).
+            const capped = merged !== undefined && (message.from ?? 0) === 0 && merged.offset > 0;
+            cappedRef.current = capped;
             // Asked against the tail: put the whole copy under it, once it is read.
             if (merged !== undefined && merged.offset > 0 && headRef.current !== undefined) {
-              merged = headRef.current === null ? undefined : attachHead(merged, headRef.current);
+              const attached = headRef.current === null ? undefined : attachHead(merged, headRef.current);
+              merged = attached ?? (capped ? merged : undefined);
             }
             if (merged === undefined) {
               // It does not fit what it was asked against: keep showing the copy and ask for everything.
@@ -209,7 +228,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             live.current = true;
             setSession(message.session);
             setState(message.state);
-            show(merged);
+            show(merged, message.state?.isStreaming === true);
             const state = JSON.stringify(message.state ?? null);
             const changed = (message.from ?? 0) === 0 || message.messages.length > 0 || state !== savedStateRef.current;
             if (changed) {
@@ -335,7 +354,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
       markViewed(machine.id, initialSession.id);
     };
-    /** The whole copy, read after the tail painted, goes under it; a copy that does not fit is never spliced. */
+    /**
+     * The whole copy, read after the tail painted, goes under it; a copy that does not fit is never spliced.
+     * Only the older rows are added above what is on screen: live events may have added rows
+     * (a reply streaming, a prompt just sent, a running tool) that no stored message holds yet.
+     */
     const readHead = () => {
       void loadCached(machine.id, initialSession.id)
         .catch(() => undefined)
@@ -346,6 +369,8 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           const attached = full === undefined ? undefined : attachHead(window, full.messages);
           if (attached === undefined) {
             headRef.current = null;
+            // The daemon holds no more than this window (past its cap): asking again brings the same.
+            if (cappedRef.current) return;
             // Only the tail is known: ask the daemon for the whole transcript.
             wholeRef.current = true;
             if (live.current || socket.isOpen) socket.restart();
@@ -353,7 +378,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           }
           headRef.current = full?.messages;
           quietRef.current = true;
-          show(attached);
+          windowRef.current = attached;
+          const older = snapshotItems(attached.messages.slice(0, window.offset), 0);
+          setItems((current) => prependHistory(current, older));
           if (unsavedRef.current !== null) scheduleSave();
         });
     };
@@ -393,7 +420,12 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   // This session is on screen: its background notifications are cleared and not posted.
   useEffect(() => {
     Attention.setOnScreen(machine.id, initialSession.id);
-    return () => Attention.setOnScreen("", "");
+    // The chat keeps its own copy current: the background pass leaves it alone meanwhile.
+    setSyncOnScreen(machine.id, initialSession.id);
+    return () => {
+      Attention.setOnScreen("", "");
+      setSyncOnScreen("", "");
+    };
   }, [initialSession.id, machine.id]);
 
   useEffect(() => {
@@ -402,6 +434,17 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     const timer = setTimeout(() => setSettled(true), 1_000);
     return () => clearTimeout(timer);
   }, [initialSession.id]);
+
+  // Not reached for a while (and not opening, not refused): say so, and that this is the saved copy.
+  // Cleared the moment the socket opens; the socket keeps retrying meanwhile.
+  useEffect(() => {
+    if (connected || opening || failure !== null) {
+      setUnreachable(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setUnreachable(true), UNREACHABLE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [connected, opening, failure]);
 
   const streaming = state?.isStreaming === true;
 
@@ -598,9 +641,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           : "live"
         : opening
           ? "opening"
-          : settled
-            ? "connecting"
-            : "quiet";
+          : unreachable
+            ? "offline"
+            : settled
+              ? "connecting"
+              : "quiet";
 
   return (
     <View style={styles.root}>
@@ -636,7 +681,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                 <LiveDot color={colors.err} size={7} />
               ) : status === "held" ? (
                 <LiveDot color={colors.warn} size={7} />
-              ) : status === "quiet" ? (
+              ) : status === "quiet" || status === "offline" ? (
                 <LiveDot color={colors.fgFaint} size={7} />
               ) : (
                 <PulseDot color={colors.warn} size={7} />
@@ -647,7 +692,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                   ? t("chat.opening")
                   : status === "connecting"
                     ? t("chat.connecting")
-                    : status === "failed"
+                    : status === "offline"
+                      ? t("chat.offline")
+                      : status === "failed"
                       ? t("chat.cannotOpen")
                       : folder}
               </Text>
@@ -656,6 +703,13 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         </View>
 
         {error !== null ? <Banner text={error} onPress={() => setError(null)} /> : null}
+        {status === "offline" ? (
+          <View style={styles.offline} accessibilityLiveRegion="polite">
+            <Text style={styles.offlineText}>
+              {rows.length > 0 ? t("chat.offlineSaved", { name: displayName(machine) }) : t("chat.offlineEmpty", { name: displayName(machine) })}
+            </Text>
+          </View>
+        ) : null}
 
         {failure !== null && offerTakeover ? (
           <View style={styles.failure}>
@@ -752,6 +806,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           canAttach={features.includes("prompt-images")}
           streaming={streaming}
           connected={connected}
+          offline={status === "offline"}
           readOnly={failure !== null}
           onSend={send}
           onStop={abort}
@@ -851,6 +906,14 @@ function createStyles(c: Palette) {
     subtitleRow: { flexDirection: "row", alignItems: "center", gap: 7, minWidth: 0 },
     subtitle: { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
 
+    offline: {
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      backgroundColor: c.panel,
+    },
+    offlineText: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
     listWrap: { flex: 1 },
     list: { paddingTop: 16, paddingBottom: 12 },
     listDim: { opacity: 0.5 },
