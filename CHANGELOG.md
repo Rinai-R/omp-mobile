@@ -6,14 +6,16 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## v0.4.2
 
-Opening a chat no longer says "connecting" on a phone that is already connected.
+Chats open several times faster, and no longer say "connecting" on a phone that is already connected.
 
+- A chat's snapshot is a fraction of its size. Screenshots and other images in it are kept on the computer and sent as references the app loads when they scroll into view, a tool result's details carry only what the app shows (an edit's diff, a read's line count, a command's run time), and the session socket is compressed. A long session went from 5.8 MB to 0.8 MB on the wire, and its saved copy on the phone shrinks with it.
 - The chat header follows the session, not the computer. While the link is up and the daemon is starting the session (an omp resumes, a long transcript arrives), it says "opening…"; the first second of a chat shows no status word at all, so a session that opens in milliseconds does not flash a message. "connecting…" now means the socket really has not opened.
 
 ### 中文
 
-打开对话时，不再在已经连上的手机上显示“连接中”。
+对话打开快了数倍，已经连上的手机也不再显示“连接中”。
 
+- 对话快照只剩原来的一小部分。其中的截图等图片留在电脑上，以引用发送，滚到时 App 再加载；工具结果的 details 只保留 App 会显示的内容（编辑的 diff、读取的行数、命令的耗时）；会话连接启用压缩。一个长会话在网络上从 5.8 MB 降到 0.8 MB，手机上保存的副本也随之变小。
 - 对话页标题下的状态改为跟随会话而不是电脑。连接已经建立、daemon 正在打开会话（恢复 omp、传输较长的记录）时显示“打开中…”；刚进入对话的一秒内不显示状态词，毫秒级打开不会闪一下提示。“连接中…”只在连接确实还没建立时出现。
 
 ## v0.4.1
