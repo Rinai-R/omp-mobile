@@ -16,7 +16,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
 import { HttpError, SessionSocket, daemonFeatures, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
-import { heldOf, mergeTranscript, type Held } from "../cache";
+import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
@@ -35,7 +35,7 @@ import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
 import { refreshTranscript } from "../sync";
-import { loadCached, markViewed, saveCached } from "../transcripts";
+import { loadCached, loadTail, markViewed, saveCached } from "../transcripts";
 import type {
   AgentMessage,
   ApprovalRequest,
@@ -109,10 +109,19 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [confirmTake, setConfirmTake] = useState(false);
   /** The daemon's snapshot has replaced whatever the saved transcript showed. */
   const live = useRef(false);
-  /** The transcript's messages as the daemon sent them (the cached copy until a snapshot merges in): what `since`/`last` describe. */
-  const messagesRef = useRef<AgentMessage[]>([]);
-  /** What the current socket was opened with, and the copy that described: a snapshot is merged against exactly these. */
-  const sentRef = useRef<{ held: Held | undefined; base: AgentMessage[] }>({ held: undefined, base: [] });
+  /**
+   * The transcript the phone holds, as the daemon sent it: the cached copy's tail first
+   * (offset > 0), the whole copy once it is read, extended by snapshots. What `since`/`last` describe.
+   */
+  const windowRef = useRef<TranscriptWindow>({ offset: 0, messages: [] });
+  /** The whole cached copy once read; `null` when it could not be (missing, damaged, not matching the tail). */
+  const headRef = useRef<AgentMessage[] | null | undefined>(undefined);
+  /** What the current socket was opened with, and the window that described: a snapshot is merged against exactly these. */
+  const sentRef = useRef<{ held: Held | undefined; window: TranscriptWindow }>({ held: undefined, window: { offset: 0, messages: [] } });
+  /** What a snapshot brought that is not saved yet: saved once the whole transcript is known. */
+  const unsavedRef = useRef<{ updatedAt: number; session: SessionSummary; state: SessionState | null } | null>(null);
+  /** Older rows are joining the list (the whole copy under its tail): they appear without an entrance. */
+  const quietRef = useRef(false);
   /** A snapshot did not fit the copy: the next connect asks for the whole transcript. */
   const wholeRef = useRef(false);
   /** The copy as last saved or read, to skip rewriting it when a snapshot brings nothing new. */
@@ -157,6 +166,25 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     [initialSession.id],
   );
 
+  /** Put a window on screen; ids are those of the whole transcript, so the rows a tail showed keep theirs. */
+  const show = useCallback((window: TranscriptWindow) => {
+    windowRef.current = window;
+    setItems(snapshotItems(window.messages, window.offset));
+  }, []);
+  /** Save what a snapshot brought, once the screen settled and the whole transcript is known. */
+  const scheduleSave = useCallback(() => {
+    const save = () => {
+      if (saveRef.current === save) saveRef.current = null;
+      const meta = unsavedRef.current;
+      const window = windowRef.current;
+      if (meta === null || window.offset !== 0) return;
+      unsavedRef.current = null;
+      saveCached(machineRef.current.id, initialSession.id, { ...meta, messages: window.messages }, true);
+    };
+    saveRef.current = save;
+    setTimeout(save, 800);
+  }, [initialSession.id]);
+
   useEffect(() => {
     let asking = false;
     const machine = machineRef.current;
@@ -167,30 +195,27 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         switch (message.type) {
           case "snapshot": {
             const sent = sentRef.current;
-            const merged = mergeTranscript(sent.base, sent.held, message);
+            let merged = mergeWindow(sent.window, sent.held, message);
+            // Asked against the tail: put the whole copy under it, once it is read.
+            if (merged !== undefined && merged.offset > 0 && headRef.current !== undefined) {
+              merged = headRef.current === null ? undefined : attachHead(merged, headRef.current);
+            }
             if (merged === undefined) {
-              // It does not fit the copy it was asked against: keep showing the copy and ask for everything.
+              // It does not fit what it was asked against: keep showing the copy and ask for everything.
               wholeRef.current = true;
               socket.restart();
               break;
             }
             live.current = true;
-            messagesRef.current = merged;
             setSession(message.session);
             setState(message.state);
-            setItems(snapshotItems(merged));
+            show(merged);
             const state = JSON.stringify(message.state ?? null);
             const changed = (message.from ?? 0) === 0 || message.messages.length > 0 || state !== savedStateRef.current;
             if (changed) {
               savedStateRef.current = state;
-              const copy = { updatedAt: message.session.updatedAt, session: message.session, state: message.state ?? null, messages: merged };
-              // After the transcript is on screen: writing a long one takes a moment.
-              const save = () => {
-                if (saveRef.current === save) saveRef.current = null;
-                saveCached(machine.id, initialSession.id, copy, true);
-              };
-              saveRef.current = save;
-              setTimeout(save, 800);
+              unsavedRef.current = { updatedAt: message.session.updatedAt, session: message.session, state: message.state ?? null };
+              scheduleSave();
             }
             break;
           }
@@ -289,31 +314,66 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       () => setOpening(true),
       // What the phone holds, for a daemon that sends deltas; asked at every (re)connect.
       () => {
-        const base = messagesRef.current;
+        const window = windowRef.current;
         const whole = wholeRef.current;
         wholeRef.current = false;
         const syncs = featuresRef.current.includes("transcript-sync") || knownFeatures(machine).includes("transcript-sync");
-        const held = whole || !syncs ? undefined : heldOf(base);
-        sentRef.current = { held, base };
+        const held = whole || !syncs ? undefined : heldOfWindow(window);
+        sentRef.current = { held, window };
         return held;
       },
     );
     socketRef.current = socket;
     if (featuresRef.current.includes("heartbeat")) socket.watchSilence();
-    // The saved copy shows at once, offline too; the socket connects once it is read, so it can
-    // ask for only what is new and the snapshot never lands before the copy it extends.
+    // The saved copy shows at once, offline too: its tail first (small whatever the session's
+    // size), then the whole copy underneath. The socket connects once the first read settles,
+    // so it asks for only what is new and the snapshot never lands before what it extends.
     let disposed = false;
-    void loadCached(machine.id, initialSession.id)
+    const paint = (saved: { session: SessionSummary; state: SessionState | null }) => {
+      savedStateRef.current = JSON.stringify(saved.state ?? null);
+      if (saved.state !== null) setState(saved.state);
+      setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
+      markViewed(machine.id, initialSession.id);
+    };
+    /** The whole copy, read after the tail painted, goes under it; a copy that does not fit is never spliced. */
+    const readHead = () => {
+      void loadCached(machine.id, initialSession.id)
+        .catch(() => undefined)
+        .then((full) => {
+          if (disposed) return;
+          const window = windowRef.current;
+          if (window.offset === 0) return;
+          const attached = full === undefined ? undefined : attachHead(window, full.messages);
+          if (attached === undefined) {
+            headRef.current = null;
+            // Only the tail is known: ask the daemon for the whole transcript.
+            wholeRef.current = true;
+            if (live.current || socket.isOpen) socket.restart();
+            return;
+          }
+          headRef.current = full?.messages;
+          quietRef.current = true;
+          show(attached);
+          if (unsavedRef.current !== null) scheduleSave();
+        });
+    };
+    void loadTail(machine.id, initialSession.id)
       .catch(() => undefined)
-      .then((saved) => {
+      .then(async (tail) => {
         if (disposed) return;
-        if (saved !== undefined && !live.current) {
-          messagesRef.current = saved.messages;
-          savedStateRef.current = JSON.stringify(saved.state ?? null);
-          setItems(snapshotItems(saved.messages));
-          if (saved.state !== null) setState(saved.state);
-          setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
-          markViewed(machine.id, initialSession.id);
+        if (tail !== undefined && !live.current) {
+          show({ offset: tail.from, messages: tail.messages });
+          paint(tail);
+          if (tail.from > 0) setTimeout(readHead, 250);
+          else headRef.current = tail.messages;
+        } else if (!live.current) {
+          // No tail (an older copy): the whole copy, as before.
+          const saved = await loadCached(machine.id, initialSession.id).catch(() => undefined);
+          if (disposed) return;
+          if (saved !== undefined && !live.current) {
+            show({ offset: 0, messages: saved.messages });
+            paint(saved);
+          }
         }
         socket.connect();
       });
@@ -460,6 +520,11 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   /** Whether each row plays its entrance, decided once per id: rows loaded with the transcript do not, rows that arrive later do. */
   const seen = useRef<Map<string, boolean> | null>(null);
   if (seen.current === null && rows.length > 0) seen.current = new Map(rows.map((row) => [row.id, false]));
+  if (quietRef.current && seen.current !== null) {
+    // The older part of the copy, put under its tail: those rows were there already.
+    for (const row of rows) if (!seen.current.has(row.id)) seen.current.set(row.id, false);
+    quietRef.current = false;
+  }
   const [away, setAway] = useState(false);
   const [unseen, setUnseen] = useState(0);
   const newest = rows[0]?.id;

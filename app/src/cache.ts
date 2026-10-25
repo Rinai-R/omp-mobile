@@ -99,6 +99,115 @@ export function mergeTranscript(
   return merged;
 }
 
+/**
+ * Messages a copy's tail file keeps: what a chat paints first, before the
+ * whole copy is read. Its size does not grow with the session.
+ */
+export const TAIL_MESSAGES = 160;
+/** How far back a tail may reach for a turn's start, so it does not open mid-turn. */
+const TAIL_REACH = 3 * TAIL_MESSAGES;
+
+/** The end of a copy that paints the chat at once: its last messages and what they belong to. */
+export interface CachedTail {
+  v: 2;
+  machineId: string;
+  sessionId: string;
+  updatedAt: number;
+  savedAt: number;
+  /** Index of the first tail message in the whole copy. */
+  from: number;
+  /** The whole copy's size and last fingerprint: the tail describes that copy and no other. */
+  count: number;
+  last: string;
+  session: SessionSummary;
+  state: SessionState | null;
+  messages: AgentMessage[];
+}
+
+/**
+ * A stretch of a transcript the phone holds: `messages` are the transcript's
+ * messages from index `offset` on, to its end as far as the phone knows.
+ * A chat opens on its cached tail (offset > 0) and gets the rest later.
+ */
+export interface TranscriptWindow {
+  offset: number;
+  messages: AgentMessage[];
+}
+
+/**
+ * Where a tail of `messages` starts: about the last {@link TAIL_MESSAGES},
+ * moved to the start of a turn (a user message) so it does not open on a
+ * tool result whose call it lacks. Reaches back at most {@link TAIL_REACH}.
+ */
+export function tailStart(messages: readonly AgentMessage[]): number {
+  const length = messages.length;
+  if (length <= TAIL_MESSAGES) return 0;
+  const candidate = length - TAIL_MESSAGES;
+  for (let i = candidate; i < length; i += 1) if (messages[i]?.role === "user") return i;
+  for (let i = candidate - 1; i >= Math.max(0, length - TAIL_REACH); i -= 1) if (messages[i]?.role === "user") return i;
+  return candidate;
+}
+
+/** What the window tells the daemon it holds: the transcript up to its end. */
+export function heldOfWindow(window: TranscriptWindow): Held | undefined {
+  const count = window.offset + window.messages.length;
+  if (count === 0 || window.messages.length === 0) return undefined;
+  return { since: count, last: fingerprint(window.messages[window.messages.length - 1]) };
+}
+
+/**
+ * The window after the daemon's answer to `held`: its messages whole
+ * (offset 0), or the window extended at `from`. Undefined when the answer
+ * does not fit the window it was asked against.
+ */
+export function mergeWindow(
+  window: TranscriptWindow,
+  held: Held | undefined,
+  answer: Pick<Transcript, "from" | "total" | "messages">,
+): TranscriptWindow | undefined {
+  if (!Array.isArray(answer.messages)) return undefined;
+  const from = answer.from ?? 0;
+  if (!Number.isSafeInteger(from) || from < 0) return undefined;
+  if (from === 0) {
+    if (answer.total !== undefined && answer.total !== answer.messages.length) return undefined;
+    return { offset: 0, messages: answer.messages };
+  }
+  if (held === undefined || from !== held.since || from !== window.offset + window.messages.length) return undefined;
+  if (window.messages.length === 0 || fingerprint(window.messages[window.messages.length - 1]) !== held.last) return undefined;
+  const merged = { offset: window.offset, messages: [...window.messages, ...answer.messages] };
+  if (answer.total !== undefined && answer.total !== merged.offset + merged.messages.length) return undefined;
+  return merged;
+}
+
+/**
+ * The whole transcript from a window and a copy that starts at 0 (the full
+ * cached copy, read after the tail painted): the copy's messages before the
+ * window, then the window. Undefined unless the copy reaches the window and
+ * agrees with it where they meet.
+ */
+export function attachHead(window: TranscriptWindow, head: readonly AgentMessage[]): TranscriptWindow | undefined {
+  if (window.offset === 0) return window;
+  if (window.messages.length === 0 || head.length <= window.offset) return undefined;
+  if (fingerprint(head[window.offset]) !== fingerprint(window.messages[0])) return undefined;
+  return { offset: 0, messages: [...head.slice(0, window.offset), ...window.messages] };
+}
+
+/** A tail to paint first: read back, and only if it describes the copy the index knows. */
+export function parseTail(value: unknown, machineId: string, entry: Pick<CacheEntry, "sessionId" | "count" | "last">): CachedTail | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const tail = value as Record<string, unknown>;
+  if (tail.v !== 2 || tail.machineId !== machineId || tail.sessionId !== entry.sessionId) return undefined;
+  if (tail.count !== entry.count || tail.last !== entry.last) return undefined;
+  if (!Array.isArray(tail.messages) || !isNumber(tail.from) || !isNumber(tail.updatedAt)) return undefined;
+  if (tail.session === null || typeof tail.session !== "object") return undefined;
+  if (!tail.messages.every((message) => message !== null && typeof message === "object")) return undefined;
+  const messages = tail.messages as AgentMessage[];
+  // Its messages end the copy: they reach its count and its last is the copy's last.
+  if (messages.length === 0 || tail.from < 0 || tail.from + messages.length !== entry.count) return undefined;
+  if (fingerprint(messages[messages.length - 1]) !== entry.last) return undefined;
+  return value as CachedTail;
+}
+
 /** When a cached session was last active: its own last update, or the last time it was viewed here. */
 export function activeAt(entry: Pick<CacheEntry, "updatedAt" | "viewedAt">): number {
   return Math.max(entry.updatedAt, entry.viewedAt);

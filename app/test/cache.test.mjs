@@ -18,7 +18,14 @@ import {
   replaces,
   retained,
   syncQueue,
+  TAIL_MESSAGES,
+  attachHead,
+  heldOfWindow,
+  mergeWindow,
+  parseTail,
+  tailStart,
 } from "../src/cache.ts";
+import { snapshotItems } from "../src/messages.ts";
 import { fingerprint as daemonFingerprint } from "../../daemon/src/transcripts.mjs";
 
 const messages = [
@@ -158,4 +165,88 @@ test("cache names are stable per machine and session and differ between them", (
   assert.equal(cacheName("http://100.64.0.1:7390", "01a1-session"), name);
   assert.notEqual(cacheName("http://100.64.0.2:7390", "01a1-session"), name);
   assert.notEqual(cacheName("http://100.64.0.1:7390", "01a1-sessioN"), name);
+});
+
+/** A long session: turns of a user prompt, a tool call, its result and a reply. */
+function longSession(turns) {
+  const list = [];
+  for (let t = 0; t < turns; t += 1) {
+    const at = t * 10;
+    list.push({ role: "user", timestamp: at, content: `q${t}` });
+    list.push({ role: "assistant", timestamp: at + 1, responseId: `a${t}`, content: [{ type: "toolCall", id: `c${t}`, name: "bash", arguments: {} }] });
+    list.push({ role: "toolResult", timestamp: at + 2, toolCallId: `c${t}`, toolName: "bash", content: [{ type: "text", text: "ok" }] });
+    list.push({ role: "assistant", timestamp: at + 3, responseId: `r${t}`, content: [{ type: "text", text: `answer ${t}` }] });
+  }
+  return list;
+}
+
+test("a tail is small whatever the session's size, and starts at a turn", () => {
+  const long = longSession(800);
+  const from = tailStart(long);
+  assert.ok(long.length - from <= TAIL_MESSAGES, "no more than the tail size");
+  assert.ok(long.length - from > TAIL_MESSAGES - 4, "close to it");
+  assert.equal(long[from].role, "user");
+  assert.equal(tailStart(long.slice(0, 40)), 0, "a short session is its own tail");
+  // One endless turn: reach back for its start, within bounds.
+  const oneTurn = [{ role: "user", timestamp: 0 }, ...Array.from({ length: 300 }, (_, i) => ({ role: "toolResult", timestamp: i + 1, toolCallId: `c${i}` }))];
+  assert.equal(tailStart(oneTurn), 0);
+  const huge = [{ role: "user", timestamp: 0 }, ...Array.from({ length: 2000 }, (_, i) => ({ role: "toolResult", timestamp: i + 1, toolCallId: `c${i}` }))];
+  assert.equal(tailStart(huge), huge.length - TAIL_MESSAGES, "no turn start in reach: the plain tail");
+});
+
+test("a tail renders with the ids the whole transcript gives those rows", () => {
+  const long = longSession(100);
+  const from = tailStart(long);
+  const whole = snapshotItems(long);
+  const tail = snapshotItems(long.slice(from), from);
+  const wholeIds = whole.map((item) => item.id);
+  assert.deepEqual(tail.map((item) => item.id), wholeIds.slice(wholeIds.length - tail.length));
+});
+
+test("a tail is used only when it describes the copy the index knows", () => {
+  const long = longSession(100);
+  const from = tailStart(long);
+  const entry = { sessionId: "s", count: long.length, last: fingerprint(long.at(-1)) };
+  const tail = { v: 2, machineId: "m", sessionId: "s", updatedAt: 1, savedAt: 1, from, count: long.length, last: entry.last, session: { id: "s" }, state: null, messages: long.slice(from) };
+  assert.equal(parseTail(tail, "m", entry), tail);
+  assert.equal(parseTail(tail, "m", { ...entry, count: long.length + 2 }), undefined, "the copy grew without its tail (a crash between writes)");
+  assert.equal(parseTail(tail, "m", { ...entry, last: "other" }), undefined);
+  assert.equal(parseTail(tail, "other", entry), undefined);
+  assert.equal(parseTail({ ...tail, from: from + 1 }, "m", entry), undefined, "its messages do not reach the copy's end");
+  assert.equal(parseTail({ ...tail, messages: tail.messages.slice(0, -1) }, "m", entry), undefined);
+  assert.equal(parseTail({ ...tail, messages: [] }, "m", entry), undefined);
+  assert.equal(parseTail({ ...tail, messages: [null] }, "m", entry), undefined);
+  assert.equal(parseTail("{", "m", entry), undefined);
+});
+
+test("a tail asks for a delta; the whole copy goes under it; anything that does not fit is refused", () => {
+  const long = longSession(100);
+  const from = tailStart(long);
+  const tail = { offset: from, messages: long.slice(from) };
+  const held = heldOfWindow(tail);
+  assert.deepEqual(held, { since: long.length, last: fingerprint(long.at(-1)) });
+  assert.equal(heldOfWindow({ offset: 0, messages: [] }), undefined);
+
+  const more = [{ role: "user", timestamp: 9_000, content: "next" }, { role: "assistant", timestamp: 9_001, responseId: "rx", content: [] }];
+  const extended = mergeWindow(tail, held, { from: long.length, total: long.length + 2, messages: more });
+  assert.equal(extended.offset, from);
+  assert.equal(extended.messages.length, long.length - from + 2);
+  assert.deepEqual(mergeWindow(tail, held, { from: long.length, total: long.length, messages: [] }), tail, "nothing new");
+  assert.deepEqual(mergeWindow(tail, held, { from: 0, total: long.length, messages: long }), { offset: 0, messages: long }, "everything replaces the tail");
+
+  assert.equal(mergeWindow(tail, held, { from: long.length - 1, total: long.length + 1, messages: more }), undefined, "another from");
+  assert.equal(mergeWindow(tail, held, { from: long.length, total: long.length + 3, messages: more }), undefined, "the count does not add up");
+  assert.equal(mergeWindow(tail, { ...held, last: "x" }, { from: long.length, total: long.length + 2, messages: more }), undefined);
+  assert.equal(mergeWindow(tail, undefined, { from: long.length, messages: more }), undefined);
+  assert.equal(mergeWindow({ offset: 5, messages: [] }, { since: 5, last: "" }, { from: 5, messages: more }), undefined, "an empty window proves nothing");
+
+  // The whole copy, read later, goes under the extended tail: the transcript is the daemon's.
+  const whole = attachHead(extended, long);
+  assert.deepEqual(whole, { offset: 0, messages: [...long, ...more] });
+  assert.deepEqual(attachHead({ offset: 0, messages: long }, []), { offset: 0, messages: long }, "nothing to attach");
+  // A copy that does not fit the tail (rewritten, damaged, shorter) is never spliced in.
+  assert.equal(attachHead(extended, long.slice(0, from)), undefined, "does not reach the tail");
+  const rewritten = long.map((message, i) => (i === from ? { ...message, timestamp: -1 } : message));
+  assert.equal(attachHead(extended, rewritten), undefined, "disagrees where they meet");
+  assert.equal(attachHead({ offset: 3, messages: [] }, long), undefined);
 });

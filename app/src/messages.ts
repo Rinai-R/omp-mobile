@@ -145,7 +145,8 @@ function toolCallsOf(message: AgentMessage): ToolItem[] {
  * live events produce, so reopening a chat shows each tool call under its own
  * name and arguments with its result attached, not a separate result card.
  */
-export function snapshotItems(messages: AgentMessage[]): ChatItem[] {
+export function snapshotItems(messages: AgentMessage[], offset = 0): ChatItem[] {
+  // `offset`: where `messages` start in the transcript (a cached tail), so ids stay those of the whole.
   const items: ChatItem[] = [];
   const tools = new Map<string, ToolItem>();
   messages.forEach((message, index) => {
@@ -174,7 +175,7 @@ export function snapshotItems(messages: AgentMessage[]): ChatItem[] {
       });
       return;
     }
-    const item = messageToItem(message, index);
+    const item = messageToItem(message, offset + index);
     if (item !== undefined) items.push(item);
     for (const tool of toolCallsOf(message)) {
       tools.set(tool.id, tool);

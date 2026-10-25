@@ -5,9 +5,12 @@ import {
   fingerprint,
   parseCached,
   parseIndex,
+  parseTail,
   replaces,
   retained,
+  tailStart,
   type CacheEntry,
+  type CachedTail,
   type CachedTranscript,
 } from "./cache";
 import type { AgentMessage, SessionState, SessionSummary } from "./types";
@@ -15,7 +18,8 @@ import type { AgentMessage, SessionState, SessionSummary } from "./types";
 /**
  * What the phone remembers of each machine between launches: a copy of every
  * session active in the last 24 hours (the daemon's slim messages, state and
- * summary, `c-*.json`), an index of those copies (`index.json`: how current
+ * summary, `c-*.json`), the end of each copy (`h-*.json`, a chat's first paint,
+ * small whatever the session's size), an index of those copies (`index.json`: how current
  * each is, what it holds, when it was viewed), and the last session list
  * (`s-*.json`). A chat opens from its copy at once, offline too, and asks the
  * daemon only for what is new. Every write is best effort and every read
@@ -36,6 +40,10 @@ interface SavedSessions {
 
 function copyFile(machineId: string, sessionId: string): File {
   return new File(ROOT, `c-${cacheName(machineId, sessionId)}.json`);
+}
+
+function tailFile(machineId: string, sessionId: string): File {
+  return new File(ROOT, `h-${cacheName(machineId, sessionId)}.json`);
 }
 
 function sessionsFile(machineId: string): File {
@@ -110,7 +118,7 @@ function sweep(now = Date.now()): void {
       const stray =
         name.startsWith("t-") ||
         (name.endsWith(".tmp") && old) ||
-        (name.startsWith("c-") && name.endsWith(".json") && !known.has(name.slice(2, -5)) && old);
+        ((name.startsWith("c-") || name.startsWith("h-")) && name.endsWith(".json") && !known.has(name.slice(2, -5)) && old);
       if (stray) item.delete();
     }
   } catch {
@@ -150,6 +158,16 @@ export async function loadCached(machineId: string, sessionId: string): Promise<
 }
 
 /**
+ * The end of a session's copy, to paint before the whole copy is read; only
+ * when it describes the copy the index knows (count and last message).
+ */
+export async function loadTail(machineId: string, sessionId: string): Promise<CachedTail | undefined> {
+  const entry = cachedEntry(machineId, sessionId);
+  if (entry === undefined) return undefined;
+  return parseTail(await readJson(tailFile(machineId, sessionId)), machineId, entry);
+}
+
+/**
  * Save a session's copy, current to `updatedAt` (the daemon's clock). An older
  * copy never replaces a newer one: a chat's snapshot and a background refresh
  * can both be on their way. Answers whether it was saved.
@@ -168,6 +186,23 @@ export function saveCached(
     const now = Date.now();
     const record: CachedTranscript = { v: 2, machineId, sessionId, savedAt: now, ...copy };
     write(copyFile(machineId, sessionId), JSON.stringify(record));
+    const last = fingerprint(copy.messages[copy.messages.length - 1]);
+    const from = tailStart(copy.messages);
+    const tail: CachedTail = {
+      v: 2,
+      machineId,
+      sessionId,
+      updatedAt: copy.updatedAt,
+      savedAt: now,
+      from,
+      count: copy.messages.length,
+      last,
+      session: copy.session,
+      state: copy.state,
+      messages: copy.messages.slice(from),
+    };
+    // Written after the copy and before the index: a tail that does not match the index is not used.
+    write(tailFile(machineId, sessionId), JSON.stringify(tail));
     entries().set(name, {
       machineId,
       sessionId,
@@ -175,7 +210,7 @@ export function saveCached(
       viewedAt: viewed ? now : (existing?.viewedAt ?? 0),
       savedAt: now,
       count: copy.messages.length,
-      last: fingerprint(copy.messages[copy.messages.length - 1]),
+      last,
     });
     saveIndex();
     return true;
@@ -215,8 +250,7 @@ export function dropTranscript(machineId: string, sessionId: string): void {
   try {
     entries().delete(cacheName(machineId, sessionId));
     saveIndex();
-    const file = copyFile(machineId, sessionId);
-    if (file.exists) file.delete();
+    for (const file of [copyFile(machineId, sessionId), tailFile(machineId, sessionId)]) if (file.exists) file.delete();
   } catch {
     // Nothing to drop.
   }
@@ -246,8 +280,7 @@ export function dropMachine(machineId: string): void {
     for (const [name, entry] of known) {
       if (entry.machineId !== machineId) continue;
       known.delete(name);
-      const file = new File(ROOT, `c-${name}.json`);
-      if (file.exists) file.delete();
+      for (const file of [new File(ROOT, `c-${name}.json`), new File(ROOT, `h-${name}.json`)]) if (file.exists) file.delete();
     }
     saveIndex();
     const list = sessionsFile(machineId);
