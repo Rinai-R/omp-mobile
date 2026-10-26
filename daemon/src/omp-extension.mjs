@@ -21,7 +21,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderQr } from "./qr.mjs";
-import { requestPath } from "./takeover.mjs";
+import { requestPath, shellWord } from "./takeover.mjs";
 
 const HOME = join(homedir(), ".omp-mobile");
 const STATE_FILE = join(HOME, "daemon.json");
@@ -229,7 +229,7 @@ export default function ompMobile(pi) {
       rmSync(requestPath(file), { force: true });
       // OMP closes once the session is idle; the daemon signals it if that does not come soon,
       // and tells the terminal where the session went once omp is gone.
-      ctx.ui.notify(`OMP Mobile: this session continues on ${request.device}. Closing omp here…`, "warning");
+      ctx.ui.notify(`OMP Mobile: this session continues on ${request.device}. Closing omp here; resume it later with: omp --resume ${shellWord(file)}`, "warning");
       if (!ctx.isIdle()) {
         ctx.abort();
         const deadline = Date.now() + TAKEOVER_IDLE_WAIT_MS;

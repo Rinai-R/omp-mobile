@@ -1125,7 +1125,7 @@ class Daemon {
       const deadline = Date.now() + 3_000;
       while ((await this.owners())?.get(id) === pid && Date.now() < deadline) await new Promise((wait) => setTimeout(wait, 100));
       // Whoever looks at the terminal sees why omp closed.
-      if (info?.tty !== undefined) tellTerminal(info.tty, takeoverFarewell(device));
+      if (info?.tty !== undefined) tellTerminal(info.tty, takeoverFarewell({ device, sessionFile: stored.sessionFile }));
       const forks = forksOf(dirname(stored.sessionFile), id, since);
       if (forks.length > 0) this.log(new Error(`taking over ${id} from pid ${pid} left forked session files: ${forks.join(", ")}`));
       outcome = { pid, via: left.via, waitedMs: left.waitedMs, busy, forks };
