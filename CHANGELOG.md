@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- A session the phone takes over now leaves the terminal with the command that brings it back, as leaving omp by hand does: the session file is printed with `omp --resume <path>` (quoted when it needs to be), and the same hint is in the notice omp shows just before it closes (#52).
+
+### 中文
+
+- 手机接管会话后，终端会像手动退出 omp 一样给出恢复命令：打印会话文件路径和 `omp --resume <路径>`（必要时加引号），omp 关闭前的提示里也有同一条命令（#52）。
+
 ## v0.4.3
 
 Chats open instantly from a 24-hour cache kept in sync, download only what is new, and read as one calm conversation.

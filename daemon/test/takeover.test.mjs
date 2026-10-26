@@ -189,7 +189,14 @@ test("the extension takes only a fresh request for its own process and session",
   assert.equal(takeoverRequest(file, "s-other", 41, 2_000), undefined, "another session");
   assert.equal(takeoverRequest(file, "s-req", 41, 120_000), undefined, "stale");
   assert.equal(takeoverRequest(undefined, "s-req", 41, 2_000), undefined, "no file (an unsaved session)");
-  assert.match(takeoverFarewell("Pixel"), /continues on Pixel/);
+  const farewell = takeoverFarewell({ device: "Pixel", sessionFile: "/Users/me/.omp/agent/sessions/-p/2026-01-01T00-00-00-000Z_abc.jsonl" });
+  assert.match(farewell, /continues on the phone \(Pixel\)/);
+  assert.match(farewell, /omp --resume \/Users\/me\/\.omp\/agent\/sessions\/-p\/2026-01-01T00-00-00-000Z_abc\.jsonl/);
+  // A path with spaces or quotes is quoted so the command can be pasted as printed.
+  const quoted = takeoverFarewell({ device: "Pixel", sessionFile: "/Users/me/My Sessions/it's.jsonl" });
+  assert.ok(quoted.includes("omp --resume '/Users/me/My Sessions/it'\\''s.jsonl'"), quoted);
+  // Without a file there is no command to print.
+  assert.equal(/--resume/.test(takeoverFarewell({ device: "Pixel", sessionFile: "" })), false);
 });
 
 /** A fake `omp --mode rpc-ui` that resumes the session it is given. */

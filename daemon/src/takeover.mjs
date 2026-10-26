@@ -175,9 +175,21 @@ export function tellTerminal(tty, text) {
   }
 }
 
-/** What the terminal is told once omp left it. */
-export function takeoverFarewell(device) {
-  return `omp-mobile: this session continues on ${device}. omp closed here so the phone could take it over.`;
+/** A path as a shell word: quoted only when it has to be. */
+export function shellWord(value) {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * What the terminal is told once omp left it: where the session went, and the
+ * command that brings it back -- the hint leaving omp by hand also leaves.
+ * @param {{device: string, sessionFile: string}} leaving
+ */
+export function takeoverFarewell({ device, sessionFile }) {
+  const lines = [`This session continues on the phone (${device}).`, "omp closed here so the phone could take it over."];
+  const file = typeof sessionFile === "string" && sessionFile !== "" ? shellWord(sessionFile) : "";
+  if (file !== "") lines.push("", "Resume it in this terminal with:", `  omp --resume ${file}`);
+  return lines.join("\n");
 }
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
