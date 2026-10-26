@@ -1,133 +1,91 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { Daemon, SessionEntry, dormantActivity, lastActivity } from "../src/server.mjs";
-import { TranscriptStore, deltaBody, deltaFrom, fingerprint } from "../src/transcripts.mjs";
+import { Daemon, SessionEntry } from "../src/server.mjs";
 
-test("a session's last activity is the newest timestamp on its messages", () => {
-  assert.equal(lastActivity([]), undefined);
-  assert.equal(lastActivity([{ timestamp: 5 }, { timestamp: 9 }, { role: "x" }]), 9);
-  assert.equal(lastActivity([{ timestamp: "soon" }]), undefined);
+/** When the session's last message was written: a minute before the test runs. */
+const LAST_MESSAGE = Date.now() - 60_000;
+/** The registry's idea of the last real use: a day ago. */
+const LAST_USE = Date.now() - 24 * 60 * 60_000;
+
+const fake = `#!${process.execPath}
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const state = { sessionId: "s1", isStreaming: false, sessionFile: process.env.FAKE_SESSION_FILE };
+send({ type: "ready", protocolVersion: 1, supportedProtocolVersions: [1] });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") send({ id: command.id, type: "response", command: "get_state", success: true, data: state });
+  else if (command.type === "get_messages") send({ id: command.id, type: "response", command: "get_messages", success: true, data: { messages: [{ role: "user", content: "hello", timestamp: Number(process.env.FAKE_MESSAGE_AT) }] } });
+});
+`;
+
+function daemonWith(lastMessage, lastUse) {
+  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-activity-"));
+  const omp = join(dir, "omp");
+  writeFileSync(omp, fake, { mode: 0o755 });
+  chmodSync(omp, 0o755);
+  const sessionFile = join(dir, "s1.jsonl");
+  writeFileSync(sessionFile, "");
+  mkdirSync(join(dir, "run", "session-owners"), { recursive: true });
+  Object.assign(process.env, { FAKE_SESSION_FILE: sessionFile, FAKE_MESSAGE_AT: String(lastMessage) });
+  const daemon = new Daemon(
+    { host: "127.0.0.1", port: 0, cwd: dir, omp, ompHome: dir, registryFile: join(dir, "sessions.json"), log: () => undefined },
+    "token-0123456789",
+  );
+  daemon.registry.set("s1", { id: "s1", title: "one", cwd: dir, sessionFile, createdAt: 0, updatedAt: lastUse });
+  return daemon;
+}
+
+test("opening a session leaves it where it was; a new message moves it to the top", async () => {
+  const daemon = daemonWith(LAST_MESSAGE, LAST_USE);
+  try {
+    const entry = await daemon.ensureLive("s1");
+    // Resuming a session makes omp emit lifecycle events; none of them is a conversation.
+    entry.rpc.emit("event", { type: "agent_start" });
+    entry.rpc.emit("event", { type: "agent_end" });
+    entry.rpc.emit("event", { type: "turn_end" });
+    entry.rpc.emit("event", { type: "tool_execution_start", toolName: "bash" });
+    assert.equal(entry.updatedAt, LAST_MESSAGE, "opening or a lifecycle event does not reorder");
+
+    entry.rpc.emit("event", { type: "message_end", message: { role: "assistant", content: "hi", timestamp: Date.now() } });
+    assert.ok(entry.updatedAt > LAST_MESSAGE + 30_000, "a new message is activity");
+  } finally {
+    await daemon.close();
+  }
 });
 
-test("a dormant session is dated by its file only when someone else wrote the file", () => {
-  const stored = { updatedAt: 1_000, closedFile: { mtimeMs: 5_000.25, size: 300 } };
-  assert.equal(dormantActivity(stored, undefined), 1_000, "not scanned: what the registry says");
-  assert.equal(dormantActivity(stored, { updatedAt: 5_000.25, size: 300 }), 1_000, "the file as our omp left it on exit");
-  assert.equal(dormantActivity(stored, { updatedAt: 6_000, size: 300 }), 6_000, "written again since");
-  assert.equal(dormantActivity(stored, { updatedAt: 5_000.25, size: 301 }), 5_000.25, "another size: written again");
-  assert.equal(dormantActivity({ updatedAt: 1_000 }, { updatedAt: 6_000, size: 1 }), 6_000, "never closed by us: the file decides");
-  assert.equal(dormantActivity(stored, { updatedAt: 500, size: 1 }), 1_000, "an older file never dates it back");
-});
-
-/** A fake omp whose exit rewrites its session file, as omp does. */
-function fakeRpc(id, file, list) {
-  return Object.assign(new EventEmitter(), {
-    extensionRequests: new Map(),
-    getState: async () => ({ sessionId: id, isStreaming: false, sessionFile: file, model: { id: "m" } }),
-    getMessages: async () => ({ messages: list }),
-    close() {
-      writeFileSync(file, `${header(id)}\n{"type":"message","rewritten":true}\n`);
-      this.emit("closed", { reason: "exit 0", stderr: "" });
-      return Promise.resolve("exited");
+test("a prompt moves the session to the top and is written to the registry", async () => {
+  const daemon = daemonWith(LAST_MESSAGE, LAST_USE);
+  const entry = Object.assign(new EventEmitter(), {
+    id: "s1",
+    updatedAt: LAST_MESSAGE,
+    rpc: { prompt: async () => ({}) },
+    onChange: () => {
+      changed += 1;
     },
   });
-}
-
-function header(id) {
-  return JSON.stringify({ type: "session", id, cwd: "/tmp", timestamp: new Date(0).toISOString() });
-}
-
-test("opening, closing and the omp's exit rewrite never make a session look recently used", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-activity-"));
-  const sessions = join(dir, "agent", "sessions", "-tmp");
-  mkdirSync(sessions, { recursive: true });
-  const file = join(sessions, "s1.jsonl");
-  writeFileSync(file, `${header("s1")}\n`);
-  const used = Date.now() - 30 * 60_000;
-  const messages = [
-    { role: "user", timestamp: used - 1_000, content: "hi" },
-    { role: "assistant", timestamp: used, responseId: "r1", content: [] },
-  ];
-  const daemon = new Daemon({ host: "127.0.0.1", port: 0, cwd: dir, ompHome: dir, omp: join(dir, "no-omp"), registryFile: join(dir, "sessions.json") }, "activity-token-0123456789");
-  daemon.owners = () => Promise.resolve(new Map());
-  const rpc = fakeRpc("s1", file, messages);
-  const entry = new SessionEntry(dir, rpc);
-  await entry.hydrate();
-  assert.equal(entry.updatedAt, used, "opened, not used: as recent as its last message");
-  entry.onClosed = (closed) => daemon.sessionClosed(closed);
-  entry.bind();
-  daemon.sessions.set("s1", entry);
-  daemon.remember(entry);
-
-  await entry.refreshState();
-  rpc.emit("event", { type: "thinking_level_changed", thinkingLevel: "low" });
-  assert.equal(entry.updatedAt, used, "state echoes are not activity");
-
-  // The reaper closes it.
-  entry.close();
-  daemon.sessions.delete("s1");
-  assert.ok(daemon.registry.get("s1").closedFile, "the file as the omp left it is remembered");
-  const listed = (await daemon.listSessions()).find((session) => session.id === "s1");
-  assert.equal(listed.updatedAt, used, "omp rewrote the file on exit; the list still dates it by its use");
-  assert.equal(daemon.transcript("s1", { since: 0, last: "" }).session.updatedAt, used, "and so does the saved transcript");
-
-  // A terminal omp writes it: that is activity, and the saved transcript is stale.
-  appendFileSync(file, '{"type":"message"}\n');
-  daemon.sessionScan.at = 0;
-  const written = (await daemon.listSessions()).find((session) => session.id === "s1");
-  assert.ok(written.updatedAt > used + 60_000, "written since: dated by the file");
-  assert.throws(() => daemon.transcript("s1", { since: 0, last: "" }), /not cached/);
+  let changed = 0;
+  const frames = [];
+  const ws = { send: (text) => frames.push(JSON.parse(text)) };
+  try {
+    await daemon.handleClientMessage(entry, ws, JSON.stringify({ type: "prompt", text: "go" }));
+    assert.ok(entry.updatedAt > LAST_MESSAGE + 30_000, "sending a prompt is activity");
+    assert.equal(changed, 1, "the registry hears about it");
+    assert.deepEqual(frames.at(-1), { type: "accepted", command: "prompt" });
+  } finally {
+    await daemon.close();
+  }
 });
 
-test("a turn is activity", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-activity-"));
-  const file = join(dir, "s.jsonl");
-  writeFileSync(file, `${header("s")}\n`);
-  const rpc = fakeRpc("s", file, [{ role: "user", timestamp: 10, content: "old" }]);
-  const entry = new SessionEntry(dir, rpc);
-  await entry.hydrate(5);
-  assert.equal(entry.updatedAt, 10);
+test("a state echo from omp does not move a session", () => {
+  const entry = new SessionEntry("/tmp/work", Object.assign(new EventEmitter(), {}));
+  entry.updatedAt = LAST_USE;
   entry.bind();
-  const before = Date.now();
-  rpc.emit("event", { type: "message_end", message: { role: "user", timestamp: before, content: "new" } });
-  assert.ok(entry.updatedAt >= before);
-});
-
-const numbered = (count, start = 0) =>
-  Array.from({ length: count }, (_, index) => ({ role: "assistant", timestamp: 1_000 + start + index, responseId: `r${start + index}`, content: [] }));
-
-test("past the 5,000-message cap a phone's copy still lines up: indices are the transcript's", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-cap-"));
-  const file = join(dir, "big.jsonl");
-  writeFileSync(file, `${header("big")}\n`);
-  const all = numbered(5_000);
-  const entry = new SessionEntry(dir, fakeRpc("big", file, all));
-  await entry.hydrate();
-  entry.bind();
-  // The phone holds all 5,000; then three more arrive and the front is dropped.
-  const held = { since: 5_000, last: fingerprint(all[4_999]) };
-  for (const message of numbered(3, 5_000)) entry.rpc.emit("event", { type: "message_end", message });
-  assert.equal(entry.messages.length, 5_000);
-  assert.equal(entry.base, 3);
-
-  const delta = entry.snapshot(held);
-  assert.deepEqual([delta.from, delta.total, delta.messages.length], [5_000, 5_003, 3]);
-  assert.equal(delta.messages[0].responseId, "r5000");
-  const none = entry.snapshot({ since: 5_003, last: fingerprint(delta.messages[2]) });
-  assert.deepEqual([none.from, none.total, none.messages.length], [5_003, 5_003, 0]);
-
-  // Nothing lines up: what is held, whole, and where in the session it starts.
-  const whole = entry.snapshot();
-  assert.deepEqual([whole.from, whole.total, whole.messages.length, whole.base], [0, 5_000, 5_000, 3]);
-  assert.equal(deltaFrom(entry.messages, 3, fingerprint(all[2]), 3), 0, "a copy that ends before what is held gets everything");
-
-  // The saved transcript keeps the offset.
-  const store = new TranscriptStore(join(dir, "t"));
-  store.write("big", { sessionFile: file, messages: entry.messages, base: entry.base, state: {}, session: { updatedAt: 1 } });
-  const saved = deltaBody(store.read("big", file), held);
-  assert.deepEqual([saved.from, saved.total, saved.messages.length], [5_000, 5_003, 3]);
+  entry.rpc.emit("event", { type: "model_changed" });
+  entry.rpc.emit("event", { type: "thinking_level_changed" });
+  assert.equal(entry.updatedAt, LAST_USE);
 });

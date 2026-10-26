@@ -58,8 +58,6 @@ const IDLE_SESSION_MS = 30 * 60_000;
 const REAP_INTERVAL_MS = 60_000;
 /** Messages a live session keeps in memory; older ones leave its front (its `base` counts them). */
 const MAX_LIVE_MESSAGES = 5_000;
-/** Events that are a session being used: a turn and what it streams. State and setting echoes are not. */
-const ACTIVITY_EVENT = /^(agent_|turn_|message_|tool_execution_|auto_compaction_|auto_retry_)/;
 /**
  * The fields of a tool result's `details` the app reads: an edit's diff, a
  * read's line count, a command's run time, a screenshot's file. The rest
@@ -638,8 +636,10 @@ class SessionEntry {
 
   bind() {
     this.rpc.on("event", (event) => {
-      if (typeof event?.type === "string" && ACTIVITY_EVENT.test(event.type)) this.updatedAt = Date.now();
       if (event.type === "message_end" && event.message) {
+        // A new message is what makes a session the most recent one; opening it,
+        // a lifecycle event from a resumed omp, or a state echo are not.
+        this.updatedAt = Date.now();
         this.messages.push(phoneMessage(event.message, this.blobDir));
         if (this.messages.length > MAX_LIVE_MESSAGES) {
           // Indices stay the transcript's: a phone's `since` still lines up after the front is dropped.
@@ -1253,6 +1253,8 @@ class Daemon {
           const text = typeof message.text === "string" ? message.text : "";
           if (text.trim() === "" && images.length === 0) throw new Error("empty prompt");
           await entry.rpc.prompt(text, images);
+          entry.updatedAt = Date.now();
+          entry.onChange?.(entry);
           ws.send(JSON.stringify({ type: "accepted", command: "prompt" }));
           return;
         }
@@ -1284,7 +1286,6 @@ class Daemon {
           }
           const state = await entry.rpc.setModel(message.provider, message.modelId);
           entry.state = state;
-          entry.updatedAt = Date.now();
           entry.onChange?.(entry);
           entry.broadcast({ type: "state", state });
           ws.send(JSON.stringify({ type: "accepted", command: "set_model" }));
@@ -1301,7 +1302,6 @@ class Daemon {
           if (typeof message.level !== "string" || message.level === "") throw new Error("set_thinking_level needs a level");
           const state = await entry.rpc.setThinkingLevel(message.level);
           entry.state = state;
-          entry.updatedAt = Date.now();
           entry.broadcast({ type: "state", state });
           ws.send(JSON.stringify({ type: "accepted", command: "set_thinking_level" }));
           return;
