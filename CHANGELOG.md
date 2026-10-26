@@ -5,10 +5,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 ## Unreleased
 
 - A session the phone takes over now leaves the terminal with the command that brings it back, as leaving omp by hand does: the session file is printed with `omp --resume <path>` (quoted when it needs to be), and the same hint is in the notice omp shows just before it closes (#52).
+- Opening a chat no longer moves it to the top of Home. A session's recency follows the conversation: sending a prompt and receiving a message count, while opening the session (which resumes its omp and makes it emit lifecycle events), changing its model or its thinking level do not (#53).
 
 ### 中文
 
 - 手机接管会话后，终端会像手动退出 omp 一样给出恢复命令：打印会话文件路径和 `omp --resume <路径>`（必要时加引号），omp 关闭前的提示里也有同一条命令（#52）。
+- 打开对话不再把它顶到首页最前面。会话的新旧只看对话本身：发送提示和收到消息算一次使用；打开会话（会恢复 omp 并产生生命周期事件）、切换模型或思考等级都不算（#53）。
 
 ## v0.4.3
 
