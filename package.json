@@ -1,6 +1,6 @@
 {
   "name": "omp-mobile-workspace",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "workspaces": [
     "daemon",

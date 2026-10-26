@@ -4,6 +4,10 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.4.4
+
+A session the phone takes over hands the terminal the command that resumes it, and opening a chat no longer reorders Home.
+
 - A session the phone takes over now leaves the terminal with the command that brings it back, as leaving omp by hand does: the session file is printed with `omp --resume <path>` (quoted when it needs to be), and the same hint is in the notice omp shows just before it closes (#52).
 - Opening a chat no longer moves it to the top of Home. A session's recency follows the conversation: sending a prompt and receiving a message count, while opening the session (which resumes its omp and makes it emit lifecycle events), changing its model or its thinking level do not (#53).
 
