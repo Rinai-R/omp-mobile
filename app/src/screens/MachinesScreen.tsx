@@ -16,8 +16,8 @@ import {
   StateDot,
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
-import { RemotePairingCard, useRemotePairing } from "../components/RemotePairing";
-import { parsePairingTicket } from "../dsh/pairing";
+import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
+import { parsePairingTicket } from "../relay/pairing";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
@@ -81,8 +81,8 @@ export function MachinesScreen({
   const closeSheet = useCallback(() => setSheet(null), []);
   /** The machine whose removal is being confirmed. */
   const [removing, setRemoving] = useState<Machine | null>(null);
-  /** A DSH Remote code pasted into the address: paired here, then the sheet closes. */
-  const remote = useRemotePairing(
+  /** A relay pairing code pasted into the address: paired here, then the sheet closes. */
+  const relay = useRelayPairing(
     machines,
     useCallback(
       (machine: Machine) => {
@@ -96,7 +96,7 @@ export function MachinesScreen({
   const ticket = parsePairingTicket(url.trim());
 
   const close = useCallback(() => {
-    remote.cancel();
+    relay.cancel();
     setAdding(false);
     setError(null);
     setBusy(false);
@@ -106,7 +106,7 @@ export function MachinesScreen({
       setToken("");
       setFromLink(false);
     }
-  }, [fromLink, remote.cancel]);
+  }, [fromLink, relay.cancel]);
 
   // A pairing link or the scanner's "Enter address" opens the sheet.
   useEffect(() => {
@@ -135,7 +135,7 @@ export function MachinesScreen({
   const connect = useCallback(async () => {
     if (ticket !== undefined) {
       setError(null);
-      remote.start(ticket);
+      relay.start(ticket);
       return;
     }
     setBusy(true);
@@ -162,7 +162,7 @@ export function MachinesScreen({
     } finally {
       setBusy(false);
     }
-  }, [machines, onAdd, remote.start, ticket, token, url]);
+  }, [machines, onAdd, relay.start, ticket, token, url]);
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
@@ -214,7 +214,7 @@ export function MachinesScreen({
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
-                const summary = summaryOf(probe, machine.lastSeen, now, machine.url);
+                const summary = summaryOf(probe, machine.lastSeen, now, machine);
                 return (
                   <Row
                     key={machine.id}
@@ -272,8 +272,8 @@ export function MachinesScreen({
       />
 
       <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
-        {remote.busy ? (
-          <RemotePairingCard code={remote.code} c={colors} onCancel={remote.cancel} />
+        {relay.busy ? (
+          <RelayPairingCard code={relay.code} c={colors} onCancel={relay.cancel} />
         ) : (
           <>
             <Field
@@ -286,7 +286,7 @@ export function MachinesScreen({
             {ticket === undefined ? (
               <Field label={t("machines.addSheet.token")} value={token} onChangeText={setToken} secure />
             ) : null}
-            {(remote.error ?? error) !== null ? <Text style={styles.error}>{remote.error ?? error}</Text> : null}
+            {(relay.error ?? error) !== null ? <Text style={styles.error}>{relay.error ?? error}</Text> : null}
             <Button
               label={t("machines.addSheet.connect")}
               onPress={() => void connect()}

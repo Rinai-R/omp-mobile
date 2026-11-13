@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { pairingContent, pairingWidget, readState, tokenOf } from "../src/omp-extension.mjs";
+import { pairingContent, pairingWidget } from "../src/omp-extension.mjs";
+import { readState, tokenOf } from "../src/state.mjs";
 import { Daemon, parseArgs } from "../src/server.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "omp-mobile-ext-"));

@@ -15,11 +15,17 @@ export interface Machine {
   /** The user's own name for this computer on this phone; the host name when absent. */
   label?: string;
   /**
-   * A computer reached through a DSH Remote server rather than its own daemon:
-   * the server it was paired on and its Host device. `url` is then
-   * `<serverUrl>#<hostDeviceId>` and `token` empty; the credentials live in `dsh/hosts.ts`.
+   * A computer reached through a ds-harness-remote relay rather than over the
+   * tailnet. `url` is then `<serverUrl>#<hostDeviceId>` and `token` empty: the
+   * daemon adds its own token, and this phone's relay credentials live in `relay/hosts.ts`.
    */
-  remote?: { serverUrl: string; hostDeviceId: string };
+  relay?: RelayLink;
+}
+
+/** A relay server and the computer's device on it. */
+export interface RelayLink {
+  serverUrl: string;
+  hostDeviceId: string;
 }
 
 export interface SessionSummary {

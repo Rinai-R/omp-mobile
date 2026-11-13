@@ -23,7 +23,7 @@ import {
   type LayoutChangeEvent,
 } from "react-native";
 import { editDiff } from "../diff";
-import { imageUri } from "../media";
+import { imageUri, relayImageUri } from "../media";
 import { resultText } from "../messages";
 import { t } from "../i18n/index.ts";
 import {
@@ -352,13 +352,26 @@ export function Thumbs({
 }): ReactNode {
   const styles = useStyles(createStyles);
   const [open, setOpen] = useState<string | null>(null);
+  /** Blob images of a relay machine, fetched through its tunnel by part index. */
+  const [fetched, setFetched] = useState<ReadonlyMap<number, string>>(new Map());
+  useEffect(() => {
+    let live = true;
+    (parts ?? []).forEach((part, index) => {
+      void relayImageUri(machine, part)?.then((uri) => {
+        if (live && uri !== undefined) setFetched((current) => new Map(current).set(index, uri));
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [machine, parts]);
   const uris = useMemo(
     () =>
       (parts ?? [])
-        .map((part) => imageUri(machine, part))
+        .map((part, index) => imageUri(machine, part) ?? fetched.get(index))
         .filter((uri): uri is string => uri !== undefined)
         .slice(0, max),
-    [machine, max, parts],
+    [fetched, machine, max, parts],
   );
   if (uris.length === 0) return null;
   const headers = { authorization: `Bearer ${machine.token}` };

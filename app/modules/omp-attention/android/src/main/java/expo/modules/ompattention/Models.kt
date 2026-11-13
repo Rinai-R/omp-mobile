@@ -34,14 +34,19 @@ data class AttentionFrame(
   }
 }
 
-/** A paired computer whose events the service follows: its daemon base URL and bearer token. */
+/**
+ * A paired computer whose events the service follows: its daemon base URL and
+ * bearer token, or [relay]: reached through a relay, whose events the app's JS
+ * receives and hands to [AttentionService.deliver] (the service only keeps the process alive).
+ */
 data class Machine(
   val id: String,
   val name: String,
   val url: String,
   val token: String,
+  val relay: Boolean = false,
 ) {
-  fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("url", url).put("token", token)
+  fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("url", url).put("token", token).put("relay", relay)
 
   companion object {
     fun fromJson(json: JSONObject): Machine = Machine(
@@ -49,6 +54,7 @@ data class Machine(
       name = json.optString("name"),
       url = json.getString("url"),
       token = json.getString("token"),
+      relay = json.optBoolean("relay", false),
     )
   }
 }

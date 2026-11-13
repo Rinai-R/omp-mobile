@@ -1,7 +1,8 @@
 /**
- * This phone's standing with a DSH Remote server after pairing: its device
- * token pair (refreshed before use), the Hosts it may reach, and their pinned
- * identity keys. Endpoints from ds-harness-remote `docs/protocol.md` §8.
+ * This phone's standing with a ds-harness-remote relay server after pairing:
+ * its device token pair (refreshed before use), the computers it may reach,
+ * and their pinned identity keys. Endpoints from ds-harness-remote
+ * `docs/protocol.md` §8 and `docs/device-pairing-v1.md` §6.
  */
 import { t } from "../i18n/index.ts";
 import { z } from "zod";
@@ -77,7 +78,7 @@ export class RemoteServerApi {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ deviceId: this.deviceId, refreshToken: this.tokens.refreshToken }),
       });
-      if (!response.ok) throw new RemoteServerError(response.status, t("remote.renewRefused"));
+      if (!response.ok) throw new RemoteServerError(response.status, t("relay.renewRefused"));
       const next = tokensSchema.parse(await response.json());
       await this.onTokens(next);
       this.tokens = next;
@@ -88,18 +89,17 @@ export class RemoteServerApi {
     return this.refreshing;
   }
 
-  private async get(path: string): Promise<unknown> {
-    const send = async (token: string) =>
-      fetch(`${this.serverUrl}${path}`, { headers: { authorization: `Bearer ${token}` } });
+  private async request(path: string, method = "GET"): Promise<Response> {
+    const send = async (token: string) => fetch(`${this.serverUrl}${path}`, { method, headers: { authorization: `Bearer ${token}` } });
     let response = await send(await this.accessToken());
     if (response.status === 401) response = await send((await this.refresh()).accessToken);
     if (!response.ok) throw new RemoteServerError(response.status, `${path}: HTTP ${response.status}`);
-    return response.json();
+    return response;
   }
 
   /** The Hosts this phone is authorized for, with online state. */
   async hosts(): Promise<RemoteHostListing[]> {
-    const body = z.object({ items: z.array(z.unknown()) }).parse(await this.get("/api/v1/devices"));
+    const body = z.object({ items: z.array(z.unknown()) }).parse(await (await this.request("/api/v1/devices")).json());
     return body.items.flatMap((item) => {
       const host = hostSchema.safeParse(item);
       return host.success ? [host.data] : [];
@@ -108,15 +108,11 @@ export class RemoteServerApi {
 
   /** One Host with the identity key its Noise session must prove. */
   async host(deviceId: string): Promise<RemoteHost> {
-    return peerSchema.parse(await this.get(`/api/v1/devices/${encodeURIComponent(deviceId)}`));
+    return peerSchema.parse(await (await this.request(`/api/v1/devices/${encodeURIComponent(deviceId)}`)).json());
   }
 
-  /** ICE servers for a WebRTC attempt; none means relay only. */
-  async iceServers(connectionId: string): Promise<{ urls: string | string[]; username?: string; credential?: string }[]> {
-    const body = await this.get(`/api/v1/turn/credentials?connection_id=${encodeURIComponent(connectionId)}`).catch(() => ({}));
-    const parsed = z
-      .object({ iceServers: z.array(z.object({ urls: z.union([z.string(), z.array(z.string())]), username: z.string().optional(), credential: z.string().optional() })) })
-      .safeParse(body);
-    return parsed.success ? parsed.data.iceServers : [];
+  /** End this phone's pairing with one computer (the server drops the membership; its connections close). */
+  async revoke(hostDeviceId: string): Promise<void> {
+    await this.request(`/api/v1/device-memberships/${encodeURIComponent(hostDeviceId)}`, "DELETE");
   }
 }

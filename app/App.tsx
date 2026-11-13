@@ -26,8 +26,8 @@ import { nativeStrings, systemLocale, useLanguage } from "./src/i18n/native.ts";
 import { isPairingLink } from "./src/pairing";
 import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
-import { probeRemote } from "./src/dsh/sessions";
-import { dropRemote, forgetServer } from "./src/dsh/hosts";
+import { followRelayEvents } from "./src/relay/attention";
+import { forgetRelay } from "./src/relay/hosts";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
 import { dropMachine } from "./src/transcripts";
@@ -62,6 +62,11 @@ function notificationState(enabled: boolean): NotificationState {
   if (!Attention.isSupported()) return "unsupported";
   if (!enabled) return "off";
   return Attention.notificationsAllowed() ? "on" : "denied";
+}
+
+/** What the notification service is told to follow: relay machines are followed here and handed over. */
+function attentionMachines(machines: readonly Machine[]): Attention.AttentionMachine[] {
+  return machines.map((machine) => ({ id: machine.id, name: machine.name, url: machine.url, token: machine.token, relay: machine.relay !== undefined }));
 }
 
 /** A session known only by id (a notification tap, so one the daemon runs): the chat's snapshot fills in the rest. */
@@ -106,8 +111,7 @@ export default function App(): ReactNode {
       const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
       if (last !== undefined) setRoute({ kind: "home", machine: last });
       // The service follows these machines while the setting is on; it persists both for the boot receiver.
-      // The service speaks the daemon's protocol only: Remote machines notify while the app is open.
-      Attention.setMachines(stored.filter((item) => item.remote === undefined));
+      Attention.setMachines(attentionMachines(stored));
       const state = notificationState(storedSettings.notifications);
       Attention.setEnabled(state === "on");
       setNotifications(state);
@@ -136,6 +140,16 @@ export default function App(): ReactNode {
       offAttention();
     };
   }, []);
+
+  // Relay machines' events, followed here while notifications are on (the service keeps the app alive).
+  const relayIds = machines
+    .filter((machine) => machine.relay !== undefined)
+    .map((machine) => machine.id)
+    .join("\n");
+  useEffect(() => {
+    if (notifications !== "on" || relayIds === "") return undefined;
+    return followRelayEvents(machinesRef.current.filter((machine) => machine.relay !== undefined));
+  }, [notifications, relayIds]);
 
   // `omp-mobile://pair?...` links, whether they launched the app or arrived while it ran.
   useEffect(() => {
@@ -216,14 +230,14 @@ export default function App(): ReactNode {
     void saveMachines(next);
     // Only what the service reads: a probe's lastSeen does not restart the streams.
     const followed = (list: Machine[]) => list.map((item) => `${item.id}\n${item.url}\n${item.token}\n${item.name}`).join("\n\n");
-    if (followed(before) !== followed(next)) Attention.setMachines(next.filter((item) => item.remote === undefined));
+    if (followed(before) !== followed(next)) Attention.setMachines(attentionMachines(next));
   }, []);
 
   const probeOne = useCallback(
     (machine: Machine): Promise<void> => {
       const pending = inFlight.current.get(machine.id);
       if (pending !== undefined) return pending;
-      const run = (machine.remote === undefined ? probeMachine(machine) : probeRemote(machine))
+      const run = probeMachine(machine)
         .then((probe) => {
           // A machine removed while it was probed has no row to update.
           if (!machinesRef.current.some((item) => item.id === machine.id)) return;
@@ -311,10 +325,8 @@ export default function App(): ReactNode {
     (machine: Machine) => {
       persist(machinesRef.current.filter((item) => item.id !== machine.id));
       dropMachine(machine.id);
-      if (machine.remote !== undefined) {
-        dropRemote(machine);
-        void forgetServer(machine.remote.serverUrl, machinesRef.current);
-      }
+      // Through a relay the pairing itself ends too: the computer stops listing this phone.
+      if (machine.relay !== undefined) void forgetRelay(machine.relay, machinesRef.current).catch(() => undefined);
       setProbes((current) => {
         const next = new Map(current);
         next.delete(machine.id);

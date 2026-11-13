@@ -21,6 +21,8 @@ import { AttentionTracker, serveEvents } from "./attention.mjs";
 import { listOmpSessions, oneLine, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
 import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
+import { RELAY_HEADER, RelayHost } from "./relay.mjs";
+import { DEFAULT_RELAY, runRelayCli } from "./relay-control.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
@@ -28,6 +30,7 @@ const DEFAULT_PORT = 7390;
 const DEFAULT_TOKEN_FILE = join(homedir(), ".omp-mobile", "token");
 const DEFAULT_REGISTRY_FILE = join(homedir(), ".omp-mobile", "sessions.json");
 const DEFAULT_STATE_FILE = join(homedir(), ".omp-mobile", "daemon.json");
+const DEFAULT_RELAY_DIR = join(homedir(), ".omp-mobile", "relay");
 const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
 /** Terminal sessions listed next to the daemon's own, newest first. */
@@ -146,6 +149,8 @@ function parseArgs(argv) {
     tailscale: "tailscale",
     whois: true,
     qr: true,
+    relay: "",
+    relayDir: DEFAULT_RELAY_DIR,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -208,6 +213,19 @@ function parseArgs(argv) {
       case "--no-qr":
         options.qr = false;
         break;
+      case "--relay":
+        // The server is optional: `--relay` alone means the public ds-harness-remote relay.
+        if (value !== undefined && !value.startsWith("--")) {
+          options.relay = value;
+          i += 1;
+        } else {
+          options.relay = DEFAULT_RELAY;
+        }
+        break;
+      case "--relay-dir":
+        options.relayDir = resolve(value);
+        i += 1;
+        break;
       case "--help":
       case "-h":
         printHelp();
@@ -245,6 +263,14 @@ Admission: on a non-loopback --host every request and WebSocket upgrade must nam
 this node in Host (421 otherwise) and come from a tailnet device of this node's
 user (403 otherwise), before the token is checked. Loopback hosts skip admission.
   --no-qr                Do not print the pairing QR code at startup
+  --relay [url]          Also serve paired phones through a ds-harness-remote relay (default ${DEFAULT_RELAY}),
+                         end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay
+  --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
+
+Relay commands (talk to the running daemon; same --state-file):
+  omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
+  omp-mobile relay status     Relay server, connection and paired phones
+  omp-mobile relay revoke <phone device id>
 `);
 }
 
@@ -746,6 +772,29 @@ class Daemon {
     // the phone's WebSocket client (OkHttp) asks for permessage-deflate on its own.
     this.wsServer = new WebSocketServer({ noServer: true, perMessageDeflate: { threshold: 1_024 } });
     this.server.on("upgrade", (req, socket, head) => void this.admitUpgrade(req, socket, head));
+    /**
+     * Phones paired through a relay reach the daemon through this loopback-only
+     * listener (`relay.mjs` adds the token): the same API, without the tailnet admission.
+     */
+    this.tunnelServer = undefined;
+    /** @type {RelayHost | undefined} */
+    this.relay = undefined;
+    if (options.relay) {
+      this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
+      this.tunnelServer.on("upgrade", (req, socket, head) => {
+        socket.on("error", () => socket.destroy());
+        this.handleUpgrade(req, socket, head);
+      });
+      this.relay = new RelayHost({
+        serverUrl: options.relay,
+        dir: options.relayDir,
+        name: `omp-mobile on ${hostname().replace(/\.local$/, "")}`,
+        version: VERSION,
+        port: () => this.tunnelServer.address().port,
+        token: this.token,
+        log: (line) => this.log(line),
+      });
+    }
   }
 
   baseUrl() {
@@ -828,7 +877,12 @@ class Daemon {
         liveSessions: this.sessions.size,
         eventStreams: this.streams.size,
         lastPhone: this.lastPhone,
+        relay: this.relay === undefined ? null : await this.relay.status(),
       });
+      return;
+    }
+    if (url.pathname === "/relay" || url.pathname.startsWith("/relay/")) {
+      await this.handleRelay(req, res, url);
       return;
     }
     if (url.pathname === "/events" && req.method === "GET") {
@@ -1328,17 +1382,72 @@ class Daemon {
    */
   noteClient(req) {
     if (req.headers["x-omp-mobile-probe"] !== undefined) return;
-    const address = String(req.socket?.remoteAddress ?? "").replace(/^::ffff:/i, "");
+    // Through the relay every request comes from loopback: name the path instead.
+    const address = req.headers[RELAY_HEADER] !== undefined ? "relay" : String(req.socket?.remoteAddress ?? "").replace(/^::ffff:/i, "");
     this.lastPhone = { address, at: Date.now() };
   }
 
-  listen() {
-    return new Promise((resolveListen) => {
-      this.server.listen(this.options.port, this.options.host, () => {
-        this.startTimers();
-        resolveListen();
-      });
-    });
+  /**
+   * Relay pairing and phones, for `omp-mobile relay` and `/mobile relay` on this
+   * computer; never through the relay itself (a paired phone cannot pair or revoke).
+   */
+  async handleRelay(req, res, url) {
+    if (req.headers[RELAY_HEADER] !== undefined) {
+      sendJson(res, 403, { error: "relay control is local only" });
+      return;
+    }
+    if (this.relay === undefined) {
+      sendJson(res, 409, { error: "the daemon runs without --relay" });
+      return;
+    }
+    try {
+      if (url.pathname === "/relay" && req.method === "GET") {
+        sendJson(res, 200, { ...(await this.relay.status()), phones: await this.relay.phones() });
+        return;
+      }
+      if (url.pathname === "/relay/pair" && req.method === "POST") {
+        sendJson(res, 200, await this.relay.pairStart());
+        return;
+      }
+      if (url.pathname === "/relay/pair" && req.method === "GET") {
+        sendJson(res, 200, { pairing: (await this.relay.pairStatus()) ?? null });
+        return;
+      }
+      if ((url.pathname === "/relay/pair/confirm" || url.pathname === "/relay/pair/cancel") && req.method === "POST") {
+        const body = await readBody(req);
+        if (typeof body.sessionId !== "string") {
+          sendJson(res, 400, { error: "sessionId is required" });
+          return;
+        }
+        const confirm = url.pathname.endsWith("/confirm");
+        if (confirm && (typeof body.code !== "string" || !/^\d{8}$/.test(body.code))) {
+          sendJson(res, 400, { error: "the code is 8 digits" });
+          return;
+        }
+        sendJson(res, 200, confirm ? await this.relay.pairConfirm(body.sessionId, body.code) : await this.relay.pairCancel(body.sessionId));
+        return;
+      }
+      const phone = /^\/relay\/phones\/([^/]+)$/.exec(url.pathname);
+      if (phone !== null && req.method === "DELETE") {
+        await this.relay.revoke(decodeURIComponent(phone[1]));
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+      sendJson(res, 404, { error: "not found" });
+    } catch (error) {
+      // The relay's own refusals carry a code (PAIRING_EXPIRED, PAIRING_ATTEMPT_USED, ...): pass it on.
+      const code = typeof error?.code === "string" ? error.code : undefined;
+      sendJson(res, 502, { error: error instanceof Error ? error.message : String(error), ...(code === undefined ? {} : { code }) });
+    }
+  }
+
+  async listen() {
+    await new Promise((resolveListen) => this.server.listen(this.options.port, this.options.host, () => resolveListen()));
+    if (this.relay !== undefined) {
+      await new Promise((resolveListen) => this.tunnelServer.listen(0, "127.0.0.1", () => resolveListen()));
+      await this.relay.start();
+    }
+    this.startTimers();
   }
 
   /** Keepalive pings and the idle-session reaper, once the daemon listens; old stashed images go. */
@@ -1395,7 +1504,9 @@ class Daemon {
     const outcomes = await Promise.all(closing);
     const stuck = outcomes.filter((outcome) => outcome === "running").length;
     if (stuck > 0) console.error(`omp-mobile: ${stuck} omp process(es) ignored SIGINT and SIGTERM and are still running`);
+    await this.relay?.close();
     this.wsServer.close();
+    this.tunnelServer?.close();
     await new Promise((resolveClose) => this.server.close(() => resolveClose()));
   }
 }
@@ -1473,6 +1584,10 @@ function clearState(path) {
 }
 
 async function main() {
+  if (process.argv[2] === "relay") {
+    await runRelayCli(process.argv.slice(3));
+    return;
+  }
   const options = parseArgs(process.argv.slice(2));
   if (options.host === "tailscale") options.host = await tailscaleHost(options);
   const token = loadToken(options);
@@ -1481,21 +1596,26 @@ async function main() {
   await daemon.listen();
   const url = daemon.baseUrl();
   const pair = `omp-mobile://pair?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
-  writeState(options.stateFile, { pid: process.pid, version: VERSION, url, pair, startedAt: daemon.startedAt });
+  writeState(options.stateFile, { pid: process.pid, version: VERSION, url, pair, relay: options.relay || null, startedAt: daemon.startedAt });
   console.log(`omp-mobile daemon ${VERSION}`);
   console.log(`  listening  ${url}`);
   console.log(`  cwd        ${options.cwd}`);
   for (const line of identity.notes) (line.includes("WARNING") ? console.warn : console.log)(line);
   console.log(`  token      ${token}`);
   console.log(`  pair       ${pair}`);
-  if (options.qr) {
+  if (daemon.relay !== undefined) {
+    const relay = await daemon.relay.status();
+    console.log(`  relay      ${relay.server} · ${relay.paired ? "paired" : "no phone paired yet"} · pair a phone: omp-mobile relay pair`);
+  }
+  const tailnet = isTailnetAddress(options.host);
+  if (options.qr && (tailnet || daemon.relay === undefined)) {
     console.log("");
     console.log("  Scan with OMP on your phone (Machines > Scan to pair):");
     console.log(renderQr(pair));
     // The app accepts only tailnet addresses from a code; say so before the user tries.
-    if (!isTailnetAddress(options.host)) {
+    if (!tailnet) {
       console.log(`  note: ${options.host} is not a Tailscale address, so the app will refuse this code.`);
-      console.log("        Start with --host <this computer's Tailscale IP> to pair a phone.");
+      console.log("        Start with --host <this computer's Tailscale IP>, or --relay, to pair a phone.");
     }
   }
   const shutdown = async () => {

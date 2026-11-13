@@ -1,17 +1,17 @@
 /**
- * Pairing with a DSH Remote computer from its code, on screen: the hook that
- * runs the steps (`dsh/pair.ts`) and the card that shows the 8-digit code to
+ * Pairing with a computer through a relay from its code, on screen: the hook that
+ * runs the steps (`relay/pair.ts`) and the card that shows the 8-digit code to
  * enter on the computer. The scanner and the Add machine sheet both use them.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
-import { pairRemote, type PairingCode, type PairingRun } from "../dsh/pair";
-import type { PairingTicket } from "../dsh/pairing";
+import { pairRelay, type PairingCode, type PairingRun } from "../relay/pair";
+import type { PairingTicket } from "../relay/pairing";
 import { t } from "../i18n/index.ts";
 import { MONO, SANS, radius, type Palette } from "../theme";
 import type { Machine } from "../types";
 
-export interface RemotePairing {
+export interface RelayPairing {
   /** A pairing is under way: resolving the code, or waiting on the computer. */
   busy: boolean;
   /** The code to enter on the computer, once the server issued it. */
@@ -21,7 +21,7 @@ export interface RemotePairing {
   cancel(): void;
 }
 
-export function useRemotePairing(machines: readonly Machine[], onAdd: (machine: Machine) => void): RemotePairing {
+export function useRelayPairing(machines: readonly Machine[], onAdd: (machine: Machine) => void): RelayPairing {
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState<PairingCode | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +38,7 @@ export function useRemotePairing(machines: readonly Machine[], onAdd: (machine: 
       setBusy(true);
       setError(null);
       setCode(null);
-      const current = pairRemote(ticket, machinesRef.current, setCode);
+      const current = pairRelay(ticket, machinesRef.current, setCode);
       run.current = current;
       current.machine
         .then((machine) => {
@@ -69,24 +69,24 @@ export function useRemotePairing(machines: readonly Machine[], onAdd: (machine: 
 }
 
 /** The computer to approve and the code to type there, with a way out. */
-export function RemotePairingCard({ code, c, onCancel }: { code: PairingCode | null; c: Palette; onCancel: () => void }): ReactNode {
+export function RelayPairingCard({ code, c, onCancel }: { code: PairingCode | null; c: Palette; onCancel: () => void }): ReactNode {
   return (
     <View style={[styles.card, { backgroundColor: c.overlay, borderColor: c.borderStrong }]} accessibilityLiveRegion="polite">
       {code === null ? (
         <View style={styles.waiting}>
           <ActivityIndicator color={c.fg} />
-          <Text style={[styles.hint, { color: c.fgMuted }]}>{t("dshPair.checking")}</Text>
+          <Text style={[styles.hint, { color: c.fgMuted }]}>{t("relayPair.checking")}</Text>
         </View>
       ) : (
         <>
-          <Text style={[styles.title, { color: c.fg }]}>{t("dshPair.enterOn", { host: code.host })}</Text>
+          <Text style={[styles.title, { color: c.fg }]}>{t("relayPair.enterOn", { host: code.host })}</Text>
           <Text style={[styles.code, { color: c.fg }]} accessibilityLabel={code.code.split("").join(" ")} selectable>
             {`${code.code.slice(0, 4)} ${code.code.slice(4)}`}
           </Text>
-          <Text style={[styles.fingerprint, { color: c.fgFaint }]}>{t("dshPair.fingerprint", { fingerprint: code.fingerprint })}</Text>
+          <Text style={[styles.fingerprint, { color: c.fgFaint }]}>{t("relayPair.fingerprint", { fingerprint: code.fingerprint })}</Text>
           <View style={styles.waiting}>
             <ActivityIndicator size="small" color={c.fgMuted} />
-            <Text style={[styles.hint, { color: c.fgMuted }]}>{t("dshPair.waiting")}</Text>
+            <Text style={[styles.hint, { color: c.fgMuted }]}>{t("relayPair.waiting")}</Text>
           </View>
         </>
       )}

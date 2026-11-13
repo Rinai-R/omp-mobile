@@ -15,8 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
-import { HttpError, SessionSocket, daemonFeatures, knownFeatures, openSession, takeOverSession, type ChatSocket, type OpenFailure } from "../api";
-import { RemoteSessionSocket } from "../dsh/sessions";
+import { HttpError, SessionSocket, daemonFeatures, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
@@ -84,7 +83,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardVisible();
   const listRef = useRef<FlatList<Row>>(null);
-  const socketRef = useRef<ChatSocket | null>(null);
+  const socketRef = useRef<SessionSocket | null>(null);
   const [session, setSession] = useState(initialSession);
   const [state, setState] = useState<SessionState | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -204,8 +203,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   useEffect(() => {
     let asking = false;
     const machine = machineRef.current;
-    const Socket = machine.remote === undefined ? SessionSocket : RemoteSessionSocket;
-    const socket: ChatSocket = new Socket(
+    const socket = new SessionSocket(
       machine,
       initialSession.id,
       (message: ServerMessage) => {

@@ -9,5 +9,5 @@ The app bundles the Geist typeface (Copyright 2023 Vercel, in collaboration with
 JetBrains Mono typeface (Copyright 2020 The JetBrains Mono Project Authors), both under the SIL Open Font
 License 1.1; see app/assets/fonts.
 
-app/vendor/dsh-remote bundles packages of DS Harness Remote (Copyright (c) 2026 DSH Remote contributors) under the
-MIT License; see app/vendor/dsh-remote/LICENSE.
+app/vendor/dsh-remote and daemon/vendor bundle code of DS Harness Remote (Copyright (c) 2026 DSH Remote contributors)
+under the MIT License; see app/vendor/dsh-remote/LICENSE and daemon/vendor/LICENSE.dsh-remote.

@@ -3,24 +3,16 @@ import { heldQuery, type Held } from "./cache.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
 import { t } from "./i18n/index.ts";
 import { ownerOf } from "./takeover.ts";
-import { createRemoteSession, listRemoteSessions, remoteWorkspaces } from "./dsh/sessions";
-import { remoteConnection } from "./dsh/hosts";
-
-/** What a Remote Host supports of the daemon's optional features: ACP takes prompt images. */
-const REMOTE_FEATURES = ["prompt-images"];
+import { machineFetch, machineSocket, type MachineInit, type MachineSocket } from "./link.ts";
 
 const JSON_HEADERS = { "content-type": "application/json" };
 /** How long a session socket may go without a frame before it is treated as dead. */
 const SILENCE_MS = 60_000;
 
-async function request<T>(machine: Machine, path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${machine.url}${path}`, {
+async function request<T>(machine: Machine, path: string, init: MachineInit = {}): Promise<T> {
+  const response = await machineFetch(machine, path, {
     ...init,
-    headers: {
-      ...(init.body === undefined ? {} : JSON_HEADERS),
-      authorization: `Bearer ${machine.token}`,
-      ...(init.headers ?? {}),
-    },
+    headers: { ...(init.body === undefined ? {} : JSON_HEADERS), ...(init.headers ?? {}) },
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -47,9 +39,8 @@ const featureMemo = new Map<string, string[]>();
 
 /** The daemon's optional features from `/hello`; empty for daemons that predate them or cannot be reached. */
 export async function daemonFeatures(machine: Machine): Promise<string[]> {
-  if (machine.remote !== undefined) return REMOTE_FEATURES;
   try {
-    const response = await fetch(`${machine.url}/hello`);
+    const response = await machineFetch(machine, "/hello");
     if (!response.ok) return [];
     const data = (await response.json()) as Hello;
     const features = Array.isArray(data.features) ? data.features.filter((feature) => typeof feature === "string") : [];
@@ -62,7 +53,7 @@ export async function daemonFeatures(machine: Machine): Promise<string[]> {
 
 /** The features this machine's daemon listed last time it was asked in this launch; empty until then. */
 export function knownFeatures(machine: Machine): string[] {
-  return machine.remote !== undefined ? REMOTE_FEATURES : (featureMemo.get(machine.url) ?? []);
+  return featureMemo.get(machine.url) ?? [];
 }
 
 /**
@@ -133,19 +124,13 @@ export async function pairMachine(url: string, token: string, machines: readonly
 }
 
 export async function listSessions(machine: Machine): Promise<SessionSummary[]> {
-  if (machine.remote !== undefined) return listRemoteSessions(machine);
   // Shared with a probe of the same computer in flight (see `sessionsFetch.ts`).
-  const answer = await fetchSessions(machine.url, machine.token);
+  const answer = await fetchSessions(machine);
   if (!answer.ok) throw new HttpError(answer.status, errorText(answer.text) || `HTTP ${answer.status}`, ownerOf(errorField(answer.text, "owner")));
   return (JSON.parse(answer.text) as { sessions: SessionSummary[] }).sessions;
 }
 
 export async function createSession(machine: Machine, cwd?: string): Promise<SessionSummary> {
-  if (machine.remote !== undefined) {
-    const path = cwd?.trim() || (await remoteWorkspaces(machine))[0];
-    if (path === undefined) throw new Error(t("remote.noWorkspace"));
-    return createRemoteSession(machine, path);
-  }
   const data = await request<{ session: SessionSummary }>(machine, "/sessions", {
     method: "POST",
     body: JSON.stringify(cwd === undefined || cwd.trim() === "" ? {} : { cwd: cwd.trim() }),
@@ -154,16 +139,10 @@ export async function createSession(machine: Machine, cwd?: string): Promise<Ses
 }
 
 export async function deleteSession(machine: Machine, id: string): Promise<void> {
-  if (machine.remote !== undefined) throw new Error(t("remote.noDelete"));
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function openSession(machine: Machine, id: string): Promise<void> {
-  // A Remote Host opens sessions itself; reaching it is all there is to check.
-  if (machine.remote !== undefined) {
-    await remoteConnection(machine);
-    return;
-  }
   await request<unknown>(machine, `/sessions/${encodeURIComponent(id)}`);
 }
 
@@ -172,8 +151,6 @@ export async function openSession(machine: Machine, id: string): Promise<void> {
  * (it closes that process, gracefully), then open it. Resolves once the session is the daemon's.
  */
 export async function takeOverSession(machine: Machine, id: string): Promise<void> {
-  // A Remote Host never reports a session as held by another omp: there is nothing to take over.
-  if (machine.remote !== undefined) return;
   await request<unknown>(machine, `/sessions/${encodeURIComponent(id)}/takeover`, {
     method: "POST",
     body: JSON.stringify({ device: "OMP Mobile" }),
@@ -188,30 +165,14 @@ export interface OpenFailure {
   owner?: SessionOwner;
 }
 
-/** What the chat drives: a daemon's `SessionSocket`, or `RemoteSessionSocket` for a DSH Remote Host. */
-export interface ChatSocket {
-  connect(): void;
-  /** Stop reconnecting because the session cannot open; `reconnect()` resumes. */
-  fail(): void;
-  /** Try again after a failure, or now instead of at the end of the backoff. */
-  reconnect(): void;
-  /** Open anew even over a working link: the snapshot is asked for again. */
-  restart(): void;
-  readonly isOpen: boolean;
-  /** Send one client frame; false when not connected. */
-  send(message: object): boolean;
-  watchSilence(): void;
-  close(): void;
-}
-
 /**
  * Live socket for one session. It reconnects with backoff while the link
  * drops, until the caller closes it, or until the daemon says the session
  * cannot open (`open_failed`): then it waits for `retry()`, since reconnecting
  * cannot fix that.
  */
-export class SessionSocket implements ChatSocket {
-  private socket: WebSocket | undefined;
+export class SessionSocket {
+  private socket: MachineSocket | undefined;
   private closed = false;
   private failed = false;
   private retry = 0;
@@ -242,9 +203,8 @@ export class SessionSocket implements ChatSocket {
     if (this.closed || this.failed) return;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
-    const base = this.machine.url.replace(/^http/i, "ws");
     const query = heldQuery(this.held());
-    const url = `${base}/sessions/${encodeURIComponent(this.sessionId)}/ws?token=${encodeURIComponent(this.machine.token)}${query === "" ? "" : `&${query}`}`;
+    const path = `/sessions/${encodeURIComponent(this.sessionId)}/ws${query === "" ? "" : `?${query}`}`;
     const previous = this.socket;
     if (previous !== undefined) {
       previous.onclose = null;
@@ -252,7 +212,7 @@ export class SessionSocket implements ChatSocket {
       previous.close();
     }
     this.attempts += 1;
-    const socket = new WebSocket(url);
+    const socket = machineSocket(this.machine, path);
     this.socket = socket;
     let opened = false;
     socket.onmessage = (event) => {

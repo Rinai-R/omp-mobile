@@ -66,8 +66,8 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
     body = (
       <>
         <View style={styles.group}>
-          <View style={styles.row} accessible accessibilityLabel={t("machine.linkA11y", { via: linkName(machine.url), link: linkText(probe) })}>
-            <Text style={styles.via}>{linkName(machine.url)}</Text>
+          <View style={styles.row} accessible accessibilityLabel={t("machine.linkA11y", { via: linkName(machine), link: linkText(probe) })}>
+            <Text style={styles.via}>{linkName(machine)}</Text>
             <StateDot dot={dotOf(probe)} used={used} />
             <Text style={used ? styles.linkUsed : styles.linkState} numberOfLines={1}>
               {linkText(probe)}
@@ -79,7 +79,7 @@ export function MachineSheet({ machine, probe, onOpen, onRemove, onRename, onClo
         <View style={styles.group}>
           {/* The title is the host's own name unless the user renamed it: then the host is worth a row. */}
           {machine.label !== undefined ? <InfoRow label={t("machine.host")} value={machine.name} /> : null}
-          <InfoRow label={t("machine.address")} value={machine.url.replace(/^https?:\/\//, "")} />
+          <InfoRow label={t("machine.address")} value={machine.relay === undefined ? machine.url.replace(/^https?:\/\//, "") : machine.relay.serverUrl.replace(/^https?:\/\//, "")} />
           <InfoRow label={t("machine.daemon")} value={version} last />
         </View>
         <Button label={t("common.open")} onPress={open} />

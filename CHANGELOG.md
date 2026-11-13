@@ -4,17 +4,15 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
-## v0.5.0
-
-Computers paired through DSH Remote: scan its code, confirm the 8-digit code, and drive their OMP sessions end to end encrypted.
-
-- Pair with a computer through DSH Remote (#57): scan or paste its pairing code, enter the 8-digit code on the computer, and its OMP sessions (served by DSH's Pi backend running `omp acp`) open on the phone over an end-to-end encrypted Host connection. Listing, new sessions, history, streaming replies, tool cards, approvals, stop and model selection all work; a tool approval asked while the chat was closed shows again when it reopens. Background notifications are not available for these computers yet.
+- Reach your computer without Tailscale, through the public relay of [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) (`https://dsh.r2049.cn`) (#59). The omp-mobile daemon registers with the relay as a device of its own (no account, no DSH): `/mobile relay` in OMP, or `omp-mobile --relay` then `omp-mobile relay pair`, shows a pairing code; the phone scans it (or takes the pasted link in **Enter address**), shows the computer's key fingerprint and an 8-digit code, and the computer asks for that code. The phone then reaches the daemon end to end encrypted (Noise IK, each side pinned to the other's key); the relay only forwards ciphertext. Over it runs the same daemon API as on the tailnet, so everything works the same: sessions, transcripts, streaming, tool cards, approvals, model and thinking changes, photos, background notifications and taking over a terminal session. These computers are labelled **Relay** in the computers list. Removing one on the phone ends the pairing on the relay; `omp-mobile relay status` lists paired phones and `omp-mobile relay revoke <id>` removes one. Tailscale works as before.
 
 ### 中文
 
-可以通过 DSH Remote 配对电脑：扫码、确认 8 位验证码，即可端到端加密地操作它的 OMP 会话。
+- 不用 Tailscale 也能连上电脑：通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn`（#59）。omp-mobile 守护进程以自己的设备身份注册到中继（不需要账号，也不经过 DSH）：在 OMP 里用 `/mobile relay`，或运行 `omp-mobile --relay` 后执行 `omp-mobile relay pair`，会显示配对码；手机扫码（或在 **Enter address** 粘贴链接），显示电脑的密钥指纹和 8 位验证码，再在电脑上输入该验证码。之后手机与守护进程之间端到端加密（Noise IK，双方互相固定密钥），中继只转发密文。上面跑的是和 Tailscale 上完全相同的守护进程接口，所以功能都一样：会话、聊天记录、流式回复、工具卡片、审批、切换模型和思考等级、图片、后台通知、接管终端会话。这类电脑在电脑列表里标为 **中继**。在手机上移除即在中继上解除配对；`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部。Tailscale 照常可用。
 
-- 支持通过 DSH Remote 配对电脑（#57）：扫描或粘贴配对码，在电脑上输入 8 位验证码，即可在手机上打开它的 OMP 会话（由 DSH 的 Pi 后端运行 `omp acp` 提供），走端到端加密的主机连接。列会话、新建会话、历史、流式回复、工具卡片、审批、停止和切换模型均可用；对话关闭期间发起的工具审批，重新打开时会再次弹出。这类电脑暂不支持后台通知。
+## v0.5.0
+
+Not published: its tag exists, but no npm package or GitHub Release was made. What it contained (pairing with DSH as the computer) was replaced in v0.5.1 by the relay below.
 
 ## v0.4.4
 

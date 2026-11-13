@@ -66,6 +66,17 @@ class OmpAttentionModule : Module() {
       sync()
     }
 
+    /** One `/events` frame of a relay machine, received by the app's JS through the relay. */
+    Function("deliverRelay") { machineId: String, data: String ->
+      if (!AttentionState.enabled(context)) return@Function
+      val machine = AttentionState.machines(context).firstOrNull { it.id == machineId && it.relay } ?: return@Function
+      AttentionService.deliver(context, machine, data)
+    }
+
+    Function("setRelayConnected") { machineId: String, connected: Boolean ->
+      AttentionService.setRelayConnected(context, machineId, connected)
+    }
+
     Function("setEnabled") { enabled: Boolean ->
       AttentionState.setEnabled(context, enabled)
       sync()

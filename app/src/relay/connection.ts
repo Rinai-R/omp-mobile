@@ -1,24 +1,24 @@
 /**
- * One end-to-end encrypted connection from this phone to a DSH Remote Host,
- * and the Agent ACP calls omp-mobile makes over it.
+ * One end-to-end encrypted connection from this phone to a computer's
+ * omp-mobile daemon through a ds-harness-remote relay server.
  *
- * Transport (LAN → P2P → TURN → relay), RPC framing and the Noise IK channel
- * come from ds-harness-remote's MIT packages; only the handshake glue here is
- * ours (adapted from its Android `secure-transport.ts`). Prompts, replies and
- * tool output are encrypted on this phone and decrypted only by the Host whose
- * pinned key the handshake proves; the server relays ciphertext.
+ * Transport, RPC framing and the Noise IK channel come from ds-harness-remote's
+ * MIT packages; only the handshake glue here is ours (adapted from its Android
+ * `secure-transport.ts`). Everything is encrypted on this phone and decrypted
+ * only by the computer whose pinned key the handshake proves; the server
+ * relays ciphertext. Over it runs the daemon's tunnel (`daemon/src/relay.mjs`),
+ * which `tunnel.ts` turns back into HTTP requests and WebSockets.
  */
-import { t } from "../i18n/index.ts";
-import { AgentAcpClient, RemoteClientCore, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type AcpStream } from "@dsh-remote/client-core";
+import { RemoteClientCore } from "@dsh-remote/client-core";
 import { NoiseIkSession, createNoisePrologue } from "@dsh-remote/crypto";
 import { SecureMessageCodec } from "@dsh-remote/protocol";
 import { AdaptiveTransport, type RemoteTransport, type SecureHandshakeTransport } from "@dsh-remote/webrtc";
+import { z } from "zod";
 import type { PhoneIdentity } from "./pairing";
 import type { RemoteHost, RemoteServerApi } from "./server";
-import { z } from "zod";
 
 const HANDSHAKE_MS = 10_000;
-/** Host calls are capped at 30 s; silence past that is a dead channel. */
+/** Tunnel calls answer once the daemon's response starts; silence past this is a dead channel. */
 const RPC_TIMEOUT_MS = 35_000;
 
 /** Noise IK over the Host carrier: initiator with this phone's key, responder pinned to the Host's. */
@@ -153,35 +153,43 @@ function handshake(inner: SecureHandshakeTransport, noise: NoiseIkSession): Prom
   });
 }
 
-/** An OMP session as the Host's Pi (ACP) backend lists it. */
-export interface RemoteSessionRow {
-  /** The ACP session id: OMP's own session id. */
-  id: string;
-  title: string;
-  cwd: string;
-  updatedAt: number;
-}
+/** One `omp.data` event: a part of a handle's body (base64) or WebSocket message, or its end. */
+const dataSchema = z.object({
+  id: z.string(),
+  data: z.string().optional(),
+  text: z.string().optional(),
+  more: z.boolean().optional(),
+  done: z.boolean().optional(),
+  error: z.string().optional(),
+  code: z.number().optional(),
+});
 
-/** An `agent.acp.frame` event's payload, as far as routing it by session needs. */
-const frameSchema = z.object({ frame: z.object({ method: z.string(), params: z.object({ sessionId: z.string() }).passthrough() }) });
+export type TunnelData = z.infer<typeof dataSchema>;
 
-/** A Host connection carrying the OMP sessions behind its `pi` ACP backend. */
-export class RemoteHostConnection {
+/** A computer's daemon reached through the relay: tunnel calls and the data they stream back. */
+export class RelayConnection {
   readonly host: RemoteHost;
   private readonly core: RemoteClientCore;
-  private readonly acp: AgentAcpClient;
+  private readonly listeners = new Map<string, (data: TunnelData) => void>();
+  private counter = 0;
 
-  private constructor(host: RemoteHost, core: RemoteClientCore, acp: AgentAcpClient) {
+  private constructor(host: RemoteHost, core: RemoteClientCore) {
     this.host = host;
     this.core = core;
-    this.acp = acp;
+    core.onEvent((event) => {
+      // The daemon's own event, outside the protocol's list of names.
+      const name: string = event.event;
+      if (name !== "omp.data") return;
+      const parsed = dataSchema.safeParse(event.data);
+      if (parsed.success) this.listeners.get(parsed.data.id)?.(parsed.data);
+    });
   }
 
   /**
-   * Connect, prove the Host's pinned key, and check it serves OMP through its
-   * `pi` backend. `forceRelay` skips WebRTC (and its native module) entirely.
+   * Connect through the server's relay (the phone has no WebRTC module) and
+   * prove the computer's pinned key.
    */
-  static async open(api: RemoteServerApi, phone: PhoneIdentity, host: RemoteHost, options: { forceRelay?: boolean; onClose?: () => void } = {}): Promise<RemoteHostConnection> {
+  static async open(api: RemoteServerApi, phone: PhoneIdentity, host: RemoteHost, onClose?: () => void): Promise<RelayConnection> {
     // String-built: React Native's URL has no setters.
     const url = `${api.serverUrl.replace(/^http/i, "ws")}/ws/v1/connect`;
     const transport = new AdaptiveTransport(url, {
@@ -190,86 +198,27 @@ export class RemoteHostConnection {
       accessToken: await api.accessToken(),
       refreshAccessToken: async () => (await api.refresh()).accessToken,
       targetDeviceId: host.deviceId,
-      forceRelay: options.forceRelay === true,
-      preferredTransports: options.forceRelay === true ? ["relay"] : ["lan", "p2p", "turn", "relay"],
+      forceRelay: true,
+      preferredTransports: ["relay"],
       negotiateTimeoutMs: 6_000,
-      iceServersTimeoutMs: 5_000,
-      fetchIceServers: (connectionId) => api.iceServers(connectionId),
     });
     const core = new RemoteClientCore(new SecureTransport(transport, phone, host), RPC_TIMEOUT_MS);
-    if (options.onClose !== undefined) core.onClose(options.onClose);
+    const connection = new RelayConnection(host, core);
+    if (onClose !== undefined) core.onClose(onClose);
     await core.connect();
-    const features = await probeRemoteHostFeatures(core, host.clientVersion ?? undefined);
-    if (!remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, "pi", "agent.acp.pi.v1")) {
-      await core.close();
-      throw new Error(t("remote.noPi"));
-    }
-    return new RemoteHostConnection(host, core, new AgentAcpClient(core, features.capabilities));
+    return connection;
   }
 
-  /** The directories the Host lists OMP sessions under. */
-  async workspaces(): Promise<{ path: string; title?: string }[]> {
-    return this.acp.listWorkspaces("pi");
+  /** A fresh handle id with its data listener; `release` removes the listener. */
+  open(listener: (data: TunnelData) => void): { id: string; release: () => void } {
+    this.counter += 1;
+    const id = `${Date.now().toString(36)}-${this.counter}`;
+    this.listeners.set(id, listener);
+    return { id, release: () => this.listeners.delete(id) };
   }
 
-  async sessions(path: string, limit = 100): Promise<RemoteSessionRow[]> {
-    const rows = await this.acp.listSessions(path, "pi", limit);
-    return rows.map((row) => ({ id: row.conversationId, title: row.title, cwd: path, updatedAt: row.updatedAt }));
-  }
-
-  /** The session's history as the Host projects it: DSH session events. */
-  history(sessionId: string): Promise<unknown[]> {
-    return this.acp.loadSessionHistory(sessionId, "pi");
-  }
-
-  async createSession(cwd: string): Promise<string> {
-    return (await this.acp.createSession(cwd, undefined, "pi")).sessionId;
-  }
-
-  /** Follow a session's live ACP notifications; close the stream when leaving it. */
-  follow(sessionId: string, onFrame: (method: string, params: unknown) => void, onClosed?: (reason: string) => void): Promise<AcpStream> {
-    return this.acp.openStream(
-      sessionId,
-      (data) => onFrame(data.frame.method, data.frame.params),
-      (closed) => onClosed?.(closed.reason),
-    );
-  }
-
-  /**
-   * Every ACP frame the Host sends this phone, stream or not: the Host addresses
-   * them by session, and sends a permission request only once.
-   */
-  onFrame(handler: (sessionId: string, method: string, params: unknown) => void): () => void {
-    return this.core.onEvent((event) => {
-      if (event.event !== "agent.acp.frame") return;
-      const parsed = frameSchema.safeParse(event.data);
-      if (!parsed.success) return;
-      const { method, params } = parsed.data.frame;
-      handler(params.sessionId, method, params);
-    });
-  }
-
-  /** Send a prompt; resolves when OMP ends the turn (ACP `session/prompt`). */
-  prompt(sessionId: string, text: string, images: { mimeType: string; data: string }[] = []): Promise<unknown> {
-    return this.acp.prompt(sessionId, text, undefined, images.map((image) => ({ type: "image" as const, ...image })), "pi");
-  }
-
-  /** The models OMP can switch this session to, and the one it runs. */
-  models(sessionId: string): Promise<unknown> {
-    return this.acp.sessionModels(sessionId, "pi");
-  }
-
-  selectModel(sessionId: string, provider: string, model: string, reasoningEffort?: string): Promise<unknown> {
-    return this.acp.selectModel(sessionId, "pi", reasoningEffort === undefined ? { provider, model } : { provider, model, reasoningEffort });
-  }
-
-  cancel(sessionId: string): Promise<unknown> {
-    return this.acp.cancel(sessionId);
-  }
-
-  /** Answer a `session/request_permission` the stream delivered. */
-  answer(requestHandle: string, decision: "allow-once" | "reject-once" | "cancel"): Promise<unknown> {
-    return this.acp.respond(requestHandle, decision);
+  call<T>(method: string, params: object): Promise<T> {
+    return this.core.rpc<T>(method, params);
   }
 
   close(): Promise<void> {
