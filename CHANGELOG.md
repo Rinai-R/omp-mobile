@@ -4,9 +4,15 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.5.1
+
+Reach your computer without Tailscale: the omp-mobile daemon pairs with your phone through the open-source ds-harness-remote relay, end-to-end encrypted.
+
 - Reach your computer without Tailscale, through the public relay of [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) (`https://dsh.r2049.cn`) (#59). The omp-mobile daemon registers with the relay as a device of its own (no account, no DSH): `/mobile relay` in OMP, or `omp-mobile --relay` then `omp-mobile relay pair`, shows a pairing code; the phone scans it (or takes the pasted link in **Enter address**), shows the computer's key fingerprint and an 8-digit code, and the computer asks for that code. The phone then reaches the daemon end to end encrypted (Noise IK, each side pinned to the other's key); the relay only forwards ciphertext. Over it runs the same daemon API as on the tailnet, so everything works the same: sessions, transcripts, streaming, tool cards, approvals, model and thinking changes, photos, background notifications and taking over a terminal session. These computers are labelled **Relay** in the computers list. Removing one on the phone ends the pairing on the relay; `omp-mobile relay status` lists paired phones and `omp-mobile relay revoke <id>` removes one. Tailscale works as before.
 
 ### 中文
+
+不用 Tailscale 也能连上电脑：omp-mobile 守护进程通过开源的 ds-harness-remote 中继与手机配对，端到端加密。
 
 - 不用 Tailscale 也能连上电脑：通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn`（#59）。omp-mobile 守护进程以自己的设备身份注册到中继（不需要账号，也不经过 DSH）：在 OMP 里用 `/mobile relay`，或运行 `omp-mobile --relay` 后执行 `omp-mobile relay pair`，会显示配对码；手机扫码（或在 **Enter address** 粘贴链接），显示电脑的密钥指纹和 8 位验证码，再在电脑上输入该验证码。之后手机与守护进程之间端到端加密（Noise IK，双方互相固定密钥），中继只转发密文。上面跑的是和 Tailscale 上完全相同的守护进程接口，所以功能都一样：会话、聊天记录、流式回复、工具卡片、审批、切换模型和思考等级、图片、后台通知、接管终端会话。这类电脑在电脑列表里标为 **中继**。在手机上移除即在中继上解除配对；`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部。Tailscale 照常可用。
 
