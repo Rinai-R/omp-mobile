@@ -179,6 +179,8 @@ class AttentionService : Service() {
     // The machine count may have changed even when no stream did.
     refreshServiceNotification()
     for (machine in machines.values) {
+      // Relay machines have no stream here: the app's JS follows them through the relay.
+      if (machine.relay) continue
       if (workers[machine.id]?.thread?.isAlive == true) continue
       val worker = Worker(machine)
       worker.thread = Thread({ follow(worker) }, "omp-events-${machine.id}")
@@ -257,30 +259,41 @@ class AttentionService : Service() {
     }
   }
 
-  private fun deliver(machine: Machine, data: String) {
-    val frame = AttentionFrame.parse(data) ?: return
-    val seenKey = "${machine.id}|${frame.sessionId}|${frame.key}"
-    if (frame.kind == "resolved") {
-      AttentionState.seen.remove(seenKey)
-      Notifier.cancel(this, machine.id, frame.sessionId, frame.key)
-      AttentionState.onFrame?.let { listener -> main.post { listener(machine, frame) } }
-      return
-    }
-    // A reconnect replays what is still open; it was shown already.
-    if (frame.kind == "approval" || frame.kind == "question") {
-      if (!AttentionState.seen.add(seenKey)) return
-    }
-    if (AttentionState.isOnScreen(machine.id, frame.sessionId)) return
-    val visible = AttentionState.appVisible
-    Notifier.post(this, machine, frame, quiet = visible)
-    if (visible) {
-      val listener = AttentionState.onFrame
-      if (listener != null) main.post { listener(machine, frame) }
-    }
-  }
+  private fun deliver(machine: Machine, data: String) = deliver(this, machine, data)
 
   companion object {
     private const val SERVICE_NOTIFICATION_ID = 7397
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** One `/events` frame of [machine]: a notification, unless that session is on screen. */
+    fun deliver(context: Context, machine: Machine, data: String) {
+      val frame = AttentionFrame.parse(data) ?: return
+      val seenKey = "${machine.id}|${frame.sessionId}|${frame.key}"
+      if (frame.kind == "resolved") {
+        AttentionState.seen.remove(seenKey)
+        Notifier.cancel(context, machine.id, frame.sessionId, frame.key)
+        AttentionState.onFrame?.let { listener -> mainHandler.post { listener(machine, frame) } }
+        return
+      }
+      // A reconnect replays what is still open; it was shown already.
+      if (frame.kind == "approval" || frame.kind == "question") {
+        if (!AttentionState.seen.add(seenKey)) return
+      }
+      if (AttentionState.isOnScreen(machine.id, frame.sessionId)) return
+      val visible = AttentionState.appVisible
+      Notifier.post(context, machine, frame, quiet = visible)
+      if (visible) {
+        val listener = AttentionState.onFrame
+        if (listener != null) mainHandler.post { listener(machine, frame) }
+      }
+    }
+
+    /** A relay machine's stream (followed by the app's JS) opened or closed: counted in the service notification. */
+    fun setRelayConnected(context: Context, machineId: String, isConnected: Boolean) {
+      val changed = if (isConnected) connected.add(machineId) else connected.remove(machineId)
+      // A start command redraws the service notification with the new count.
+      if (changed && AttentionState.enabled(context)) start(context)
+    }
 
     /** Machines whose event stream is connected now. */
     private val connected: MutableSet<String> = ConcurrentHashMap.newKeySet()

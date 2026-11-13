@@ -8,12 +8,16 @@
  */
 import { requireOptionalNativeModule, type NativeModule } from "expo";
 
-/** A computer the service follows: its daemon base URL and bearer token. */
+/**
+ * A computer the service follows: its daemon base URL and bearer token, or
+ * `relay`: one the app follows through its relay and hands frames for (`deliverRelay`).
+ */
 export interface AttentionMachine {
   id: string;
   name: string;
   url: string;
   token: string;
+  relay?: boolean;
 }
 
 /** A notification tap: open this session on this machine. */
@@ -45,6 +49,8 @@ type Events = {
 declare class OmpAttentionModule extends NativeModule<Events> {
   setMachines(json: string): void;
   setEnabled(enabled: boolean): void;
+  deliverRelay(machineId: string, data: string): void;
+  setRelayConnected(machineId: string, connected: boolean): void;
   isEnabled(): boolean;
   setStrings(json: string): void;
   setOnScreen(machineId: string, sessionId: string): void;
@@ -62,7 +68,17 @@ export const isSupported = (): boolean => native !== null;
 
 /** The computers to follow; the service restarts only the streams whose address or token changed. */
 export function setMachines(machines: readonly AttentionMachine[]): void {
-  native?.setMachines(JSON.stringify(machines.map(({ id, name, url, token }) => ({ id, name, url, token }))));
+  native?.setMachines(JSON.stringify(machines.map(({ id, name, url, token, relay }) => ({ id, name, url, token, relay: relay === true }))));
+}
+
+/** One `/events` frame of a relay machine: notified as the service would its own. */
+export function deliverRelay(machineId: string, data: string): void {
+  native?.deliverRelay(machineId, data);
+}
+
+/** Whether a relay machine's events stream is connected, for the service notification's count. */
+export function setRelayConnected(machineId: string, connected: boolean): void {
+  native?.setRelayConnected(machineId, connected);
 }
 
 /** Turn background notifications on or off; persisted natively so they resume after a reboot. */

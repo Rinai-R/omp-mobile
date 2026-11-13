@@ -22,7 +22,7 @@ OMP Mobile 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的原生
 - **终端会话：** 你在电脑终端里开的会话也会列出来，可以在手机上接着用。仍在终端里打开的会话，要等那个终端退出后才能打开。
 - **通知：** App 在后台时，审批、提问和任务完成会发安卓通知。
 - **所有机器：** 扫码配对每台电脑，并在手机上给它起名。点对话标题即可看到所有电脑上的所有会话——可搜索，需要你处理的排在最前。App 打开时直接进入上次用的电脑；重新打开的对话立即显示，离线也能看。
-- **只走 Tailscale：** daemon 只监听电脑的 Tailscale 地址，只放行你自己的设备。没有自己的中继或云服务。
+- **Tailscale 或中继：** daemon 监听电脑的 Tailscale 地址，只放行你自己的设备。没有 Tailscale 时，可经开源的 ds-harness-remote 中继连接，端到端加密。
 - **OMP 插件：** 在 OMP 里输入 `/mobile`，就会在后台启动 daemon 并显示配对二维码。终端关掉后 daemon 继续运行。
 
 ## 开始使用
@@ -30,7 +30,7 @@ OMP Mobile 是 [oh-my-pi](https://github.com/can1357/oh-my-pi)（OMP）的原生
 ### 前置条件
 
 - 每台电脑：OMP 18.x
-- 电脑和手机都登录同一个 [Tailscale](https://tailscale.com) 账号
+- 电脑和手机都登录同一个 [Tailscale](https://tailscale.com) 账号，或使用中继（见下文）
 - 一台安卓手机
 
 ### 电脑
@@ -49,11 +49,9 @@ omp plugin install omp-mobile
 
 从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
 
-#### 通过 DSH Remote
+#### 通过中继（不用 Tailscale）
 
-运行 [DS Harness Remote](https://github.com/liguobao/ds-harness-remote)、且 Pi 后端配置为 `omp acp` 的电脑，可以不经 Tailscale 和 daemon 直接配对。在 DSH Remote 里生成配对二维码并扫描（或把 `https://<服务器>/pair#v1.…` 链接粘贴到 **Enter address**）；手机会显示电脑名称、密钥指纹和一个 8 位验证码，在电脑上输入即可。电脑确认后，它的 OMP 会话会像其他机器一样列出。提示、回复和工具输出在手机与这台电脑之间端到端加密（Noise IK，固定到电脑密钥），服务器只转发。工具审批照常以弹窗显示。这类电脑暂不支持后台通知。
-
-需要通知时，在 App 里打开 **Settings → Notifications**。
+守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码，或把链接粘贴到 **Enter address**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。
 
 你 Tailscale 账号下持有 token 的设备，可以在那台电脑上执行 OMP 能做的任何事。
 

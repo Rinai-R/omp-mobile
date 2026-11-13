@@ -7,6 +7,7 @@
 import { hostOf } from "./machines.ts";
 import { isTailnetHost } from "./pairing.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
+import { machineFetch, type MachineAddress, type MachineResponse } from "./link.ts";
 import type { Machine, SessionSummary } from "./types";
 import { t } from "./i18n/index.ts";
 
@@ -48,12 +49,20 @@ class ProbeFailure extends Error {
   }
 }
 
-async function get(url: string, timeoutMs: number, headers?: Record<string, string>): Promise<Response> {
+async function get(machine: MachineAddress, path: string, timeoutMs: number): Promise<MachineResponse> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // Raced as well as aborted: a relay connection still being made does not see the abort.
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new ProbeFailure("timeout"));
+    }, timeoutMs);
+  });
   try {
-    return await fetch(url, headers === undefined ? { signal: controller.signal } : { headers, signal: controller.signal });
+    return await Promise.race([machineFetch(machine, path, { signal: controller.signal }), timeout]);
   } catch (cause) {
+    if (cause instanceof ProbeFailure) throw cause;
     const aborted =
       controller.signal.aborted || (cause instanceof Error && (cause.name === "AbortError" || cause.name === "TimeoutError"));
     throw new ProbeFailure(aborted ? "timeout" : "network");
@@ -85,7 +94,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function json(response: Response): Promise<unknown> {
+async function json(response: MachineResponse): Promise<unknown> {
   try {
     return (await response.json()) as unknown;
   } catch {
@@ -110,21 +119,21 @@ function sessionsOf(value: unknown): SessionSummary[] | null {
  * Never throws; every failure is an unreachable probe with its reason.
  */
 export async function probeMachine(
-  machine: Pick<Machine, "url" | "token">,
+  machine: MachineAddress,
   options: ProbeOptions = {},
 ): Promise<Probe> {
   const timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
   const now = options.now ?? Date.now;
   try {
     const started = now();
-    const helloResponse = await get(`${machine.url}/hello`, timeoutMs);
+    const helloResponse = await get(machine, "/hello", timeoutMs);
     const latencyMs = Math.max(0, Math.round(now() - started));
     if (helloResponse.status !== 200) throw new ProbeFailure("not-omp");
     const hello = await json(helloResponse);
     if (!isHello(hello)) throw new ProbeFailure("not-omp");
 
     // Shared with the home's own list request when both ask at once.
-    const sessionsAnswer = await within(fetchSessions(machine.url, machine.token), timeoutMs);
+    const sessionsAnswer = await within(fetchSessions(machine), timeoutMs);
     if (sessionsAnswer.status === 401 || sessionsAnswer.status === 403) throw new ProbeFailure("unauthorized");
     if (!sessionsAnswer.ok) throw new ProbeFailure("not-omp");
     const sessions = sessionsOf(parseJson(sessionsAnswer.text));
@@ -192,10 +201,10 @@ export function summaryOf(
   lastSeen: number | undefined,
   now: number,
   /** The machine's address: what the link is called (Tailscale, or a LAN address). */
-  url?: string,
+  machine?: Pick<Machine, "url" | "relay">,
 ): { dot: Dot; text: string } {
   if (probe === undefined) return { dot: "checking", text: t("probe.checking") };
-  if (probe.state === "online") return { dot: "online", text: `${linkName(url)} · ${sessionsText(probe)}` };
+  if (probe.state === "online") return { dot: "online", text: `${linkName(machine)} · ${sessionsText(probe)}` };
   const reason = reasonText(probe.reason);
   return {
     dot: "down",
@@ -208,8 +217,9 @@ export function summaryOf(
  * tailnet address, else "LAN" (an emulator's 10.0.2.2, a home network's 192.168.x).
  * Unknown (no address): Tailscale, the one link the app is meant for.
  */
-export function linkName(url: string | undefined): string {
-  if (url === undefined || isTailnetHost(hostOf(url).toLowerCase())) return "Tailscale";
+export function linkName(machine: Pick<Machine, "url" | "relay"> | undefined): string {
+  if (machine?.relay !== undefined) return t("link.relay");
+  if (machine === undefined || isTailnetHost(hostOf(machine.url).toLowerCase())) return "Tailscale";
   return t("link.lan");
 }
 

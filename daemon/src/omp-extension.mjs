@@ -21,10 +21,12 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderQr } from "./qr.mjs";
+import { Tailscale } from "./admission.mjs";
 import { requestPath, shellWord } from "./takeover.mjs";
+import { alive, readState, tokenOf } from "./state.mjs";
+import { DEFAULT_RELAY, grouped, pairingOutcome, relayCall, waitForPhone } from "./relay-control.mjs";
 
 const HOME = join(homedir(), ".omp-mobile");
-const STATE_FILE = join(HOME, "daemon.json");
 const LOG_FILE = join(HOME, "daemon.log");
 const SERVER = fileURLToPath(new URL("./server.mjs", import.meta.url));
 const WIDGET = "omp-mobile";
@@ -38,40 +40,11 @@ const TAKEOVER_MAX_AGE_MS = 60_000;
 /** How long a running turn gets to stop before omp closes anyway. */
 const TAKEOVER_IDLE_WAIT_MS = 5_000;
 const SUBCOMMANDS = [
+  { value: "relay", label: "relay", description: "Pair a phone through the ds-harness-remote relay (no Tailscale)" },
   { value: "status", label: "status", description: "Is the daemon running, and where" },
   { value: "stop", label: "stop", description: "Stop the background daemon" },
   { value: "hide", label: "hide", description: "Hide the pairing code" },
 ];
-
-/**
- * The running daemon's record, if its process is alive.
- * @returns {{pid: number, version: string, url: string, pair: string, startedAt: number} | undefined}
- */
-export function readState(path = STATE_FILE) {
-  let state;
-  try {
-    state = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return undefined;
-  }
-  if (typeof state?.pid !== "number" || typeof state.url !== "string" || typeof state.pair !== "string") return undefined;
-  return alive(state.pid) ? state : undefined;
-}
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM: it exists but belongs to someone else.
-    return error?.code === "EPERM";
-  }
-}
-
-/** The token inside a pairing link. */
-export function tokenOf(pair) {
-  return new URL(pair.replace(/^omp-mobile:\/\//, "http://x/")).searchParams.get("token") ?? "";
-}
 
 /** The daemon's `/status`, or undefined when it does not answer. */
 async function status(state) {
@@ -116,13 +89,23 @@ function ompBinary() {
 /**
  * Start the daemon detached from this terminal and wait until it serves.
  * @param {string} cwd Default directory for sessions the phone starts.
+ * @param {string} [relay] Relay server to serve phones through as well; then
+ *   the daemon binds loopback when this computer has no Tailscale.
  */
-async function startDaemon(cwd) {
+async function startDaemon(cwd, relay) {
   mkdirSync(HOME, { recursive: true, mode: 0o700 });
+  let host = "tailscale";
+  if (relay !== undefined) {
+    host = await new Tailscale({ binary: "tailscale" })
+      .status()
+      .then(() => "tailscale")
+      .catch(() => "127.0.0.1");
+  }
   const log = openSync(LOG_FILE, "a", 0o600);
   let child;
   try {
-    child = spawn(process.execPath, [SERVER, "--host", "tailscale", "--cwd", cwd, "--omp", ompBinary(), "--no-qr"], {
+    const args = [SERVER, "--host", host, "--cwd", cwd, "--omp", ompBinary(), "--no-qr", ...(relay === undefined ? [] : ["--relay", relay])];
+    child = spawn(process.execPath, args, {
       cwd,
       detached: true,
       stdio: ["ignore", log, log],
@@ -278,6 +261,73 @@ export default function ompMobile(pi) {
     showing = { timer };
   };
 
+  /**
+   * `/mobile relay`: make sure the daemon serves through the relay, show the
+   * relay pairing code, and once a phone claims it ask for the code it shows.
+   */
+  const pairThroughRelay = async (ctx, state, server) => {
+    let running = state !== undefined && (await status(state)) !== undefined ? state : undefined;
+    if (running !== undefined && !running.relay) {
+      ctx.ui.notify("OMP Mobile: the daemon runs without the relay. /mobile stop, then /mobile relay.", "warning");
+      return;
+    }
+    if (running === undefined) {
+      ctx.ui.notify("OMP Mobile: starting the daemon with the relay…", "info");
+      try {
+        running = await startDaemon(ctx.cwd, server);
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        return;
+      }
+    }
+    let view;
+    try {
+      view = await relayCall(running, "POST", "/relay/pair");
+    } catch (error) {
+      ctx.ui.notify(`OMP Mobile: the relay did not start a pairing: ${error instanceof Error ? error.message : String(error)}`, "error");
+      return;
+    }
+    hide(ctx);
+    if (ctx.mode === "tui") {
+      ctx.ui.setWidget(
+        WIDGET,
+        pairingWidget({
+          title: "OMP Mobile · relay · in the app: Machines → Scan to pair",
+          code: renderQr(view.qrPayload).split("\n"),
+          notes: [`computer key ${grouped(view.hostFingerprint).slice(0, 39)}…`, "then enter the phone's 8-digit code here · /mobile hide closes this"],
+        }),
+        { placement: "aboveEditor" },
+      );
+    } else {
+      ctx.ui.notify(`OMP Mobile: open this link on the phone: ${view.qrPayload}`, "info");
+    }
+    const timer = ctx.setInterval(() => undefined, 60_000);
+    showing = { timer };
+    const claimed = await waitForPhone(running, view.sessionId, () => showing?.timer !== timer).catch(() => undefined);
+    if (showing?.timer !== timer) {
+      // Hidden (or replaced) before a phone came: the pairing is not wanted any more.
+      void relayCall(running, "POST", "/relay/pair/cancel", { sessionId: view.sessionId }).catch(() => undefined);
+      return;
+    }
+    hide(ctx);
+    if (claimed?.state !== "claimed") {
+      ctx.ui.notify(`OMP Mobile: ${claimed === undefined ? "the pairing ended." : pairingOutcome(claimed)}`, "warning");
+      return;
+    }
+    const code = (await ctx.ui.input(`OMP Mobile: code shown on ${claimed.mobile?.name ?? "the phone"} (phone key ${grouped(claimed.mobile?.fingerprint ?? "").slice(0, 19)}…)`, "8 digits, one try"))?.replace(/\D/g, "");
+    if (code === undefined || code === "") {
+      await relayCall(running, "POST", "/relay/pair/cancel", { sessionId: view.sessionId }).catch(() => undefined);
+      ctx.ui.notify("OMP Mobile: pairing cancelled.", "info");
+      return;
+    }
+    try {
+      const done = await relayCall(running, "POST", "/relay/pair/confirm", { sessionId: view.sessionId, code });
+      ctx.ui.notify(`OMP Mobile: ${pairingOutcome(done)}`, done.state === "completed" ? "info" : "warning");
+    } catch (error) {
+      ctx.ui.notify(`OMP Mobile: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
+  };
+
   pi.registerCommand("mobile", {
     description: "Pair your phone with this computer (OMP Mobile)",
     getArgumentCompletions: (prefix) => SUBCOMMANDS.filter((item) => item.value.startsWith(prefix.trim())),
@@ -308,8 +358,12 @@ export default function ompMobile(pi) {
         ctx.ui.notify(`OMP Mobile: ${now.url} · pid ${now.pid} · ${now.liveSessions} live sessions · ${phone}`, "info");
         return;
       }
+      if (sub === "relay" || sub.startsWith("relay ")) {
+        await pairThroughRelay(ctx, state, sub.slice("relay".length).trim() || DEFAULT_RELAY);
+        return;
+      }
       if (sub !== "") {
-        ctx.ui.notify(`OMP Mobile: unknown "${sub}". Use /mobile, /mobile status, /mobile stop or /mobile hide.`, "warning");
+        ctx.ui.notify(`OMP Mobile: unknown "${sub}". Use /mobile, /mobile relay, /mobile status, /mobile stop or /mobile hide.`, "warning");
         return;
       }
       let running = state !== undefined && (await status(state)) !== undefined ? state : undefined;

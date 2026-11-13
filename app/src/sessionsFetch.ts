@@ -1,3 +1,5 @@
+import { machineFetch, type MachineAddress } from "./link.ts";
+
 /**
  * One `GET /sessions` per computer at a time. Coming back to Home asks for the
  * list twice at once (the home's own refresh and the computer's probe); both
@@ -26,13 +28,13 @@ export function shared<T>(map: Map<string, Promise<T>>, key: string, task: () =>
   return run;
 }
 
-/** `GET <url>/sessions` with the token, shared with any such request already in flight. */
-export function fetchSessions(url: string, token: string): Promise<SessionsAnswer> {
-  return shared(inflight, `${url}\n${token}`, async () => {
+/** `GET /sessions` on the machine's daemon, shared with any such request already in flight. */
+export function fetchSessions(machine: MachineAddress): Promise<SessionsAnswer> {
+  return shared(inflight, `${machine.url}\n${machine.token}`, async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GIVE_UP_MS);
     try {
-      const response = await fetch(`${url}/sessions`, { headers: { authorization: `Bearer ${token}` }, signal: controller.signal });
+      const response = await machineFetch(machine, "/sessions", { signal: controller.signal });
       return { status: response.status, ok: response.ok, text: await response.text() };
     } finally {
       clearTimeout(timer);

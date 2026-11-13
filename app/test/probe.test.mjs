@@ -59,8 +59,6 @@ describe("probeMachine", () => {
       calls.map((call) => call.path),
       ["/hello", "/sessions"],
     );
-    // /hello is public; /sessions carries the token.
-    assert.equal(calls[0].init.headers?.authorization, undefined);
     assert.equal(calls[1].init.headers.authorization, "Bearer secret");
   });
 
@@ -126,6 +124,8 @@ describe("summaryOf", () => {
     assert.deepEqual(summaryOf(online, NOW, NOW), { dot: "online", text: "Tailscale · 2 sessions" });
     assert.equal(summaryOf({ ...online, sessionCount: 1 }, undefined, NOW).text, "Tailscale · 1 session");
     assert.equal(summaryOf({ ...online, sessionCount: 0 }, undefined, NOW).text, "Tailscale · no sessions");
+    // A computer paired through a relay says so, whatever its URL looks like.
+    assert.equal(summaryOf(online, NOW, NOW, { url: "https://relay.example#host", relay: { serverUrl: "https://relay.example", hostDeviceId: "host" } }).text, "Relay · 2 sessions");
   });
 
   it("prefers running sessions over the count", () => {
@@ -165,7 +165,7 @@ describe("one /sessions request at a time", () => {
     const probe = probeMachine(MACHINE);
     const list = (async () => {
       while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
-      return fetchSessions(MACHINE.url, MACHINE.token);
+      return fetchSessions(MACHINE);
     })();
     while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
     await new Promise((wait) => setTimeout(wait, 5));
@@ -175,7 +175,7 @@ describe("one /sessions request at a time", () => {
     assert.equal(calls.filter((call) => call.path === "/sessions").length, 1);
     // Settled: the next one asks again.
     release = undefined;
-    const again = fetchSessions(MACHINE.url, MACHINE.token);
+    const again = fetchSessions(MACHINE);
     while (release === undefined) await new Promise((wait) => setTimeout(wait, 1));
     release();
     await again;
@@ -186,12 +186,12 @@ describe("one /sessions request at a time", () => {
 describe("linkName", () => {
   it("calls a tailnet address Tailscale and any other address LAN", async () => {
     const { linkName } = await import("../src/probe.ts");
-    assert.equal(linkName("http://100.68.127.23:7390"), "Tailscale");
-    assert.equal(linkName("http://box.tail1234.ts.net:7390"), "Tailscale");
-    assert.equal(linkName("http://10.0.2.2:7395"), "LAN", "the emulator's host");
-    assert.equal(linkName("http://192.168.1.20:7390"), "LAN");
+    assert.equal(linkName({ url: "http://100.68.127.23:7390" }), "Tailscale");
+    assert.equal(linkName({ url: "http://box.tail1234.ts.net:7390" }), "Tailscale");
+    assert.equal(linkName({ url: "http://10.0.2.2:7395" }), "LAN", "the emulator's host");
+    assert.equal(linkName({ url: "http://192.168.1.20:7390" }), "LAN");
     assert.equal(linkName(undefined), "Tailscale");
     const online = { state: "online", latencyMs: 3, sessionCount: 2, running: 0, name: "a", version: "1" };
-    assert.equal(summaryOf(online, undefined, 0, "http://10.0.2.2:7395").text, "LAN · 2 sessions");
+    assert.equal(summaryOf(online, undefined, 0, { url: "http://10.0.2.2:7395" }).text, "LAN · 2 sessions");
   });
 });

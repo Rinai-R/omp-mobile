@@ -11,9 +11,9 @@ export function displayName(machine: Pick<Machine, "name" | "label">): string {
   return label !== undefined && label !== "" ? label : shortName(machine.name);
 }
 
-/** The host part of a machine's address: `100.68.127.23`, `box.tail1234.ts.net`. */
+/** The host part of a machine's address: `100.68.127.23`, `box.tail1234.ts.net`; for a relay machine, the relay's. */
 export function hostOf(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/:\d+$/, "");
+  return url.replace(/^https?:\/\//, "").replace(/[/#].*$/, "").replace(/:\d+$/, "");
 }
 
 /** A machine's name among `machines`: with its address when another one is called the same, and its port when that is shared too. */
@@ -23,7 +23,7 @@ export function machineLabel(machine: Machine, machines: readonly Machine[]): st
   if (twins.length < 2) return name;
   const host = hostOf(machine.url);
   const sameHost = twins.filter((item) => hostOf(item.url) === host).length > 1;
-  return `${name} · ${sameHost ? machine.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : host}`;
+  return `${name} · ${sameHost ? machine.url.replace(/^https?:\/\//, "").replace(/[/#].*$/, "") : host}`;
 }
 
 /** The longest name the rename field keeps. */

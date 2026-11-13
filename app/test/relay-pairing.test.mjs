@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { keyFingerprint, pairingProof, parsePairingTicket } from "../src/dsh/pairing.ts";
+import { keyFingerprint, pairingProof, parsePairingTicket } from "../src/relay/pairing.ts";
 
 // The fixed vector ds-harness-remote publishes for every phone implementation.
-const vector = JSON.parse(readFileSync(new URL("./fixtures/dsh-pairing-proof.json", import.meta.url), "utf8"));
+const vector = JSON.parse(readFileSync(new URL("./fixtures/relay-pairing-proof.json", import.meta.url), "utf8"));
 
 test("the mobile pairing proof matches the published vector", () => {
   const mobile = vector.vectors.find((item) => item.side === "mobile");
