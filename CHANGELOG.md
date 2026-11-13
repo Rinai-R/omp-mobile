@@ -4,9 +4,15 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.5.0
+
+Computers paired through DSH Remote: scan its code, confirm the 8-digit code, and drive their OMP sessions end to end encrypted.
+
 - Pair with a computer through DSH Remote (#57): scan or paste its pairing code, enter the 8-digit code on the computer, and its OMP sessions (served by DSH's Pi backend running `omp acp`) open on the phone over an end-to-end encrypted Host connection. Listing, new sessions, history, streaming replies, tool cards, approvals, stop and model selection all work; a tool approval asked while the chat was closed shows again when it reopens. Background notifications are not available for these computers yet.
 
 ### 中文
+
+可以通过 DSH Remote 配对电脑：扫码、确认 8 位验证码，即可端到端加密地操作它的 OMP 会话。
 
 - 支持通过 DSH Remote 配对电脑（#57）：扫描或粘贴配对码，在电脑上输入 8 位验证码，即可在手机上打开它的 OMP 会话（由 DSH 的 Pi 后端运行 `omp acp` 提供），走端到端加密的主机连接。列会话、新建会话、历史、流式回复、工具卡片、审批、停止和切换模型均可用；对话关闭期间发起的工具审批，重新打开时会再次弹出。这类电脑暂不支持后台通知。
 
