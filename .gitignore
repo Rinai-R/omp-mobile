@@ -8,3 +8,5 @@ android/build/
 **/android/build/
 *.log
 .DS_Store
+# DSH Remote ships as built packages (see app/vendor/dsh-remote/README.md).
+!/app/vendor/dsh-remote/*/dist/

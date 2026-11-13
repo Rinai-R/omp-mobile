@@ -49,6 +49,10 @@ omp plugin install omp-mobile
 
 从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
 
+#### 通过 DSH Remote
+
+运行 [DS Harness Remote](https://github.com/liguobao/ds-harness-remote)、且 Pi 后端配置为 `omp acp` 的电脑，可以不经 Tailscale 和 daemon 直接配对。在 DSH Remote 里生成配对二维码并扫描（或把 `https://<服务器>/pair#v1.…` 链接粘贴到 **Enter address**）；手机会显示电脑名称、密钥指纹和一个 8 位验证码，在电脑上输入即可。电脑确认后，它的 OMP 会话会像其他机器一样列出。提示、回复和工具输出在手机与这台电脑之间端到端加密（Noise IK，固定到电脑密钥），服务器只转发。工具审批照常以弹窗显示。这类电脑暂不支持后台通知。
+
 需要通知时，在 App 里打开 **Settings → Notifications**。
 
 你 Tailscale 账号下持有 token 的设备，可以在那台电脑上执行 OMP 能做的任何事。

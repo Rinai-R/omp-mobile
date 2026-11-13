@@ -14,6 +14,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { pairMachine } from "../api";
+import { RemotePairingCard, useRemotePairing } from "../components/RemotePairing";
+import { parsePairingTicket, type PairingTicket } from "../dsh/pairing";
 import { CloseGlyph, KeyboardGlyph } from "../components/icons";
 import { pairingMessage, readPairing } from "../pairing";
 import { EASE_OUT, GRADIENT, MONO, SANS, palette, radius } from "../theme";
@@ -81,10 +83,11 @@ function useCameraAccess() {
 }
 
 /**
- * Scanned codes, one at a time: refuse anything but a tailnet pairing code with
- * an inline error and keep scanning; check an accepted one and add it.
+ * Scanned codes, one at a time: refuse anything but a tailnet pairing code or a
+ * DSH Remote code with an inline error and keep scanning; check an accepted
+ * daemon code and add it, and hand a DSH Remote code to `onRemote`.
  */
-function usePairing(machines: Machine[], onAdd: (machine: Machine) => void) {
+function usePairing(machines: Machine[], onAdd: (machine: Machine) => void, onRemote: (ticket: PairingTicket) => void) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
@@ -108,6 +111,12 @@ function usePairing(machines: Machine[], onAdd: (machine: Machine) => void) {
       last.current = { data, at: now };
       // Held in view, the same code is one scan; shown again later, it is a new one.
       if (working.current || (previous !== null && previous.data === data && now - previous.at < SAME_CODE_MS)) return;
+      const ticket = parsePairingTicket(data);
+      if (ticket !== undefined) {
+        setError(null);
+        onRemote(ticket);
+        return;
+      }
       const pairing = readPairing(data);
       if (!pairing.ok) {
         setError(pairingMessage(pairing.problem, pairing.host));
@@ -140,7 +149,8 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const camera = useCameraAccess();
-  const pairing = usePairing(machines, onAdd);
+  const remote = useRemotePairing(machines, onAdd);
+  const pairing = usePairing(machines, onAdd, remote.start);
   /** The camera granted but failed to start; a retry remounts it under a new key. */
   const [mountFailed, setMountFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -192,7 +202,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
       <View style={styles.center} pointerEvents="none">
         <View style={layout.frame}>
           <FrameCorners size={frame} />
-          {pairing.busy || camera.access === "pending" ? (
+          {pairing.busy || (remote.busy && remote.code === null) || camera.access === "pending" ? (
             <View style={styles.busy}>
               <ActivityIndicator color={DARK.fg} />
               {pairing.busy ? <Text style={styles.busyText}>{t("scanner.connecting")}</Text> : null}
@@ -216,11 +226,13 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
         <View style={styles.iconSpacer} />
       </View>
       <View style={layout.bottom}>
-        {panel ?? (
+        {remote.busy ? <RemotePairingCard code={remote.code} c={DARK} onCancel={remote.cancel} /> : null}
+        {!remote.busy && panel !== null ? panel : null}
+        {!remote.busy && panel === null ? (
           <>
-            {pairing.error !== null ? (
+            {(remote.error ?? pairing.error) !== null ? (
               <Text style={styles.error} accessibilityRole="alert">
-                {pairing.error}
+                {remote.error ?? pairing.error}
               </Text>
             ) : null}
             <Pressable onPress={onManual} style={styles.ghost} accessibilityRole="button">
@@ -228,7 +240,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
               <Text style={styles.ghostText}>{t("machines.enterAddress")}</Text>
             </Pressable>
           </>
-        )}
+        ) : null}
       </View>
     </View>
   );

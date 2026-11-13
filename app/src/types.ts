@@ -14,6 +14,12 @@ export interface Machine {
   lastSeen?: number;
   /** The user's own name for this computer on this phone; the host name when absent. */
   label?: string;
+  /**
+   * A computer reached through a DSH Remote server rather than its own daemon:
+   * the server it was paired on and its Host device. `url` is then
+   * `<serverUrl>#<hostDeviceId>` and `token` empty; the credentials live in `dsh/hosts.ts`.
+   */
+  remote?: { serverUrl: string; hostDeviceId: string };
 }
 
 export interface SessionSummary {
