@@ -26,6 +26,8 @@ import { nativeStrings, systemLocale, useLanguage } from "./src/i18n/native.ts";
 import { isPairingLink } from "./src/pairing";
 import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
+import { probeRemote } from "./src/dsh/sessions";
+import { dropRemote, forgetServer } from "./src/dsh/hosts";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
 import { dropMachine } from "./src/transcripts";
@@ -104,7 +106,8 @@ export default function App(): ReactNode {
       const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
       if (last !== undefined) setRoute({ kind: "home", machine: last });
       // The service follows these machines while the setting is on; it persists both for the boot receiver.
-      Attention.setMachines(stored);
+      // The service speaks the daemon's protocol only: Remote machines notify while the app is open.
+      Attention.setMachines(stored.filter((item) => item.remote === undefined));
       const state = notificationState(storedSettings.notifications);
       Attention.setEnabled(state === "on");
       setNotifications(state);
@@ -213,14 +216,14 @@ export default function App(): ReactNode {
     void saveMachines(next);
     // Only what the service reads: a probe's lastSeen does not restart the streams.
     const followed = (list: Machine[]) => list.map((item) => `${item.id}\n${item.url}\n${item.token}\n${item.name}`).join("\n\n");
-    if (followed(before) !== followed(next)) Attention.setMachines(next);
+    if (followed(before) !== followed(next)) Attention.setMachines(next.filter((item) => item.remote === undefined));
   }, []);
 
   const probeOne = useCallback(
     (machine: Machine): Promise<void> => {
       const pending = inFlight.current.get(machine.id);
       if (pending !== undefined) return pending;
-      const run = probeMachine(machine)
+      const run = (machine.remote === undefined ? probeMachine(machine) : probeRemote(machine))
         .then((probe) => {
           // A machine removed while it was probed has no row to update.
           if (!machinesRef.current.some((item) => item.id === machine.id)) return;
@@ -308,6 +311,10 @@ export default function App(): ReactNode {
     (machine: Machine) => {
       persist(machinesRef.current.filter((item) => item.id !== machine.id));
       dropMachine(machine.id);
+      if (machine.remote !== undefined) {
+        dropRemote(machine);
+        void forgetServer(machine.remote.serverUrl, machinesRef.current);
+      }
       setProbes((current) => {
         const next = new Map(current);
         next.delete(machine.id);

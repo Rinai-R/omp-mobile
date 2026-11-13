@@ -49,6 +49,10 @@ Without the plugin, the same daemon runs from npm (Node.js 22.19 or newer) in th
 
 Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Scan to pair** and scan the code. **Enter address** takes the address and token by hand, or a pasted pairing link.
 
+#### Through DSH Remote
+
+A computer running [DS Harness Remote](https://github.com/liguobao/ds-harness-remote) with its Pi backend set to `omp acp` can be paired without Tailscale or the daemon. Generate the pairing code in DSH Remote and scan it (or paste its `https://<server>/pair#v1.…` link into **Enter address**); the phone shows the computer's name, its key fingerprint and an 8-digit code to enter on the computer. Once the computer approves, its OMP sessions are listed like any other machine. Prompts, replies and tool output are end-to-end encrypted between the phone and that computer (Noise IK, pinned to its key); the server only relays. Tool approvals show as the usual sheet. Background notifications are not available for these computers yet.
+
 For notifications, open **Settings → Notifications** in the app.
 
 A device on your Tailscale account that has the token can run anything OMP can on that computer.

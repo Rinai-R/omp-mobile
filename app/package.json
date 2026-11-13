@@ -10,11 +10,16 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@dsh-remote/client-core": "*",
+    "@dsh-remote/crypto": "*",
+    "@dsh-remote/protocol": "*",
+    "@dsh-remote/webrtc": "*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~57.0.27",
     "expo-build-properties": "~57.0.22",
     "expo-camera": "~57.0.6",
     "expo-clipboard": "~57.0.2",
+    "expo-crypto": "~57.0.1",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
     "expo-image-manipulator": "~57.0.21",

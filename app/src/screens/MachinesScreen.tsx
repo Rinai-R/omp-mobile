@@ -16,6 +16,8 @@ import {
   StateDot,
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
+import { RemotePairingCard, useRemotePairing } from "../components/RemotePairing";
+import { parsePairingTicket } from "../dsh/pairing";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
@@ -79,8 +81,22 @@ export function MachinesScreen({
   const closeSheet = useCallback(() => setSheet(null), []);
   /** The machine whose removal is being confirmed. */
   const [removing, setRemoving] = useState<Machine | null>(null);
+  /** A DSH Remote code pasted into the address: paired here, then the sheet closes. */
+  const remote = useRemotePairing(
+    machines,
+    useCallback(
+      (machine: Machine) => {
+        setUrl("");
+        setAdding(false);
+        onAdd(machine);
+      },
+      [onAdd],
+    ),
+  );
+  const ticket = parsePairingTicket(url.trim());
 
   const close = useCallback(() => {
+    remote.cancel();
     setAdding(false);
     setError(null);
     setBusy(false);
@@ -90,7 +106,7 @@ export function MachinesScreen({
       setToken("");
       setFromLink(false);
     }
-  }, [fromLink]);
+  }, [fromLink, remote.cancel]);
 
   // A pairing link or the scanner's "Enter address" opens the sheet.
   useEffect(() => {
@@ -117,6 +133,11 @@ export function MachinesScreen({
   }, [addRequest, onAddRequestHandled]);
 
   const connect = useCallback(async () => {
+    if (ticket !== undefined) {
+      setError(null);
+      remote.start(ticket);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -141,7 +162,7 @@ export function MachinesScreen({
     } finally {
       setBusy(false);
     }
-  }, [machines, onAdd, token, url]);
+  }, [machines, onAdd, remote.start, ticket, token, url]);
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
@@ -251,26 +272,29 @@ export function MachinesScreen({
       />
 
       <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
-        <Field
-          label={t("machines.addSheet.address")}
-          value={url}
-          onChangeText={setUrl}
-          placeholder={t("machines.addSheet.addressPlaceholder")}
-          autoFocus={!fromLink}
-        />
-        <Field
-          label={t("machines.addSheet.token")}
-          value={token}
-          onChangeText={setToken}
-          secure
-        />
-        {error !== null ? <Text style={styles.error}>{error}</Text> : null}
-        <Button
-          label={t("machines.addSheet.connect")}
-          onPress={() => void connect()}
-          busy={busy}
-          disabled={url.trim() === "" || (token.trim() === "" && !isPairingLink(url))}
-        />
+        {remote.busy ? (
+          <RemotePairingCard code={remote.code} c={colors} onCancel={remote.cancel} />
+        ) : (
+          <>
+            <Field
+              label={t("machines.addSheet.address")}
+              value={url}
+              onChangeText={setUrl}
+              placeholder={t("machines.addSheet.addressPlaceholder")}
+              autoFocus={!fromLink}
+            />
+            {ticket === undefined ? (
+              <Field label={t("machines.addSheet.token")} value={token} onChangeText={setToken} secure />
+            ) : null}
+            {(remote.error ?? error) !== null ? <Text style={styles.error}>{remote.error ?? error}</Text> : null}
+            <Button
+              label={t("machines.addSheet.connect")}
+              onPress={() => void connect()}
+              busy={busy}
+              disabled={url.trim() === "" || (token.trim() === "" && !isPairingLink(url) && ticket === undefined)}
+            />
+          </>
+        )}
       </Sheet>
     </View>
   );

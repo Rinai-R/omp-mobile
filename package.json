@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "daemon",
-    "app"
+    "app",
+    "app/vendor/dsh-remote/*"
   ],
   "scripts": {
     "daemon": "node daemon/src/server.mjs",
