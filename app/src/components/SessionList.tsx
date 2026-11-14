@@ -6,7 +6,7 @@ import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { heldDetail } from "../takeover";
 import { syncSessions } from "../sync";
 import { loadSessionList, saveSessionList } from "../transcripts";
-import type { Machine, SessionSummary } from "../types";
+import type { Machine, SearchResult, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
 import { GradientFill, ShimmerText, Spinner } from "./brand";
 import { ChevronGlyph, ComputerGlyph, LockGlyph, QuestionGlyph, TerminalGlyph } from "./icons";
@@ -111,6 +111,7 @@ export function SessionRow({
   session,
   current = false,
   busy = false,
+  snippet,
   onPress,
   onLongPress,
 }: {
@@ -118,6 +119,8 @@ export function SessionRow({
   current?: boolean;
   /** The session is being opened: a spinner replaces its age. */
   busy?: boolean;
+  /** A search's line from the message that matched, under the detail. */
+  snippet?: string;
   onPress: (session: SessionSummary) => void;
   onLongPress?: (session: SessionSummary) => void;
 }): ReactNode {
@@ -167,6 +170,11 @@ export function SessionRow({
             {detail}
           </Text>
         )}
+        {snippet !== undefined ? (
+          <Text style={styles.snippet} numberOfLines={2}>
+            {snippet}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.trailing}>
         {busy ? (
@@ -243,6 +251,35 @@ export function SessionGroups({
   );
 }
 
+/**
+ * A computer-wide search's results (`session-search`), best first: the title
+ * or the line of the message that matched. Tapping one opens the session at
+ * that message.
+ */
+export function SearchResults({
+  results,
+  currentId,
+  onPress,
+}: {
+  results: readonly SearchResult[];
+  currentId?: string;
+  onPress: (session: SessionSummary, at: number | undefined) => void;
+}): ReactNode {
+  return (
+    <>
+      {results.map(({ session, match }) => (
+        <SessionRow
+          key={session.id}
+          session={session}
+          current={session.id === currentId}
+          snippet={match.kind === "message" ? match.snippet : undefined}
+          onPress={() => onPress(session, match.kind === "message" ? match.timestamp : undefined)}
+        />
+      ))}
+    </>
+  );
+}
+
 function createStyles(c: Palette) {
   const title = { fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "400", letterSpacing: -0.3, color: c.fg } as const;
   // Uppercased in JS and without letter spacing: Android clips the last glyph of such labels otherwise.
@@ -257,6 +294,7 @@ function createStyles(c: Palette) {
     title,
     titleDim: { ...title, color: c.fgFaint },
     detail: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgFaint },
+    snippet: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
     trailing: { flexDirection: "row", alignItems: "center", gap: 8 },
     badge: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.badge },
     badgeText: { fontFamily: SANS, fontSize: 13, lineHeight: 16, fontWeight: "600", color: "#ffffff" },

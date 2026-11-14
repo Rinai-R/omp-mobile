@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { answerRequest, createSession, deleteSession } from "../api";
+import { FORK_FEATURE, answerRequest, createSession, daemonFeatures, deleteSession, forkSession, knownFeatures } from "../api";
 import { ApprovalWidget } from "../components/ApprovalWidget";
 import { LiveDot, PulseDot } from "../components/brand";
-import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
+import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, ForkGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
 import { haptic } from "../haptics";
@@ -56,6 +56,23 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   /** The session whose Close is being confirmed, and what the last close failed with. */
   const [closing, setClosing] = useState<SessionSummary | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
+  /** The session whose long-press actions are open (fork, close), and a fork in flight. */
+  const [actions, setActions] = useState<SessionSummary | null>(null);
+  const [forking, setForking] = useState(false);
+  const [canFork, setCanFork] = useState(() => knownFeatures(machine).includes(FORK_FEATURE));
+  // Asked again once the list loads: the computer may have been out of reach when the home opened.
+  const listed = sessions !== undefined;
+  useEffect(() => {
+    let live = true;
+    void daemonFeatures(machine).then((features) => {
+      if (live && features.length > 0) setCanFork(features.includes(FORK_FEATURE));
+    });
+    return () => {
+      live = false;
+    };
+    // A probe updates the machine object (lastSeen); only its address and the list's arrival matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machine.url, listed]);
   // Starts at 0, not at newRequest: a home opened with a request (New from the switcher) opens the sheet at once.
   const [lastRequest, setLastRequest] = useState(0);
   if (newRequest !== lastRequest) {
@@ -120,6 +137,32 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   const confirmDelete = useCallback((session: SessionSummary) => {
     if (session.origin === "daemon") setClosing(session);
   }, []);
+  /** A long press: the session's actions where the daemon can fork, else Close as before. */
+  const longPress = useCallback(
+    (session: SessionSummary) => {
+      if (canFork) setActions(session);
+      else confirmDelete(session);
+    },
+    [canFork, confirmDelete],
+  );
+  const fork = useCallback(
+    (session: SessionSummary) => {
+      setForking(true);
+      setCloseError(null);
+      void forkSession(machine, session.id)
+        .then((forked) => {
+          setActions(null);
+          setSessions((current) => [forked, ...(current ?? []).filter((item) => item.id !== forked.id)]);
+          onOpen(machine, forked);
+        })
+        .catch((cause: unknown) => {
+          setActions(null);
+          setCloseError(t("fork.failed", { error: cause instanceof Error ? cause.message : String(cause) }));
+        })
+        .finally(() => setForking(false));
+    },
+    [machine, onOpen, setSessions],
+  );
   const closeSession = useCallback(
     (session: SessionSummary) => {
       setCloseError(null);
@@ -158,6 +201,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
 
   return (
     <View style={styles.root}>
+
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: 6, paddingBottom: 168 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
@@ -289,7 +333,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
             <Text style={styles.emptyTitle}>{sessions.length === 0 ? t("home.empty.title") : t("home.noMatch")}</Text>
           </View>
         ) : (
-          <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={confirmDelete} />
+          <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={longPress} />
         )}
       </ScrollView>
 
@@ -328,6 +372,29 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         <Button label={t("home.newSheet.start")} onPress={() => void create()} busy={busy} />
       </Sheet>
 
+      <Sheet visible={actions !== null} title={actions?.title ?? ""} onClose={() => setActions(null)}>
+        <Text style={styles.actionsBody}>{t("fork.sessionBody")}</Text>
+        <Button
+          label={t("fork.session")}
+          icon={<ForkGlyph size={16} color={colors.accentFg} />}
+          busy={forking}
+          onPress={() => {
+            if (actions !== null) fork(actions);
+          }}
+        />
+        {actions?.origin === "daemon" ? (
+          <Button
+            label={t("home.close.action")}
+            kind="plain"
+            icon={<CloseGlyph size={14} color={colors.fgMuted} />}
+            onPress={() => {
+              const session = actions;
+              setActions(null);
+              setClosing(session);
+            }}
+          />
+        ) : null}
+      </Sheet>
       <ConfirmSheet
         visible={closing !== null}
         title={t("home.close.title")}
@@ -406,5 +473,6 @@ function createStyles(c: Palette) {
     recentText: chipText,
     recentTextOn: { ...chipText, color: c.fg },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
+    actionsBody: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fgMuted, marginTop: -4 },
   } as const;
 }
