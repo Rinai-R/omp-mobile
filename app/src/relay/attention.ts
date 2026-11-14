@@ -25,7 +25,8 @@ export function followRelayEvents(machines: readonly Machine[]): () => void {
         try {
           await relayStream(
             relay,
-            "/events",
+            // `live=1`: running turns too, for the live activity; daemons before 0.7 ignore it.
+            "/events?live=1",
             {
               onOpen: () => {
                 reached = true;

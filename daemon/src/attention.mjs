@@ -12,12 +12,17 @@
  */
 import { hostname } from "node:os";
 
-/** @typedef {"approval" | "question" | "resolved" | "done" | "failed"} AttentionKind */
+/**
+ * `running`: a turn started (key `run:<n>`, the key its `done`/`failed` frame
+ * will carry), sent only to streams that ask for it (`?live=1`), for the phone's
+ * Live Update; older apps would show it as a banner.
+ * @typedef {"approval" | "question" | "resolved" | "done" | "failed" | "running"} AttentionKind
+ */
 
 /**
  * @typedef {object} AttentionFrame
  * @property {AttentionKind} kind
- * @property {string} key Waiting-item identity: the extension request id; `run:<n>` for done/failed.
+ * @property {string} key Waiting-item identity: the extension request id; `run:<n>` for running/done/failed.
  * @property {string} sessionId
  * @property {string} sessionTitle
  * @property {string} machine This computer's hostname.
@@ -77,10 +82,17 @@ export class AttentionTracker {
     this.subscribers = new Set();
   }
 
-  /** Approvals and questions still waiting, across all sessions, oldest first. */
-  pending() {
+  /**
+   * Approvals and questions still waiting, across all sessions, oldest first;
+   * with `live`, also each turn still running, so a reconnecting phone knows.
+   * @param {{live?: boolean}} [options]
+   */
+  pending(options = {}) {
     const open = [];
-    for (const state of this.sessions.values()) open.push(...state.open.values());
+    for (const state of this.sessions.values()) {
+      open.push(...state.open.values());
+      if (options.live === true && state.running !== undefined) open.push(state.running);
+    }
     return open.sort((a, b) => a.time - b.time);
   }
 
@@ -147,6 +159,10 @@ export class AttentionTracker {
           state.open.delete(key);
           emit("resolved", key, "closed");
         }
+        if (state.running !== undefined) {
+          emit("resolved", state.running.key, "closed");
+          state.running = undefined;
+        }
         break;
       }
       case "notice": {
@@ -167,6 +183,7 @@ export class AttentionTracker {
       case "agent_start":
         state.error = "";
         state.last = undefined;
+        state.running = emit("running", `run:${state.runs + 1}`, "");
         return;
       case "notice":
         if (event.level === "error") state.error = typeof event.message === "string" ? event.message : "error";
@@ -189,6 +206,7 @@ export class AttentionTracker {
         }
         state.error = "";
         state.last = undefined;
+        state.running = undefined;
         return;
       }
       default:
@@ -198,7 +216,7 @@ export class AttentionTracker {
   #state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (state === undefined) {
-      state = { open: new Map(), runs: 0, error: "", last: undefined };
+      state = { open: new Map(), runs: 0, error: "", last: undefined, running: undefined };
       this.sessions.set(sessionId, state);
     }
     return state;
@@ -216,10 +234,13 @@ export function sseData(frame) {
  * @param {AttentionTracker} tracker
  * @param {import("node:http").IncomingMessage} req
  * @param {import("node:http").ServerResponse} res
- * @param {{heartbeatMs?: number}} [options]
+ * @param {{heartbeatMs?: number, live?: boolean}} [options] `live`: also send `running` frames and their resolutions (`?live=1`).
  * @returns {() => void} ends the stream
  */
 export function serveEvents(tracker, req, res, options = {}) {
+  const live = options.live === true;
+  // A turn's frames other than done/failed exist for the Live Update; streams that did not ask never see them.
+  const wanted = (frame) => live || (frame.kind !== "running" && !(frame.kind === "resolved" && frame.key.startsWith("run:")));
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -229,9 +250,11 @@ export function serveEvents(tracker, req, res, options = {}) {
   req.socket.setNoDelay(true);
   req.socket.setKeepAlive(true, 30_000);
   res.write(": omp-mobile attention\n\n");
-  for (const frame of tracker.pending()) res.write(sseData(frame));
+  for (const frame of tracker.pending({ live })) res.write(sseData(frame));
   res.write("event: live\ndata: {}\n\n");
-  const off = tracker.subscribe((frame) => res.write(sseData(frame)));
+  const off = tracker.subscribe((frame) => {
+    if (wanted(frame)) res.write(sseData(frame));
+  });
   const heartbeat = setInterval(() => res.write(": ping\n\n"), options.heartbeatMs ?? HEARTBEAT_MS);
   let ended = false;
   const end = () => {

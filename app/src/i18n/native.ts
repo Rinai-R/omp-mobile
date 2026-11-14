@@ -42,6 +42,12 @@ const NATIVE_KEYS = [
   "notify.channel.service.detail",
   "notify.service.connected",
   "notify.service.partial",
+  "notify.channel.live",
+  "notify.channel.live.detail",
+  "live.approve",
+  "live.answer",
+  "live.working",
+  "live.more",
 ] as const satisfies readonly Key[];
 
 /**

@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScrollView, Switch, Text, View } from "react-native";
-import { CheckGlyph } from "../components/icons";
-import { Button, Group, Header, Row, SectionHeader } from "../components/ui";
+import { BackGlyph, CheckGlyph } from "../components/icons";
+import { LargeTitle, TAB_BAR_HEIGHT } from "../components/TabBar";
+import { Button, Group, IconButton, Row, SectionHeader } from "../components/ui";
 import { t, type LanguagePreference } from "../i18n/index.ts";
+import type { AppearancePreference } from "../storage";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 
 /**
@@ -11,42 +14,64 @@ import { MONO, useColors, useStyles, type Palette } from "../theme";
  */
 export type NotificationState = "on" | "off" | "denied" | "unsupported";
 
+/** Whether the live activity is promoted to an Android 16 Live Update: allowed, not yet allowed, or an older Android. */
+export type LiveState = "on" | "off" | "unsupported";
+
 interface Props {
   notifications: NotificationState;
   language: LanguagePreference;
   onLanguage: (language: LanguagePreference) => void;
+  appearance: AppearancePreference;
+  onAppearance: (appearance: AppearancePreference) => void;
   /** Android may stop the background connection to save battery. */
   batteryRestricted: boolean;
   onToggleNotifications: (on: boolean) => void;
   onOpenNotificationSettings: () => void;
   onFixBattery: () => void;
-  onBack: () => void;
+  live: LiveState;
+  onAllowLive: () => void;
+  /** Back to the computers screen: only before any computer is paired, when there is no tab bar. */
+  onBack?: () => void;
   version: string;
 }
 
 /** Each language under its own name, the same in every language. */
 const LANGUAGE_NAMES = { en: "English", "zh-CN": "中文" } as const;
 const LANGUAGE_CHOICES: readonly LanguagePreference[] = ["system", "zh-CN", "en"];
+const APPEARANCE_CHOICES: readonly AppearancePreference[] = ["system", "dark", "light"];
 
 export function SettingsScreen({
   notifications,
   language,
   onLanguage,
+  appearance,
+  onAppearance,
   batteryRestricted,
   onToggleNotifications,
   onOpenNotificationSettings,
   onFixBattery,
+  live,
+  onAllowLive,
   onBack,
   version,
 }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const showBattery = notifications === "on" && batteryRestricted;
   return (
     <View style={styles.root}>
-      <Header title={t("settings.title")} onBack={onBack} />
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.first} />
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: (onBack === undefined ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}>
+        {onBack !== undefined ? (
+          <View style={styles.back}>
+            <IconButton onPress={onBack} label={t("common.back")}>
+              <BackGlyph size={24} color={colors.tint} />
+            </IconButton>
+          </View>
+        ) : null}
+        <View style={styles.bleed}>
+          <LargeTitle title={t("settings.title")} />
+        </View>
         <Group>
           <Row
             title={t("settings.notifications.title")}
@@ -57,7 +82,7 @@ export function SettingsScreen({
                 value={notifications === "on"}
                 disabled={notifications === "unsupported"}
                 onValueChange={onToggleNotifications}
-                trackColor={{ false: colors.selected, true: colors.accent }}
+                trackColor={{ false: colors.selected, true: colors.sysGreen }}
                 thumbColor="#ffffff"
                 ios_backgroundColor={colors.selected}
                 accessibilityLabel={t("settings.notifications.a11y")}
@@ -79,13 +104,47 @@ export function SettingsScreen({
           ) : null}
         </Group>
 
+        {notifications === "on" ? (
+          <>
+            <View style={styles.gap} />
+            <Group>
+              <Row
+                title={t("settings.live.title")}
+                detail={live === "on" ? t("settings.live.on") : live === "off" ? t("settings.live.off") : t("settings.live.unsupported")}
+                last={live !== "off"}
+                trailing={live === "on" ? <CheckGlyph size={16} color={colors.sysGreen} /> : undefined}
+              />
+              {live === "off" ? (
+                <View style={styles.action}>
+                  <Button label={t("settings.live.allow")} kind="plain" onPress={onAllowLive} />
+                </View>
+              ) : null}
+            </Group>
+          </>
+        ) : null}
+
+        <SectionHeader title={t("settings.appearance.section")} />
+        <Group>
+          {APPEARANCE_CHOICES.map((choice, index) => (
+            <Row
+              key={choice}
+              title={t(`settings.appearance.${choice}`)}
+              trailing={choice === appearance ? <CheckGlyph size={16} color={colors.tint} /> : undefined}
+              chevron={false}
+              selected={choice === appearance}
+              last={index === APPEARANCE_CHOICES.length - 1}
+              onPress={() => onAppearance(choice)}
+            />
+          ))}
+        </Group>
+
         <SectionHeader title={t("settings.language.section")} />
         <Group>
           {LANGUAGE_CHOICES.map((choice, index) => (
             <Row
               key={choice}
               title={choice === "system" ? t("settings.language.system") : LANGUAGE_NAMES[choice]}
-              trailing={choice === language ? <CheckGlyph size={16} color={colors.accent} /> : undefined}
+              trailing={choice === language ? <CheckGlyph size={16} color={colors.tint} /> : undefined}
               chevron={false}
               selected={choice === language}
               last={index === LANGUAGE_CHOICES.length - 1}
@@ -106,10 +165,12 @@ export function SettingsScreen({
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16 },
     action: { paddingHorizontal: 12, paddingBottom: 12 },
-    first: { height: 16 },
     gap: { height: 24 },
+    // The large title keeps the home's 20 px inset inside this 16 px-padded list.
+    bleed: { marginHorizontal: -16 },
+    back: { position: "absolute", top: 0, left: -12 },
     version: { fontFamily: MONO, fontSize: 12, lineHeight: 16, color: c.fgFaint },
   } as const;
 }

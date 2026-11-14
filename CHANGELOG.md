@@ -4,6 +4,20 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- The in-app "island" capsule is gone. In its place, a real **live activity**: while a session runs or waits for you, one ongoing notification shows it, with a running clock, or "Approve · bash · npm test" while it waits; tapping it opens the session, and it disappears when nothing runs. On Android 16 it becomes a Live Update in the status-bar chip and on the lock screen (HyperOS, ColorOS and MagicOS show it in their islands) once you allow Live Updates for OMP (Settings → Live activity). It needs background notifications on, and this daemon version (`/events?live=1`).
+- Sessions, Computers and Settings are now three tabs under one tab bar, with the same large titles and grouped lists, instead of separate pages with a back button.
+- The chat no longer shows Send while a run started elsewhere (the terminal, another phone) is still going: it follows OMP's run start and end, not each turn's, so a message sent then is passed to OMP mid-run. If the computer runs an omp-mobile older than 0.6, which cannot pass it, the chat says so and keeps your text.
+- The Sessions tab opens on the computer instead of a large "Sessions" title: its name, whether it is online, and the switcher behind it; the settings gear at the top is gone (Settings is a tab). Computers and Settings use the same smaller title.
+- Settings → Appearance: Same as phone, Dark or Light. The app followed only the phone's setting until now, so with the phone in light mode there was no way to get the dark look.
+
+### 中文
+
+- 会话页顶部不再是大号"会话"标题，改为显示当前电脑：名称、是否在线，点它切换电脑；去掉了右上角的齿轮（设置已是标签页）。电脑和设置页使用同样较小的标题。
+- 设置 → 外观：跟随系统、深色或浅色。之前 App 只跟随手机设置，手机是浅色模式时就没法用深色外观。
+- 去掉了 App 里的"灵动岛"胶囊，换成真正的**实时活动**：有会话在运行或等你处理时，一条常驻通知显示它，运行时带计时，等待时显示"待批准 · bash · npm test"；点一下打开该会话，没有会话在跑时自动消失。在 Android 16 上，允许 OMP 的"实时更新"后（设置 → 实时活动），它会显示在状态栏胶囊和锁屏上（HyperOS、ColorOS、MagicOS 会显示在各自的灵动岛里）。需要开启后台通知，并使用本版本的守护进程（`/events?live=1`）。
+- 会话、电脑、设置改为同一个底部标签栏下的三个标签页，使用相同的大标题和分组列表，不再是带返回按钮的独立页面。
+- 在终端或其他手机上发起的运行还没结束时，聊天页不再显示"发送"：它跟随 OMP 整次运行的开始和结束，而不是每一轮，所以此时发的消息会在运行中传给 OMP。如果电脑上的 omp-mobile 低于 0.6、不支持运行中插话，聊天页会提示并保留你输入的文字。
+
 ## v0.6.0
 
 A new iOS-flavoured look, approvals answered straight from the home, and OMP's own English shown in the phone's language.

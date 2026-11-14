@@ -76,7 +76,8 @@ test("an answer or cancellation resolves the request by key, once", () => {
 
 test("agent_end is done with the final answer, or failed on error/aborted stops and error notices", () => {
   const attention = tracker();
-  const run = (events) => events.flatMap((event) => attention.observe(session, { type: "event", event }));
+  // Turn ends only; the `running` frame each start emits is covered below.
+  const run = (events) => events.flatMap((event) => attention.observe(session, { type: "event", event })).filter((frame) => frame.kind !== "running");
   const done = run([
     { type: "agent_start" },
     { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "All  tests\npass." }] } },
@@ -109,6 +110,22 @@ test("agent_end is done with the final answer, or failed on error/aborted stops 
   assert.deepEqual(clean.map((frame) => [frame.kind, frame.text]), [["done", "fine"]]);
   // Turns inside a run, tool events and streaming are not news.
   assert.deepEqual(run([{ type: "turn_end" }, { type: "tool_execution_start" }, { type: "message_update" }]), []);
+});
+
+test("a running turn is announced under the key its end will carry, replayed while it runs, and resolved if the session goes", () => {
+  const attention = tracker();
+  const [started] = attention.observe(session, { type: "event", event: { type: "agent_start" } });
+  assert.deepEqual([started.kind, started.key], ["running", "run:1"]);
+  assert.deepEqual(attention.pending(), [], "only a live stream replays running turns");
+  assert.deepEqual(attention.pending({ live: true }).map((frame) => frame.key), ["run:1"]);
+  const [ended] = attention.observe(session, { type: "event", event: { type: "agent_end", messages: [{ role: "assistant", content: "ok" }] } });
+  assert.deepEqual([ended.kind, ended.key], ["done", "run:1"]);
+  assert.deepEqual(attention.pending({ live: true }), []);
+
+  attention.observe(session, { type: "event", event: { type: "agent_start" } });
+  const closed = attention.observe(session, { type: "closed" });
+  assert.deepEqual(closed.map((frame) => [frame.kind, frame.key]), [["resolved", "run:2"]]);
+  assert.deepEqual(attention.pending({ live: true }), []);
 });
 
 test("subscribers hear frames as they are folded", () => {
@@ -182,6 +199,44 @@ test("GET /events needs the token, replays open requests, then says live and str
       ],
     );
     assert.ok(blocks.findIndex((block) => block.includes('"kind":"approval"')) < live);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("GET /events?live=1 also carries running turns, replaying one already under way", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-mobile-attention-"));
+  const token = "attention-token-0123456789";
+  const daemon = new Daemon({ host: "127.0.0.1", port: 0, cwd: dir, registryFile: join(dir, "sessions.json") }, token);
+  const rpc = Object.assign(new EventEmitter(), {
+    extensionRequests: new Map(),
+    getState: async () => ({ sessionId: "s1", sessionName: "Smoke", isStreaming: false }),
+    getMessages: async () => ({ messages: [] }),
+    close() {},
+  });
+  const entry = new SessionEntry(dir, rpc);
+  await entry.hydrate();
+  entry.onBroadcast = (source, payload) => daemon.attention.observe(source, payload);
+  entry.bind();
+  daemon.sessions.set(entry.id, entry);
+  rpc.emit("event", { type: "agent_start" });
+  await daemon.listen();
+  const base = `http://127.0.0.1:${daemon.server.address().port}`;
+  try {
+    const response = await fetch(`${base}/events?token=${token}&live=1`);
+    const pending = readFrames(response, (blocks) => blocks.filter((block) => block.startsWith("data:")).length >= 3);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    rpc.emit("event", { type: "agent_end", messages: [{ role: "assistant", content: "ok" }] });
+    rpc.emit("event", { type: "agent_start" });
+    const frames = (await pending).filter((block) => block.startsWith("data:")).map((block) => JSON.parse(block.slice(5)));
+    assert.deepEqual(
+      frames.map((frame) => [frame.kind, frame.key]),
+      [
+        ["running", "run:1"],
+        ["done", "run:1"],
+        ["running", "run:2"],
+      ],
+    );
   } finally {
     await daemon.close();
   }

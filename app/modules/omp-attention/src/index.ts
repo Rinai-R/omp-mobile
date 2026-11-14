@@ -59,6 +59,8 @@ declare class OmpAttentionModule extends NativeModule<Events> {
   isBatteryRestricted(): boolean;
   requestBatteryExemption(): void;
   openNotificationSettings(): void;
+  canPromote(): boolean;
+  openPromotionSettings(): boolean;
 }
 
 const native = requireOptionalNativeModule<OmpAttentionModule>("OmpAttention");
@@ -126,6 +128,16 @@ export function requestBatteryExemption(): void {
 /** Open the app's notification settings. */
 export function openNotificationSettings(): void {
   native?.openNotificationSettings();
+}
+
+/** Whether the live activity shows as an Android 16 Live Update (status-bar chip, lock screen) on this phone. */
+export function canPromote(): boolean {
+  return native?.canPromote() ?? false;
+}
+
+/** Open the system page that allows Live Updates for this app; false where the phone has none. */
+export function openPromotionSettings(): boolean {
+  return native?.openPromotionSettings() ?? false;
 }
 
 /**
