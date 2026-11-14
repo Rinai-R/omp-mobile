@@ -160,7 +160,8 @@ function summaryOf(found, parsed, running) {
   }
   // OMP lists pending and running subagents only, and drops one as it ends.
   const live = running?.find((snapshot) => snapshot?.sessionFile === found.file);
-  const task = parsed.task?.trim();
+  // OMP opens every assignment with the same line; the list shows what the task actually is.
+  const task = parsed.task?.replace(/^\s*Complete assignment thoroughly:\s*/i, "").trim();
   return {
     id: found.id,
     agentId: found.agentId,
