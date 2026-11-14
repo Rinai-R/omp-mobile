@@ -30,7 +30,7 @@ object Notifier {
    * The app's text for `key` (sent by JS in its language, see app/src/i18n/native.ts),
    * else the English `fallback`; `{name}` placeholders are filled from `args`.
    */
-  private fun text(context: Context, key: String, fallback: String, vararg args: Pair<String, Any>): String {
+  fun text(context: Context, key: String, fallback: String, vararg args: Pair<String, Any>): String {
     var value = AttentionState.strings(context).optString(key).ifEmpty { fallback }
     for ((name, arg) in args) value = value.replace("{$name}", arg.toString())
     return value
@@ -67,6 +67,11 @@ object Notifier {
         description = text(context, "notify.channel.service.detail", "Keeps OMP connected to your computers")
         setShowBadge(false)
       },
+    )
+    LiveActivity.ensureChannel(
+      context,
+      text(context, "notify.channel.live", "Live activity"),
+      text(context, "notify.channel.live.detail", "What OMP is running or waiting on, in the status bar and on the lock screen"),
     )
   }
 
@@ -156,7 +161,7 @@ object Notifier {
   private fun notificationId(machineId: String, sessionId: String, key: String) =
     "$machineId|$sessionId|$key".hashCode()
 
-  private fun openIntent(context: Context, machineId: String?, sessionId: String?, requestCode: Int): PendingIntent {
+  fun openIntent(context: Context, machineId: String?, sessionId: String?, requestCode: Int): PendingIntent {
     val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
       ?: Intent().setPackage(context.packageName)
     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)

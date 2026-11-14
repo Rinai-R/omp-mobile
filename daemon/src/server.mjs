@@ -914,7 +914,7 @@ class Daemon {
       return;
     }
     if (url.pathname === "/events" && req.method === "GET") {
-      const end = serveEvents(this.attention, req, res);
+      const end = serveEvents(this.attention, req, res, { live: url.searchParams.get("live") === "1" });
       this.streams.add(end);
       res.on("close", () => this.streams.delete(end));
       return;

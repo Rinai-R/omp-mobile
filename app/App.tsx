@@ -2,6 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
+  Appearance,
   AppState,
   BackHandler,
   Linking,
@@ -18,27 +19,30 @@ import { AttentionBanner } from "./src/components/AttentionBanner";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MachineSwitcher } from "./src/components/MachineSwitcher";
 import { SessionSwitcher } from "./src/components/SessionSwitcher";
+import { TabBar, type Tab } from "./src/components/TabBar";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
 import { PairScanner } from "./src/screens/PairScanner";
 import { resolveLanguage, setLanguage, t, type LanguagePreference } from "./src/i18n/index.ts";
 import { nativeStrings, systemLocale, useLanguage } from "./src/i18n/native.ts";
 import { isPairingLink } from "./src/pairing";
-import { SettingsScreen, type NotificationState } from "./src/screens/SettingsScreen";
+import { SettingsScreen, type LiveState, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
 import { followRelayEvents } from "./src/relay/attention";
 import { forgetRelay } from "./src/relay/hosts";
-import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type Settings } from "./src/storage";
+import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type AppearancePreference, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
 import { dropMachine } from "./src/transcripts";
 import type { Machine, SessionSummary } from "./src/types";
 
 type Route =
+  /** The computers screen on its own: only while no computer is paired. */
   | { kind: "machines" }
-  /** `create` is a nonce: a new value opens the New session sheet once. */
-  | { kind: "home"; machine: Machine; create?: number }
+  /** The tabbed shell on `machine`; `create` is a nonce: a new value opens the New session sheet once. */
+  | { kind: "home"; machine: Machine; tab: Tab; create?: number }
   | { kind: "chat"; machine: Machine; session: SessionSummary }
-  | { kind: "settings"; from: Machine | null }
+  /** Settings on their own: only from the computers screen before any computer is paired. */
+  | { kind: "settings" }
   | { kind: "scan" };
 
 const EDGES = ["top", "left", "right"] as const;
@@ -62,6 +66,17 @@ function notificationState(enabled: boolean): NotificationState {
   if (!Attention.isSupported()) return "unsupported";
   if (!enabled) return "off";
   return Attention.notificationsAllowed() ? "on" : "denied";
+}
+
+/** The scheme React Native is told to use: `unspecified` follows the phone. */
+function colorSchemeOf(preference: AppearancePreference): "light" | "dark" | "unspecified" {
+  return preference === "system" ? "unspecified" : preference;
+}
+
+/** Whether the live activity is a Live Update here: Android 16 QPR1+ promotes it once the user allows it. */
+function liveState(): LiveState {
+  if (Platform.OS !== "android" || typeof Platform.Version !== "number" || Platform.Version < 36) return "unsupported";
+  return Attention.canPromote() ? "on" : "off";
 }
 
 /** What the notification service is told to follow: relay machines are followed here and handed over. */
@@ -96,10 +111,23 @@ export default function App(): ReactNode {
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<NotificationState>("off");
   const [batteryRestricted, setBatteryRestricted] = useState(false);
+  const [live, setLive] = useState<LiveState>("unsupported");
   /** A frame for a session not on screen, while the app is open. */
   const [banner, setBanner] = useState<Attention.Attention | null>(null);
   /** A notification tap that arrived before the stored machines were restored. */
   const [pendingOpen, setPendingOpen] = useState<Attention.OpenSession | null>(null);
+  /** Sessions waiting for an answer on the computer on screen, for the Sessions tab's badge. */
+  const [waiting, setWaiting] = useState(0);
+  /**
+   * Where the computers list is: the Computers tab of the computer used last,
+   * or the computers screen on its own while none is paired. Reads refs only,
+   * so callbacks created once can call it.
+   */
+  const computersRoute = (): Route => {
+    const list = machinesRef.current;
+    const last = list.find((item) => item.id === settingsRef.current.lastMachineId) ?? list[0];
+    return last === undefined ? { kind: "machines" } : { kind: "home", machine: last, tab: "computers" };
+  };
 
   useEffect(() => {
     void Promise.all([loadMachines(), loadSettings()]).then(([stored, storedSettings]) => {
@@ -107,15 +135,17 @@ export default function App(): ReactNode {
       setMachines(stored);
       setSettings(storedSettings);
       setLanguage(resolveLanguage(storedSettings.language, systemLocale()));
+      Appearance.setColorScheme(colorSchemeOf(storedSettings.appearance));
       // The app opens on the computer used last; with none paired, on the computers screen.
       const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
-      if (last !== undefined) setRoute({ kind: "home", machine: last });
+      if (last !== undefined) setRoute({ kind: "home", machine: last, tab: "sessions" });
       // The service follows these machines while the setting is on; it persists both for the boot receiver.
       Attention.setMachines(attentionMachines(stored));
       const state = notificationState(storedSettings.notifications);
       Attention.setEnabled(state === "on");
       setNotifications(state);
       setBatteryRestricted(Attention.isBatteryRestricted());
+      setLive(liveState());
       setRestored(true);
       // A tap that launched the app before any listener existed.
       setPendingOpen(Attention.takePendingOpen());
@@ -168,7 +198,7 @@ export default function App(): ReactNode {
     if (!restored || pendingLink === null) return;
     setPendingLink(null);
     setAddRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, link: pendingLink }));
-    setRoute({ kind: "machines" });
+    setRoute(computersRoute());
   }, [pendingLink, restored]);
 
   // Once restored, a tap opens that session's chat.
@@ -192,32 +222,31 @@ export default function App(): ReactNode {
       if (state !== "active") return;
       setNotifications(notificationState(settings.notifications));
       setBatteryRestricted(Attention.isBatteryRestricted());
+      setLive(liveState());
     });
     return () => subscription.remove();
   }, [restored, settings.notifications]);
 
   const clearAddRequest = useCallback(() => setAddRequest(null), []);
   const openScanner = useCallback(() => setRoute({ kind: "scan" }), []);
-  const closeScanner = useCallback(() => setRoute({ kind: "machines" }), []);
+  const closeScanner = useCallback(() => setRoute(computersRoute()), []);
   const scannerToManual = useCallback(() => {
     setAddRequest({ nonce: Date.now(), link: null });
-    setRoute({ kind: "machines" });
+    setRoute(computersRoute());
   }, []);
 
   /** Where back goes from `current`; null leaves the app (the home, or the computers screen with none paired). */
   const backOf = useCallback((current: Route): Route | null => {
     switch (current.kind) {
       case "chat":
-        return { kind: "home", machine: current.machine };
+        return { kind: "home", machine: current.machine, tab: "sessions" };
+      case "home":
+        // Back from another tab is the Sessions tab, as on a tabbed app; from Sessions it leaves.
+        return current.tab === "sessions" ? null : { ...current, tab: "sessions", create: undefined };
       case "settings":
-        return current.from !== null ? { kind: "home", machine: current.from } : { kind: "machines" };
-      case "scan":
         return { kind: "machines" };
-      case "machines": {
-        const list = machinesRef.current;
-        const last = list.find((item) => item.id === settingsRef.current.lastMachineId) ?? list[0];
-        return last === undefined ? null : { kind: "home", machine: last };
-      }
+      case "scan":
+        return computersRoute();
       default:
         return null;
     }
@@ -262,7 +291,7 @@ export default function App(): ReactNode {
   /** The home of `machine`, remembered as the computer to open on next time. */
   const goHome = useCallback(
     (machine: Machine, create?: boolean) => {
-      setRoute({ kind: "home", machine, create: create === true ? Date.now() : undefined });
+      setRoute({ kind: "home", machine, tab: "sessions", create: create === true ? Date.now() : undefined });
       setSettings((current) => {
         if (current.lastMachineId === machine.id) return current;
         const next = { ...current, lastMachineId: machine.id };
@@ -277,8 +306,8 @@ export default function App(): ReactNode {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       const next = backOf(route);
       if (next === null) return false;
-      // Home is remembered as the computer to open on, as the on-screen back buttons do.
-      if (next.kind === "home") goHome(next.machine);
+      // Back to the Sessions tab of the computer on screen; a chat's home is remembered as the one to open on.
+      if (next.kind === "home" && route.kind === "chat") goHome(next.machine);
       else setRoute(next);
       return true;
     });
@@ -357,6 +386,15 @@ export default function App(): ReactNode {
     [updateSettings],
   );
 
+  /** Switch light/dark now: every screen re-renders under the new palette. */
+  const chooseAppearance = useCallback(
+    (preference: AppearancePreference) => {
+      Appearance.setColorScheme(colorSchemeOf(preference));
+      updateSettings({ ...settingsRef.current, appearance: preference });
+    },
+    [updateSettings],
+  );
+
   // The notification service composes its text natively: hand it the app's language.
   useEffect(() => {
     if (restored) Attention.setStrings(nativeStrings(language));
@@ -366,7 +404,7 @@ export default function App(): ReactNode {
     if (route.kind !== "home" && route.kind !== "chat") return;
     if (machines.some((item) => item.id === route.machine.id)) return;
     const first = machines[0];
-    setRoute(first === undefined ? { kind: "machines" } : { kind: "home", machine: first });
+    setRoute(first === undefined ? { kind: "machines" } : { kind: "home", machine: first, tab: route.kind === "home" ? route.tab : "sessions" });
   }, [machines, route]);
 
   const toggleNotifications = useCallback(
@@ -398,6 +436,47 @@ export default function App(): ReactNode {
 
   /** The stored machine a route names: routes keep a copy, and a rename or probe updates the stored one. */
   const liveMachine = (machine: Machine): Machine => machines.find((item) => item.id === machine.id) ?? machine;
+  function settingsScreen(onBack?: () => void): ReactNode {
+    return (
+      <SettingsScreen
+        notifications={notifications}
+        language={settings.language}
+        onLanguage={chooseLanguage}
+        appearance={settings.appearance}
+        onAppearance={chooseAppearance}
+        batteryRestricted={batteryRestricted}
+        onToggleNotifications={toggleNotifications}
+        onOpenNotificationSettings={Attention.openNotificationSettings}
+        onFixBattery={fixBattery}
+        live={live}
+        onAllowLive={() => void Attention.openPromotionSettings()}
+        onBack={onBack}
+        version={appConfig.expo.version}
+      />
+    );
+  }
+  function machinesScreen(tabbed: boolean): ReactNode {
+    return (
+      <MachinesScreen
+        machines={machines}
+        probes={probes}
+        onAdd={addMachine}
+        onScan={openScanner}
+        addRequest={addRequest}
+        onAddRequestHandled={clearAddRequest}
+        onOpen={(machine) => goHome(machine)}
+        onRemove={removeMachine}
+        onRename={renameMachine}
+        onSettings={() => setRoute({ kind: "settings" })}
+        tabbed={tabbed}
+        refreshing={refreshing}
+        onRefresh={() => {
+          setRefreshing(true);
+          void probeAll().finally(() => setRefreshing(false));
+        }}
+      />
+    );
+  }
   let content: ReactNode;
   if (!restored) {
     content = (
@@ -416,60 +495,36 @@ export default function App(): ReactNode {
       />
     );
   } else if (route.kind === "home") {
+    const tab = route.tab;
     content = (
-      <HomeScreen
-        // Another computer's home starts fresh: its list and probe state.
-        key={route.machine.id}
-        machine={liveMachine(route.machine)}
-        machines={machines}
-        probe={probes.get(route.machine.id)}
-        onOpen={openChat}
-        onPickMachine={() => setMachinePicker(true)}
-        onSettings={() => setRoute({ kind: "settings", from: route.machine })}
-        onRetry={(machine) => void probeOne(machine)}
-        newRequest={route.create ?? 0}
-      />
+      <View style={{ flex: 1 }}>
+        {/* Kept mounted under the other tabs: its search, scroll and list survive a tab switch. */}
+        <View style={tab === "sessions" ? { flex: 1 } : { display: "none" }}>
+          <HomeScreen
+            // Another computer's home starts fresh: its list and probe state.
+            key={route.machine.id}
+            machine={liveMachine(route.machine)}
+            machines={machines}
+            probe={probes.get(route.machine.id)}
+            onOpen={openChat}
+            onPickMachine={() => setMachinePicker(true)}
+            onWaiting={setWaiting}
+            onRetry={(machine) => void probeOne(machine)}
+            newRequest={route.create ?? 0}
+          />
+        </View>
+        {tab === "computers" ? machinesScreen(true) : tab === "settings" ? settingsScreen() : null}
+        <TabBar current={tab} badge={waiting} onSelect={(next) => setRoute({ ...route, tab: next, create: undefined })} />
+      </View>
     );
   } else if (route.kind === "scan") {
     content = (
       <PairScanner machines={machines} onAdd={addMachine} onClose={closeScanner} onManual={scannerToManual} />
     );
   } else if (route.kind === "settings") {
-    const from = route.from;
-    content = (
-      <SettingsScreen
-        notifications={notifications}
-        language={settings.language}
-        onLanguage={chooseLanguage}
-        batteryRestricted={batteryRestricted}
-        onToggleNotifications={toggleNotifications}
-        onOpenNotificationSettings={Attention.openNotificationSettings}
-        onFixBattery={fixBattery}
-        onBack={() => setRoute(from !== null ? { kind: "home", machine: from } : { kind: "machines" })}
-        version={appConfig.expo.version}
-      />
-    );
+    content = settingsScreen(() => setRoute({ kind: "machines" }));
   } else {
-    content = (
-      <MachinesScreen
-        machines={machines}
-        probes={probes}
-        onAdd={addMachine}
-        onScan={openScanner}
-        addRequest={addRequest}
-        onAddRequestHandled={clearAddRequest}
-        onOpen={(machine) => goHome(machine)}
-        onRemove={removeMachine}
-        onRename={renameMachine}
-        onSettings={() => setRoute({ kind: "settings", from: null })}
-        onBack={machines[0] === undefined ? undefined : () => goHome(machinesRef.current.find((item) => item.id === settings.lastMachineId) ?? machines[0] as Machine)}
-        refreshing={refreshing}
-        onRefresh={() => {
-          setRefreshing(true);
-          void probeAll().finally(() => setRefreshing(false));
-        }}
-      />
-    );
+    content = machinesScreen(false);
   }
 
   const homeMachine = route.kind === "home" || route.kind === "chat" ? liveMachine(route.machine) : undefined;
@@ -515,7 +570,7 @@ export default function App(): ReactNode {
             onProbe={probeAllNow}
             onPick={(machine) => goHome(machine)}
             onClose={() => setMachinePicker(false)}
-            onManage={() => setRoute({ kind: "machines" })}
+            onManage={() => setRoute({ kind: "home", machine: homeMachine, tab: "computers" })}
           />
         ) : null}
       </Fragment>

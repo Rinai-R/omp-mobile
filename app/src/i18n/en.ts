@@ -34,6 +34,10 @@ export const en = {
   "settings.battery.fix": "Allow background use",
   "settings.language.section": "Language",
   "settings.language.system": "System",
+  "settings.appearance.section": "Appearance",
+  "settings.appearance.system": "Same as phone",
+  "settings.appearance.dark": "Dark",
+  "settings.appearance.light": "Light",
   "settings.about.app": "OMP mobile",
 
   // Home
@@ -50,12 +54,11 @@ export const en = {
   "home.newSheet.cwd": "Working directory",
   "home.newSheet.use": "Use {path}",
   "home.newSheet.start": "Start session",
-  "home.title": "Sessions",
+  "home.online": "Online",
   "home.segment.all": "All",
   "home.segment.active": "Active",
   "home.segment.terminal": "Terminal",
   "home.noMatch": "No sessions match",
-  "home.island": "{title} · {count} running",
   "home.tab.sessions": "Sessions",
   "home.tab.computers": "Computers",
   "home.widget.title": "Needs your approval",
@@ -65,6 +68,7 @@ export const en = {
   "home.widget.failed": "Could not answer: {error}",
 
   // Chat
+  "chat.steerNeedsUpdate": "OMP is still working, and the omp-mobile on your computer is too old to pass a message to it mid-run. Update it (omp plugin upgrade omp-mobile, or npm i -g omp-mobile), or send again when it finishes.",
   "chat.failure.gone.title": "This session is gone",
   "chat.failure.terminal.title": "Open in a terminal",
   "chat.failure.terminal.body": "Exit omp there, then try again.",
@@ -153,6 +157,17 @@ export const en = {
   "level.inherit": "inherit",
 
   // In-app banner and system notifications
+  "notify.channel.live": "Live activity",
+  "notify.channel.live.detail": "What OMP is running or waiting on, in the status bar and on the lock screen",
+  "live.approve": "Approve",
+  "live.answer": "Answer",
+  "live.working": "Working",
+  "live.more": "{name} · {count} more",
+  "settings.live.title": "Live activity",
+  "settings.live.on": "Shown in the status bar and on the lock screen while OMP runs",
+  "settings.live.off": "Allow Live Updates to see OMP in the status bar and on the lock screen",
+  "settings.live.allow": "Allow Live Updates",
+  "settings.live.unsupported": "Needs Android 16; until then it shows as an ongoing notification",
   "attention.approval": "Approval needed",
   "attention.question": "Question for you",
   "attention.done": "Turn finished",
@@ -171,7 +186,6 @@ export const en = {
 
   // Computers
   "machines.title": "Computers",
-  "machines.titleLarge": "computers",
   "machines.add": "Add computer",
   "machines.details": "{name} details",
   "machines.empty.title": "Connect your first computer",

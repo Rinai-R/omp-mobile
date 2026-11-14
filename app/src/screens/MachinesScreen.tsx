@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { pairMachine } from "../api";
 import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
+import { LargeTitle, TAB_BAR_HEIGHT } from "../components/TabBar";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MachineSheet } from "../components/MachineSheet";
 import {
   Button,
@@ -9,7 +11,6 @@ import {
   EmptyState,
   Field,
   Group,
-  Header,
   IconButton,
   Row,
   Sheet,
@@ -48,8 +49,8 @@ interface Props {
   onSettings: () => void;
   refreshing: boolean;
   onRefresh: () => void;
-  /** Back to the home; absent while no computer is paired (this is the first screen then). */
-  onBack?: () => void;
+  /** Shown as a tab under the tab bar; false while no computer is paired (this is the first screen then, settings behind a button). */
+  tabbed: boolean;
 }
 
 export function MachinesScreen({
@@ -65,10 +66,11 @@ export function MachinesScreen({
   onSettings,
   refreshing,
   onRefresh,
-  onBack,
+  tabbed,
 }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
+  const insets = useSafeAreaInsets();
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -172,30 +174,32 @@ export function MachinesScreen({
 
   return (
     <View style={styles.root}>
-      <Header
-        large={onBack === undefined}
-        title={onBack === undefined ? t("machines.titleLarge") : t("machines.title")}
-        onBack={onBack}
-        right={
-          <>
-            {machines.length > 0 ? (
-              <IconButton onPress={onScan} label={t("machines.add")}>
-                <PlusGlyph size={20} color={colors.fgMuted} />
-              </IconButton>
-            ) : null}
-            <IconButton onPress={onSettings} label={t("common.settings")}>
-              <SettingsGlyph size={20} color={colors.fgMuted} />
-            </IconButton>
-          </>
-        }
-      />
 
       <ScrollView
-        contentContainerStyle={machines.length === 0 ? styles.emptyContent : styles.content}
+        contentContainerStyle={[machines.length === 0 ? styles.emptyContent : styles.content, { paddingBottom: (tabbed ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.fgMuted} colors={[colors.accent]} progressBackgroundColor={colors.overlay} />
         }
       >
+        <View style={machines.length === 0 ? undefined : styles.bleed}>
+          <LargeTitle
+            title={t("machines.title")}
+            right={
+              <>
+                {machines.length > 0 ? (
+                  <IconButton onPress={onScan} label={t("machines.add")}>
+                    <PlusGlyph size={24} color={colors.tint} />
+                  </IconButton>
+                ) : null}
+                {tabbed ? null : (
+                  <IconButton onPress={onSettings} label={t("common.settings")}>
+                    <SettingsGlyph size={22} color={colors.tint} />
+                  </IconButton>
+                )}
+              </>
+            }
+          />
+        </View>
         {machines.length === 0 ? (
           <EmptyState
             icon={<ComputerGlyph size={26} color={colors.fg} />}
@@ -210,7 +214,6 @@ export function MachinesScreen({
           />
         ) : (
           <>
-            <View style={styles.top} />
             <Group>
               {machines.map((machine, index) => {
                 const probe = probes.get(machine.id);
@@ -228,7 +231,7 @@ export function MachinesScreen({
                         </Text>
                       </View>
                     }
-                    leading={<ComputerGlyph size={18} color={summary.dot === "down" ? colors.fgFaint : colors.fgMuted} />}
+                    leading={<ComputerGlyph size={17} color={summary.dot === "down" ? colors.fgFaint : colors.tileFg} />}
                     trailing={
                       <IconButton onPress={() => setSheet(machine)} label={t("machines.details", { name: machineLabel(machine, machines) })}>
                         <MoreGlyph size={18} color={colors.fgFaint} />
@@ -303,12 +306,13 @@ export function MachinesScreen({
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 12, paddingBottom: 32 },
+    content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16 },
+    // The large title keeps the home's 20 px inset inside this 16 px-padded list.
+    bleed: { marginHorizontal: -16 },
     emptyContent: { flexGrow: 1 },
     emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
     state: { flexDirection: "row", alignItems: "center", gap: 5 },
-    top: { height: 16 },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }

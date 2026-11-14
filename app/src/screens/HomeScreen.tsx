@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { answerRequest, createSession, deleteSession } from "../api";
 import { ApprovalWidget } from "../components/ApprovalWidget";
-import { LiveDot, Orb, PulseDot, ShimmerText } from "../components/brand";
-import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, PlusGlyph, SearchGlyph, SettingsGlyph } from "../components/icons";
+import { LiveDot, PulseDot } from "../components/brand";
+import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
+import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
 import { haptic } from "../haptics";
 import { displayName, machineLabel } from "../machines";
@@ -34,14 +35,15 @@ interface Props {
   onOpen: (machine: Machine, session: SessionSummary) => void;
   /** Open the computer picker (the computer card). */
   onPickMachine: () => void;
-  onSettings: () => void;
+  /** How many sessions wait for an answer, for the tab bar's badge. */
+  onWaiting: (count: number) => void;
   onRetry: (machine: Machine) => void;
   /** Ask the home to open the New session sheet (from the switcher); a changing nonce opens it again. */
   newRequest: number;
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onSettings, onRetry, newRequest }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -80,10 +82,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         .sort((a, b) => a.updatedAt - b.updatedAt),
     [sessions],
   );
-  const running = useMemo(
-    () => (sessions ?? []).filter((session) => session.status === "streaming").sort((a, b) => b.updatedAt - a.updatedAt),
-    [sessions],
-  );
+  useEffect(() => onWaiting(counts.waiting), [counts.waiting, onWaiting]);
   /** Directories sessions ran in, newest first: one tap starts a new session there. */
   const recent = useMemo(() => {
     const seen: string[] = [];
@@ -156,7 +155,6 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   );
 
   const name = machineLabel(machine, machines);
-  const lead = running[0];
 
   return (
     <View style={styles.root}>
@@ -176,53 +174,37 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
           />
         }
       >
-        {lead !== undefined ? (
-          <Pressable
-            onPress={() => onOpen(machine, lead)}
-            style={({ pressed }) => [styles.island, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={(running.length > 1 ? t("home.island", { count: running.length, title: lead.title }) : lead.title)}
-          >
-            <Orb size={22} />
-            <View style={styles.islandText}>
-              <ShimmerText text={(running.length > 1 ? t("home.island", { count: running.length, title: lead.title }) : lead.title)} style={styles.islandLabel} />
+        {/* The tab already says "Sessions": the header names the computer they run on, and switches it. */}
+        <Pressable
+          onPress={onPickMachine}
+          style={({ pressed }) => [styles.machine, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={t("home.machineA11y", { name, detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
+        >
+          <View style={styles.machineTile}>
+            <ComputerGlyph size={20} color={colors.tileFg} />
+            <View style={styles.machineDot}>
+              {down ? (
+                <LiveDot color={colors.err} size={9} />
+              ) : reachable ? (
+                <LiveDot color={colors.sysGreen} size={9} ping={counts.running > 0} />
+              ) : (
+                <PulseDot color={colors.warn} size={9} />
+              )}
             </View>
-          </Pressable>
-        ) : null}
-
-        <View style={styles.topbar}>
-          <Pressable
-            onPress={onPickMachine}
-            hitSlop={10}
-            style={({ pressed }) => [styles.machine, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel={t("home.machineA11y", { name, detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
-          >
-            {down ? (
-              <LiveDot color={colors.err} size={7} />
-            ) : reachable ? (
-              <LiveDot color={colors.sysGreen} size={7} />
-            ) : (
-              <PulseDot color={colors.warn} size={7} />
-            )}
-            <Text style={styles.machineName} numberOfLines={1}>
-              {name}
+          </View>
+          <View style={styles.machineText}>
+            <View style={styles.machineNameRow}>
+              <Text style={styles.machineName} numberOfLines={1} accessibilityRole="header">
+                {name}
+              </Text>
+              <ChevronDownGlyph size={16} color={colors.fgFaint} />
+            </View>
+            <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>
+              {detail ?? t(reachable ? "home.online" : "chat.status.connecting")}
             </Text>
-            <ChevronDownGlyph size={14} color={colors.tint} />
-          </Pressable>
-          <Pressable onPress={onSettings} hitSlop={10} style={({ pressed }) => pressed && styles.pressed} accessibilityRole="button" accessibilityLabel={t("common.settings")}>
-            <SettingsGlyph size={22} color={colors.tint} />
-          </Pressable>
-        </View>
-
-        <Text style={styles.large} accessibilityRole="header">
-          {t("home.title")}
-        </Text>
-        {down ? (
-          <Text style={styles.downText} numberOfLines={2}>
-            {detail}
-          </Text>
-        ) : null}
+          </View>
+        </Pressable>
 
         <View style={styles.search}>
           <SearchGlyph size={16} color={colors.fgFaint} />
@@ -316,32 +298,12 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
           haptic.tap();
           openCreate();
         }}
-        style={({ pressed }) => [styles.fab, { bottom: 84 + insets.bottom }, pressed && styles.fabPressed]}
+        style={({ pressed }) => [styles.fab, { bottom: TAB_BAR_HEIGHT + 26 + insets.bottom }, pressed && styles.fabPressed]}
         accessibilityRole="button"
         accessibilityLabel={t("home.new")}
       >
         <PlusGlyph size={26} color={colors.fabFg} />
       </Pressable>
-
-      <View style={[styles.tabbar, { paddingBottom: 8 + insets.bottom }]}>
-        <View style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: true }}>
-          <ChatGlyph size={24} color={colors.tint} />
-          <Text style={styles.tabTextOn}>{t("home.tab.sessions")}</Text>
-          {counts.waiting > 0 ? (
-            <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{counts.waiting}</Text>
-            </View>
-          ) : null}
-        </View>
-        <Pressable onPress={onPickMachine} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: false }}>
-          <ComputerGlyph size={24} color={colors.fgFaint} />
-          <Text style={styles.tabText}>{t("home.tab.computers")}</Text>
-        </Pressable>
-        <Pressable onPress={onSettings} style={styles.tab} accessibilityRole="tab" accessibilityState={{ selected: false }}>
-          <SettingsGlyph size={24} color={colors.fgFaint} />
-          <Text style={styles.tabText}>{t("common.settings")}</Text>
-        </Pressable>
-      </View>
 
       <Sheet visible={creating} title={t("home.new")} onClose={() => setCreating(false)}>
         <Field label={t("home.newSheet.cwd")} value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
@@ -394,38 +356,18 @@ function createStyles(c: Palette) {
   const chipText = { fontFamily: MONO, fontSize: 12, lineHeight: 16, color: c.fgMuted } as const;
   const segment = { flex: 1, height: 30, borderRadius: 7, alignItems: "center", justifyContent: "center" } as const;
   const segmentText = { fontFamily: SANS, fontSize: 13, lineHeight: 17, fontWeight: "500", color: c.fg } as const;
-  const tabText = { fontFamily: SANS, fontSize: 10.5, lineHeight: 13, fontWeight: "500", color: c.fgFaint } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 640, alignSelf: "center" },
     pressed: { opacity: 0.6 },
-    island: {
-      alignSelf: "center",
-      maxWidth: "78%",
-      height: 38,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 9,
-      paddingLeft: 8,
-      paddingRight: 14,
-      marginBottom: 8,
-      borderRadius: 19,
-      backgroundColor: "#000000",
-      borderWidth: 1,
-      borderColor: c.dark ? "#ffffff1c" : "#00000000",
-      elevation: 6,
-      shadowColor: c.accentV,
-      shadowOpacity: 0.4,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 4 },
-    },
-    islandText: { flexShrink: 1, minWidth: 0 },
-    islandLabel: { fontFamily: SANS, fontSize: 12.5, lineHeight: 17, fontWeight: "500", color: "#d8d8de" },
-    topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, minHeight: 36 },
-    machine: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1, minWidth: 0 },
-    machineName: { fontFamily: SANS, fontSize: 16, lineHeight: 21, color: c.tint, flexShrink: 1 },
-    large: { fontFamily: SANS, fontSize: 34, lineHeight: 41, fontWeight: "600", letterSpacing: -1.1, color: c.fg, marginTop: 2, marginBottom: 10, marginHorizontal: 20 },
-    downText: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginTop: -6, marginBottom: 10, marginHorizontal: 20 },
+    machine: { flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: 16, marginTop: 14, marginBottom: 14, alignSelf: "flex-start", maxWidth: "100%" },
+    machineTile: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
+    machineDot: { position: "absolute", right: -2, bottom: -2, padding: 2, borderRadius: 8, backgroundColor: c.bg },
+    machineText: { flexShrink: 1, minWidth: 0, gap: 1 },
+    machineNameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+    machineName: { flexShrink: 1, fontFamily: SANS, fontSize: 22, lineHeight: 28, fontWeight: "600", letterSpacing: -0.5, color: c.fg },
+    machineDetail: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgFaint },
+    machineDetailDown: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.err },
     search: { flexDirection: "row", alignItems: "center", gap: 8, height: 38, borderRadius: 11, paddingHorizontal: 10, marginHorizontal: 16, marginBottom: 12, backgroundColor: c.search },
     searchInput: { flex: 1, height: 38, paddingVertical: 0, fontFamily: SANS, fontSize: 16, color: c.fg },
     clear: { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.fgFaint },
@@ -458,23 +400,6 @@ function createStyles(c: Palette) {
       shadowOffset: { width: 0, height: 8 },
     },
     fabPressed: { transform: [{ scale: 0.92 }] },
-    tabbar: {
-      position: "absolute",
-      left: 0,
-      right: 0,
-      bottom: 0,
-      flexDirection: "row",
-      justifyContent: "space-around",
-      paddingTop: 8,
-      backgroundColor: c.chrome,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: c.separator,
-    },
-    tab: { minWidth: 72, alignItems: "center", gap: 3 },
-    tabText: tabText,
-    tabTextOn: { ...tabText, color: c.tint },
-    tabBadge: { position: "absolute", top: -4, left: 42, minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.badge },
-    tabBadgeText: { fontFamily: SANS, fontSize: 11, lineHeight: 14, fontWeight: "600", color: "#ffffff" },
     recent: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: -4 },
     recentChip: chip,
     recentChipOn: { ...chip, borderColor: c.accent, backgroundColor: c.accentMuted },

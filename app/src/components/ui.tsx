@@ -279,7 +279,7 @@ export function SectionHeader({ title, meta }: { title: string; meta?: string })
   const styles = useStyles(createStyles);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionText}>{title}</Text>
+      <Text style={styles.sectionText}>{title.toLocaleUpperCase()}</Text>
       {meta !== undefined ? <Text style={styles.sectionMeta}>{meta}</Text> : null}
     </View>
   );
@@ -616,7 +616,7 @@ function createStyles(c: Palette) {
     paddingVertical: 10,
     paddingHorizontal: 12,
   } as const;
-  const divider = { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.border };
+  const divider = { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: c.separator };
   const header = {
     height: HEADER_HEIGHT,
     flexDirection: "row",
@@ -627,7 +627,7 @@ function createStyles(c: Palette) {
     borderBottomColor: c.border,
     backgroundColor: c.bg,
   } as const;
-  const rowTitle = { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "500", letterSpacing: -0.15, color: c.fg } as const;
+  const rowTitle = { fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "400", letterSpacing: -0.3, color: c.fg } as const;
   const input = {
     minHeight: 44,
     borderWidth: StyleSheet.hairlineWidth,
@@ -713,35 +713,15 @@ function createStyles(c: Palette) {
     headerSubtitle: { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
     headerRight: { flexDirection: "row", alignItems: "center" },
 
-    section: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 22, paddingBottom: 8, paddingHorizontal: 6 },
-    sectionText: {
-      fontFamily: MONO,
-      fontSize: 10.5,
-      lineHeight: 14,
-      fontWeight: "500",
-      letterSpacing: 1.6,
-      textTransform: "uppercase",
-      color: c.fgGhost,
-    },
-    sectionMeta: { fontFamily: MONO, fontSize: 10.5, lineHeight: 14, letterSpacing: 0.4, color: c.fgGhost },
-    group: {
-      borderRadius: radius.xl,
-      overflow: "hidden",
-      backgroundColor: c.panel,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-    },
+    section: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingTop: 22, paddingBottom: 7, paddingHorizontal: 16 },
+    // No letter spacing and no textTransform: Android clips the last glyph of such labels.
+    sectionText: { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400", color: c.fgFaint },
+    sectionMeta: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgFaint },
+    group: { borderRadius: 14, overflow: "hidden", backgroundColor: c.group },
     row,
     rowDivided: { ...row, ...divider },
     pressed: { backgroundColor: c.hover },
-    tile: {
-      width: 36,
-      height: 36,
-      borderRadius: 11,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: c.well,
-    },
+    tile: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
     rowText: { flex: 1, minWidth: 0, gap: 3 },
     rowTitle,
     rowTitleDim: { ...rowTitle, color: c.fgMuted },

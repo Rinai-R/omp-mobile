@@ -241,8 +241,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
           }
           case "event": {
             setItems((current) => applyEvent(current, message.event));
-            if (message.event.type === "turn_end" || message.event.type === "agent_end") {
-              setState((current) => (current === null ? current : { ...current, isStreaming: false }));
+            // A run is many turns (each tool call ends one): it starts at agent_start, from any client, and ends at agent_end.
+            const running = message.event.type === "agent_start" ? true : message.event.type === "agent_end" ? false : undefined;
+            if (running !== undefined) {
+              setState((current) => (current === null ? current : { ...current, isStreaming: running }));
             }
             break;
           }
@@ -280,15 +282,18 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             break;
           case "error": {
             const refused = pending.current;
+            // OMP's refusal of a prompt while it runs: daemons before 0.6 do not send it as a steer.
+            const busy = /already processing/i.test(message.error);
             // Older daemons do not name the command; then any error while a prompt is unanswered is taken as its refusal.
             if (refused !== null && (message.command === undefined || message.command === "prompt")) {
               // The daemon refused the prompt: give the text and photos back instead of losing them.
               pending.current = null;
               setDraft((current) => (current === "" ? refused.text : current));
               setAttachments((current) => (current.length === 0 ? refused.attachments : current));
-              setState((current) => (current === null ? current : { ...current, isStreaming: false }));
+              // Refused because it is busy: it still runs.
+              if (!busy) setState((current) => (current === null ? current : { ...current, isStreaming: false }));
             }
-            setError(message.error);
+            setError(busy ? t("chat.steerNeedsUpdate") : message.error);
             setPickerError(message.error);
             setPickerLoading(false);
             break;

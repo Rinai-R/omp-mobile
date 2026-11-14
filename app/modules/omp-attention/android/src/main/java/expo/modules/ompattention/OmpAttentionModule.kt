@@ -135,6 +135,12 @@ class OmpAttentionModule : Module() {
       }
     }
 
+    /** Whether Android shows the live activity as a Live Update (status-bar chip, lock screen): Android 16 QPR1+ and allowed. */
+    Function("canPromote") { LiveActivity.canPromote(context) }
+
+    /** Open the system page that allows Live Updates for this app; false where the phone has none. */
+    Function("openPromotionSettings") { LiveActivity.openPromotionSettings(context) }
+
     /** Open the system notification settings for this app. */
     Function("openNotificationSettings") {
       val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

@@ -67,7 +67,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 | `GET /sessions/:id/transcript?since=&last=` | `transcript-sync`. The session's transcript `{session, state, from, total, messages}` (see delta snapshots below), **without starting an omp**: a live session answers from memory, a closed one from the transcript saved when its omp exited, while its session file still has the modification time and size it had then. Otherwise `404 {"error": "not cached"}`. |
 | `POST /sessions/:id/answer` | Body `{id, value?, confirmed?, cancelled?}`. Answers the live session's open request `id` as the `approval` frame does, without a session socket (the home's Allow). `404` when the session is not live, `409` when that request is no longer open. |
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it, and its saved transcript; the OMP session file stays. |
-| `GET /events` | The attention stream (Server-Sent Events), see below. |
+| `GET /events?live=` | The attention stream (Server-Sent Events), see below. With `live=1` it also carries `running` frames (key `run:<n>`, the key the turn's `done`/`failed` frame will carry), replays the turns still running, and a `resolved` frame for a running turn whose session closed; the phone's live activity is built from them. Streams without it never see those frames. |
 | `GET /blobs/<sha256>` | One image from OMP's content-addressed store (`<omp home>/agent/blobs`), typed from its bytes. |
 | `GET /status` | `{pid, version, startedAt, url, liveSessions, eventStreams, lastPhone}`; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
 | `GET /sessions/:id/ws` | WebSocket upgrade, see below. |

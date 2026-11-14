@@ -12,10 +12,12 @@ export interface Settings {
   lastMachineId?: string;
   /** The app's language: the phone's (`system`) or one chosen in Settings. */
   language: LanguagePreference;
+  /** Light or dark: the phone's (`system`) or one chosen in Settings. */
+  appearance: AppearancePreference;
 }
 
 /** Off until the user turns them on: that is when Android asks for the notification permission. */
-export const DEFAULT_SETTINGS: Settings = { notifications: false, language: "system" };
+export const DEFAULT_SETTINGS: Settings = { notifications: false, language: "system", appearance: "system" };
 
 export async function loadMachines(): Promise<Machine[]> {
   try {
@@ -37,13 +39,24 @@ export async function saveMachines(machines: Machine[]): Promise<void> {
   await AsyncStorage.setItem(MACHINES_KEY, JSON.stringify(machines));
 }
 
+/** Light or dark: the phone's (`system`) or one chosen in Settings. */
+export type AppearancePreference = "system" | "dark" | "light";
+
+function isAppearancePreference(value: unknown): value is AppearancePreference {
+  return value === "system" || value === "dark" || value === "light";
+}
+
 export async function loadSettings(): Promise<Settings> {
   try {
     const raw = await AsyncStorage.getItem(SETTINGS_KEY);
     if (raw === null) return DEFAULT_SETTINGS;
     const stored = { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
-    // A value a later version wrote, or garbage, falls back to the phone's language.
-    return isLanguagePreference(stored.language) ? stored : { ...stored, language: "system" };
+    // A value a later version wrote, or garbage, falls back to the phone's.
+    return {
+      ...stored,
+      language: isLanguagePreference(stored.language) ? stored.language : "system",
+      appearance: isAppearancePreference(stored.appearance) ? stored.appearance : "system",
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }

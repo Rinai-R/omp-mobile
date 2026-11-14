@@ -131,6 +131,8 @@ class AttentionService : Service() {
     workers.clear()
     connected.clear()
     AttentionState.seen.clear()
+    // Nothing follows the computers any more: what it showed would go stale.
+    LiveActivity.clear(this)
     super.onDestroy()
   }
 
@@ -218,7 +220,8 @@ class AttentionService : Service() {
   private fun stream(worker: Worker): Boolean {
     val machine = worker.machine
     val base = machine.url.trimEnd('/')
-    val url = URL("$base/events?token=" + URLEncoder.encode(machine.token, "UTF-8"))
+    // `live=1`: running turns too, for the live activity; daemons before 0.7 ignore it.
+    val url = URL("$base/events?live=1&token=" + URLEncoder.encode(machine.token, "UTF-8"))
     val connection = url.openConnection() as HttpURLConnection
     worker.connection = connection
     // Stopped while this connection was made: stop() saw no connection to drop.
@@ -231,6 +234,8 @@ class AttentionService : Service() {
     try {
       if (connection.responseCode != 200) throw IllegalStateException("HTTP ${connection.responseCode}")
       if (connected.add(machine.id)) refreshServiceNotification()
+      // The replay that follows says afresh what runs and waits on this machine.
+      LiveActivity.resetMachine(this, machine.id)
       return BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).use { reader ->
         val data = StringBuilder()
         var event = ""
@@ -268,6 +273,9 @@ class AttentionService : Service() {
     /** One `/events` frame of [machine]: a notification, unless that session is on screen. */
     fun deliver(context: Context, machine: Machine, data: String) {
       val frame = AttentionFrame.parse(data) ?: return
+      LiveActivity.onFrame(context, machine, frame)
+      // A turn starting only feeds the live activity: no notification, no in-app banner.
+      if (frame.kind == "running") return
       val seenKey = "${machine.id}|${frame.sessionId}|${frame.key}"
       if (frame.kind == "resolved") {
         AttentionState.seen.remove(seenKey)
@@ -291,6 +299,8 @@ class AttentionService : Service() {
     /** A relay machine's stream (followed by the app's JS) opened or closed: counted in the service notification. */
     fun setRelayConnected(context: Context, machineId: String, isConnected: Boolean) {
       val changed = if (isConnected) connected.add(machineId) else connected.remove(machineId)
+      // A relay stream (re)opened: its replay says afresh what runs and waits there.
+      if (isConnected) LiveActivity.resetMachine(context, machineId)
       // A start command redraws the service notification with the new count.
       if (changed && AttentionState.enabled(context)) start(context)
     }

@@ -33,6 +33,10 @@ export const zhCN: Record<Key, Message> = {
   "settings.battery.fix": "允许后台运行",
   "settings.language.section": "语言",
   "settings.language.system": "跟随系统",
+  "settings.appearance.section": "外观",
+  "settings.appearance.system": "跟随系统",
+  "settings.appearance.dark": "深色",
+  "settings.appearance.light": "浅色",
   "settings.about.app": "OMP mobile",
 
   // Home
@@ -49,12 +53,11 @@ export const zhCN: Record<Key, Message> = {
   "home.newSheet.cwd": "工作目录",
   "home.newSheet.use": "使用 {path}",
   "home.newSheet.start": "开始",
-  "home.title": "会话",
+  "home.online": "在线",
   "home.segment.all": "全部",
   "home.segment.active": "进行中",
   "home.segment.terminal": "终端",
   "home.noMatch": "没有匹配的会话",
-  "home.island": "{title} · {count} 个运行中",
   "home.tab.sessions": "会话",
   "home.tab.computers": "电脑",
   "home.widget.title": "需要你批准",
@@ -64,6 +67,7 @@ export const zhCN: Record<Key, Message> = {
   "home.widget.failed": "无法回复：{error}",
 
   // Chat
+  "chat.steerNeedsUpdate": "OMP 还在运行，而电脑上的 omp-mobile 版本太旧，不能在运行中插话。请更新它（omp plugin upgrade omp-mobile，或 npm i -g omp-mobile），或等它跑完再发。",
   "chat.failure.gone.title": "这个会话已不存在",
   "chat.failure.terminal.title": "已在终端中打开",
   "chat.failure.terminal.body": "先在那边退出 omp，再重试。",
@@ -152,6 +156,17 @@ export const zhCN: Record<Key, Message> = {
   "level.inherit": "跟随默认",
 
   // In-app banner and system notifications
+  "notify.channel.live": "实时活动",
+  "notify.channel.live.detail": "OMP 正在运行或等你处理的事，显示在状态栏和锁屏上",
+  "live.approve": "待批准",
+  "live.answer": "待回答",
+  "live.working": "运行中",
+  "live.more": "{name} · 另有 {count} 个",
+  "settings.live.title": "实时活动",
+  "settings.live.on": "OMP 运行时显示在状态栏和锁屏上",
+  "settings.live.off": "允许“实时更新”后，OMP 运行时会显示在状态栏和锁屏上",
+  "settings.live.allow": "允许实时更新",
+  "settings.live.unsupported": "需要 Android 16；之前的系统显示为常驻通知",
   "attention.approval": "需要你审批",
   "attention.question": "有问题问你",
   "attention.done": "回合已完成",
@@ -170,7 +185,6 @@ export const zhCN: Record<Key, Message> = {
 
   // Computers
   "machines.title": "电脑",
-  "machines.titleLarge": "电脑",
   "machines.add": "添加电脑",
   "machines.details": "{name} 详情",
   "machines.empty.title": "连接你的第一台电脑",
