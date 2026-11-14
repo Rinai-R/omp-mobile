@@ -142,6 +142,19 @@ export async function deleteSession(machine: Machine, id: string): Promise<void>
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+/** Answer a session's waiting question from outside the chat (the home's approval card). */
+export async function answerRequest(
+  machine: Machine,
+  sessionId: string,
+  id: string,
+  answer: { value?: string; confirmed?: boolean; cancelled?: boolean },
+): Promise<void> {
+  await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(sessionId)}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ id, ...answer }),
+  });
+}
+
 export async function openSession(machine: Machine, id: string): Promise<void> {
   await request<unknown>(machine, `/sessions/${encodeURIComponent(id)}`);
 }

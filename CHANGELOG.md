@@ -5,9 +5,17 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 ## Unreleased
 
 - A message sent while OMP is working is no longer refused ("Agent is already processing") and handed back to the composer: it is queued as a steer, as Enter does in the terminal, shows as a queue chip, and OMP takes it at its next step.
+- A new look, iOS-flavoured on OMP's aurora colours. The home has a large "Sessions" title, a search field, All / Active / Terminal segments, sessions as a grouped list with a coloured tile per project, a tab bar and a round white New button; while a session runs, a capsule at the top shows it and opens it. The chat has a centred navigation bar, gradient bubbles for your messages and soft bubbles for replies, each tool call as a card (the running one framed in the brand gradient with its terminal output open), a turning orb while OMP thinks, and an iMessage-style composer. Approvals open as an action sheet with the command in a code block and Deny in red. Sending, answering and switching tap the phone's motor.
+- Approve from the home: a session waiting for a tool approval shows as a card at the top of the home, and **Allow** approves that one call without opening the session (`POST /sessions/:id/answer`; the session list carries the waiting request). Needs this daemon version; with an older one, approve in the chat as before.
+- OMP's own English is shown in the phone's language: approval prompts ("Allow bash?"), their labels (Command, Path, Content…), its answers (Allow once, Allow bash for this session, Deny…) and thinking levels. Commands, paths and code stay as sent; approval notifications leave out the English labels.
+- A session now lists as running as soon as its turn starts, not only after the state is next read.
 
 ### 中文
 
+- 全新外观：iOS 风格，配 OMP 的极光配色。首页有"会话"大标题、搜索框、全部 / 进行中 / 终端分段，会话以分组列表显示、每个项目一个彩色方块，底部标签栏和白色圆形新建按钮；有会话在运行时，顶部胶囊显示它，点一下打开。聊天页是居中的导航栏，你的消息是渐变气泡、回复是柔和气泡，每次工具调用一张卡片（运行中的带品牌渐变描边并展开终端输出），思考时显示转动的光球，输入框为 iMessage 样式。审批以操作面板弹出，命令显示在代码块里，"拒绝"为红色。发送、回答和切换时手机会轻震。
+- 在首页直接批准：等待工具审批的会话在首页顶部显示为卡片，点**允许**即可放行这一次调用，不用打开会话（`POST /sessions/:id/answer`；会话列表会带上等待中的请求）。需要本版本的守护进程；旧版本下照旧在聊天里批准。
+- OMP 自带的英文按手机语言显示：审批提示（"允许运行 bash？"）、其中的标签（命令、路径、内容…）、回答选项（允许一次、本会话都允许 bash、拒绝…）和思考强度。命令、路径和代码保持原样；审批通知不再带英文标签。
+- 会话一开始运行就在列表中显示为运行中，而不是等下一次读取状态后。
 - OMP 正在运行时发送的消息不再被拒绝（"Agent is already processing"）并退回输入框：它会像终端里按回车一样作为插话（steer）排队，显示为排队标签，OMP 在下一步时接收。
 
 ## v0.5.1

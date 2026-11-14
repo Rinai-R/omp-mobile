@@ -136,7 +136,7 @@ export class TranscriptStore {
       base: Number.isSafeInteger(base) && base > 0 ? base : 0,
       messages,
       state: state !== null && typeof state === "object" ? { ...state, isStreaming: false } : state,
-      session: { ...session, status: "idle", waiting: 0 },
+      session: { ...session, status: "idle", waiting: 0, request: undefined },
     };
     try {
       mkdirSync(this.dir, { recursive: true, mode: 0o700 });

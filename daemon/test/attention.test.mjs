@@ -46,7 +46,7 @@ test("an `Allow tool:` select is an approval; anything else that asks is a quest
     type: "approval",
     request: { id: "r9", method: "select", title: "Allow tool: bash\nCommand: echo hi", options: ["Approve", "Deny"] },
   });
-  assert.equal(real.text, "bash · Command: echo hi");
+  assert.equal(real.text, "bash · echo hi", "OMP's English labels stay out of a notification");
   // Fire-and-forget UI (notify, status) never reaches the tracker as a request.
   assert.deepEqual(attention.observe(session, { type: "approval", request: { id: "x", method: "notify" } }), []);
   // The same request repeated (a reconnecting client) is not news twice.

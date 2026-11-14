@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
 import { listSessions } from "../api";
 import { age, folderOf, type SessionGroup } from "../sessionGroups";
-import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { heldDetail } from "../takeover";
 import { syncSessions } from "../sync";
 import { loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
-import { BrandMark, LiveDot, Spinner } from "./brand";
-import { LockGlyph } from "./icons";
+import { GradientFill, ShimmerText, Spinner } from "./brand";
+import { ChevronGlyph, ComputerGlyph, LockGlyph, QuestionGlyph, TerminalGlyph } from "./icons";
 
 /**
  * A computer's sessions, as the phone last saw them while the daemon answers,
@@ -126,11 +126,10 @@ export function SessionRow({
   const running = session.status === "streaming";
   const waiting = (session.waiting ?? 0) > 0;
   const locked = session.openElsewhere === true;
-  // A waiting session says so in its group and its trailing "answer"; its detail stays the folder and the model.
-  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : session.model]
-    .filter(Boolean)
-    .join(" · ");
+  const terminal = session.origin === "omp";
   const when = age(session.updatedAt);
+  // A waiting session says so in its group and its badge; its detail stays the folder and the model.
+  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : when].filter(Boolean).join(" · ");
   return (
     <Pressable
       onPress={() => onPress(session)}
@@ -143,41 +142,60 @@ export function SessionRow({
       })}
       accessibilityState={{ selected: current }}
     >
-      {current ? <View style={styles.currentBar} /> : null}
-      <View style={running ? styles.tileRunning : styles.tile}>
-        {running ? (
-          <View style={styles.tileInner}>
-            <BrandMark size={11} />
-          </View>
-        ) : waiting ? (
-          <LiveDot color={colors.accent} size={8} ping />
+      <View style={[styles.tile, { backgroundColor: waiting ? colors.sysOrange : running ? "transparent" : terminal || locked ? colors.fgGhost : hueOf(session.cwd) }]}>
+        {waiting ? (
+          <QuestionGlyph size={16} color="#ffffff" />
+        ) : running ? (
+          <>
+            <GradientFill radius={8} />
+            <TerminalGlyph size={16} color="#ffffff" />
+          </>
+        ) : terminal || locked ? (
+          locked ? <LockGlyph size={14} color="#ffffff" /> : <ComputerGlyph size={16} color="#ffffff" />
         ) : (
-          <View style={locked ? styles.dotLocked : current ? styles.dotCurrent : styles.dot} />
+          <Text style={styles.initial}>{initialOf(session.cwd)}</Text>
         )}
       </View>
       <View style={styles.text}>
         <Text style={locked ? styles.titleDim : styles.title} numberOfLines={1}>
           {session.title}
         </Text>
-        <Text style={styles.detail} numberOfLines={1}>
-          {detail}
-        </Text>
+        {running && !waiting ? (
+          <ShimmerText text={`${t("session.working")} · ${folderOf(session.cwd)}`} style={styles.detail} />
+        ) : (
+          <Text style={styles.detail} numberOfLines={1}>
+            {detail}
+          </Text>
+        )}
       </View>
       <View style={styles.trailing}>
         {busy ? (
           <Spinner size={12} />
         ) : waiting ? (
-          <Text style={styles.need}>{t("session.answer")}</Text>
-        ) : running ? (
-          <Text style={styles.live}>{t("session.working")}</Text>
-        ) : locked ? (
-          <LockGlyph size={12} color={colors.warn} />
-        ) : (
-          <Text style={styles.time}>{when}</Text>
-        )}
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{session.waiting}</Text>
+          </View>
+        ) : null}
+        <ChevronGlyph size={15} color={colors.fgGhost} />
       </View>
     </Pressable>
   );
+}
+
+/** The colours a folder's tile cycles through: iOS's own, so the list reads like Settings. */
+const HUES = ["#5e5ce6", "#0a84ff", "#30b0c7", "#34c759", "#ff9f0a", "#ff375f", "#bf5af2", "#ac8e68"];
+
+/** A folder's tile colour, the same every time it appears. */
+function hueOf(path: string): string {
+  let hash = 0;
+  for (const char of folderOf(path)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return HUES[hash % HUES.length] ?? "#5e5ce6";
+}
+
+/** The folder's first letter or digit, for its tile. */
+function initialOf(path: string): string {
+  const match = /[\p{L}\p{N}]/u.exec(folderOf(path));
+  return (match?.[0] ?? "·").toUpperCase();
 }
 
 /** Groups as labelled cards; `flat` drops the cards for use inside a sheet. */
@@ -202,13 +220,13 @@ export function SessionGroups({
       {groups.map((group) => (
         <View key={group.key}>
           <View style={styles.label}>
-            <Text style={group.key === "waiting" ? styles.labelAccent : styles.labelText}>{group.title}</Text>
+            <Text style={group.key === "waiting" ? styles.labelAccent : styles.labelText}>{group.title.toLocaleUpperCase()}</Text>
             {group.sessions.length > 1 ? <Text style={styles.labelCount}>{group.sessions.length}</Text> : null}
           </View>
           <View style={flat ? undefined : styles.card}>
             {group.sessions.map((session, index) => (
               <View key={session.id}>
-                {index > 0 && !flat ? <View style={styles.divider} /> : null}
+                {index > 0 ? <View style={styles.divider} /> : null}
                 <SessionRow
                   session={session}
                   current={session.id === currentId}
@@ -226,57 +244,27 @@ export function SessionGroups({
 }
 
 function createStyles(c: Palette) {
-  const tile = {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.well,
-  } as const;
-  const dot = { width: 7, height: 7, borderRadius: 4, backgroundColor: c.fgGhost } as const;
-  const title = { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "500", letterSpacing: -0.15, color: c.fg } as const;
-  const mono = { fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgGhost } as const;
-  const label = {
-    fontFamily: MONO,
-    fontSize: 10.5,
-    lineHeight: 14,
-    fontWeight: "500",
-    letterSpacing: 1.6,
-    textTransform: "uppercase",
-    color: c.fgGhost,
-  } as const;
+  const title = { fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "400", letterSpacing: -0.3, color: c.fg } as const;
+  // Uppercased in JS and without letter spacing: Android clips the last glyph of such labels otherwise.
+  const label = { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400", color: c.fgFaint } as const;
   return {
-    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 62, paddingVertical: 10, paddingLeft: 14, paddingRight: 14 },
-    rowCurrent: { backgroundColor: c.accentMuted },
+    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 58, paddingVertical: 10, paddingLeft: 14, paddingRight: 12 },
+    rowCurrent: { backgroundColor: c.selected },
     rowPressed: { backgroundColor: c.hover },
-    currentBar: { position: "absolute", left: 0, top: 12, bottom: 12, width: 3, borderTopRightRadius: 3, borderBottomRightRadius: 3, backgroundColor: c.accent },
-    tile,
-    tileRunning: { ...tile, padding: 1.5, backgroundColor: c.accentV },
-    tileInner: { flex: 1, alignSelf: "stretch", borderRadius: 8.5, alignItems: "center", justifyContent: "center", backgroundColor: c.panel },
-    dot,
-    dotCurrent: { ...dot, backgroundColor: c.ok },
-    dotLocked: { ...dot, backgroundColor: c.warn },
-    text: { flex: 1, minWidth: 0, gap: 3 },
+    tile: { width: 32, height: 32, borderRadius: 8, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+    initial: { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "600", color: "#ffffff" },
+    text: { flex: 1, minWidth: 0, gap: 2 },
     title,
     titleDim: { ...title, color: c.fgFaint },
-    detail: { ...mono, color: c.fgFaint },
-    trailing: { minWidth: 28, alignItems: "flex-end" },
-    time: mono,
-    live: { ...mono, color: c.accentV },
-    need: { ...mono, color: c.accent },
-    label: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 18, paddingBottom: 8, paddingHorizontal: 18 },
+    detail: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgFaint },
+    trailing: { flexDirection: "row", alignItems: "center", gap: 8 },
+    badge: { minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.badge },
+    badgeText: { fontFamily: SANS, fontSize: 13, lineHeight: 16, fontWeight: "600", color: "#ffffff" },
+    label: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 16, paddingBottom: 7, paddingHorizontal: 32 },
     labelText: label,
-    labelAccent: { ...label, color: c.cyan },
-    labelCount: { ...label, letterSpacing: 0.4 },
-    card: {
-      marginHorizontal: 12,
-      borderRadius: radius.xl,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.border,
-      backgroundColor: c.panel,
-      overflow: "hidden",
-    },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginLeft: 56 },
+    labelAccent: { ...label, color: c.sysOrange },
+    labelCount: label,
+    card: { marginHorizontal: 16, borderRadius: 14, backgroundColor: c.group, overflow: "hidden" },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: 58 },
   } as const;
 }

@@ -220,14 +220,25 @@ export function GradientTile({ size = 56, children }: { size?: number; children:
 }
 
 /**
- * A filled gradient surface the size of its parent (clip it with the parent's
- * radius): the send button, the New session button. It measures its parent
- * first, because a percentage-sized Svg in a content-sized parent can draw
- * before that parent has its final width.
+ * A gradient surface the size of its parent: the send button, a running tool's
+ * frame, the user's bubble, the approval widget. `colors` default to the brand
+ * stops; `radius` rounds it to match the parent; `stroke` draws only a frame of
+ * that width (the parent keeps its own fill). It measures its parent first,
+ * because a percentage-sized Svg in a content-sized parent can draw before
+ * that parent has its final width.
  */
-export function GradientFill(): ReactNode {
+export function GradientFill({
+  colors,
+  radius: corner = 0,
+  stroke,
+}: {
+  colors?: readonly string[];
+  radius?: number;
+  stroke?: number;
+} = {}): ReactNode {
   const c = useColors();
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const inset = stroke === undefined ? 0 : stroke / 2;
   return (
     <View
       style={StyleSheet.absoluteFill}
@@ -241,13 +252,52 @@ export function GradientFill(): ReactNode {
         <Svg width={size.width} height={size.height}>
           <Defs>
             <LinearGradient id="fill" x1="0" y1="0" x2={size.width} y2={size.height} gradientUnits="userSpaceOnUse">
-              {stops(c)}
+              {colors === undefined
+                ? stops(c)
+                : colors.map((color, index) => (
+                    <Stop key={index} offset={colors.length === 1 ? 0 : index / (colors.length - 1)} stopColor={color} />
+                  ))}
             </LinearGradient>
           </Defs>
-          <Rect x={0} y={0} width={size.width} height={size.height} fill="url(#fill)" />
+          <Rect
+            x={inset}
+            y={inset}
+            width={size.width - 2 * inset}
+            height={size.height - 2 * inset}
+            rx={Math.max(0, corner - inset)}
+            fill={stroke === undefined ? "url(#fill)" : "none"}
+            stroke={stroke === undefined ? undefined : "url(#fill)"}
+            strokeWidth={stroke}
+          />
         </Svg>
       ) : null}
     </View>
+  );
+}
+
+/** The working orb: a brand-gradient ball that turns while OMP thinks or runs something. */
+export function Orb({ size = 16, active = true }: { size?: number; active?: boolean }): ReactNode {
+  const c = useColors();
+  const value = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!active) return undefined;
+    const loop = Animated.loop(Animated.timing(value, { toValue: 1, duration: 2_400, easing: Easing.linear, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [active, value]);
+  const rotate = value.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+  return (
+    <Animated.View style={{ width: size, height: size, transform: [{ rotate }] }}>
+      <Svg width={size} height={size} viewBox="0 0 10 10">
+        <Defs>
+          <LinearGradient id="orb" {...GRADIENT}>
+            {stops(c)}
+          </LinearGradient>
+        </Defs>
+        <Circle cx={5} cy={5} r={5} fill="url(#orb)" />
+        <Circle cx={3.6} cy={3.4} r={1.6} fill="#ffffff" opacity={0.35} />
+      </Svg>
+    </Animated.View>
   );
 }
 

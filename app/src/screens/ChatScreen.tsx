@@ -27,7 +27,8 @@ import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
-import { Banner, ConfirmSheet, IconButton } from "../components/ui";
+import { Banner, ConfirmSheet } from "../components/ui";
+import { haptic } from "../haptics";
 import { applyEvent, snapshotItems } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, type Row, type Step } from "../rows";
@@ -259,6 +260,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             // The keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
             Keyboard.dismiss();
             setApproval(message.request);
+            haptic.ask();
             break;
           case "approval_resolved":
             setApproval((current) => (current?.id === message.id ? null : current));
@@ -460,6 +462,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
       setError(t("chat.notConnected"));
       return;
     }
+    haptic.tap();
     pending.current = { text: draft, attachments };
     setDraft("");
     setAttachments([]);
@@ -657,9 +660,9 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         keyboardVerticalOffset={insets.top}
       >
         <View style={styles.header}>
-          <IconButton onPress={onBack} label={t("common.back")}>
-            <BackGlyph size={22} color={colors.fgMuted} />
-          </IconButton>
+          <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [styles.back, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("common.back")}>
+            <BackGlyph size={24} color={colors.tint} />
+          </Pressable>
           <Pressable
             onPress={onSwitch}
             style={({ pressed }) => [styles.title, pressed && styles.titlePressed]}
@@ -667,28 +670,24 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             accessibilityLabel={t("chat.switchA11y", { title })}
             hitSlop={4}
           >
-            <View style={styles.titleRow}>
-              <Text style={styles.titleText} numberOfLines={1}>
-                {title}
-              </Text>
-              <ChevronDownGlyph size={14} color={colors.fgGhost} />
-            </View>
+            <Text style={styles.titleText} numberOfLines={1}>
+              {title}
+            </Text>
             <View style={styles.subtitleRow} accessible accessibilityLabel={t("common.pair", { label: displayName(machine), value: t(`chat.status.${status}`) })}>
               {status === "working" ? (
-                <GradientDot size={7} />
+                <GradientDot size={6} />
               ) : status === "live" ? (
-                <LiveDot color={colors.ok} size={7} />
+                <LiveDot color={colors.sysGreen} size={6} />
               ) : status === "failed" ? (
-                <LiveDot color={colors.err} size={7} />
+                <LiveDot color={colors.err} size={6} />
               ) : status === "held" ? (
-                <LiveDot color={colors.warn} size={7} />
+                <LiveDot color={colors.warn} size={6} />
               ) : status === "quiet" || status === "offline" ? (
-                <LiveDot color={colors.fgFaint} size={7} />
+                <LiveDot color={colors.fgFaint} size={6} />
               ) : (
-                <PulseDot color={colors.warn} size={7} />
+                <PulseDot color={colors.warn} size={6} />
               )}
               <Text style={styles.subtitle} numberOfLines={1}>
-                {displayName(machine)} ·{" "}
                 {status === "opening"
                   ? t("chat.opening")
                   : status === "connecting"
@@ -697,9 +696,12 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
                       ? t("chat.offline")
                       : status === "failed"
                       ? t("chat.cannotOpen")
-                      : folder}
+                      : `${folder} · ${model}`}
               </Text>
             </View>
+          </Pressable>
+          <Pressable onPress={onSwitch} hitSlop={10} style={({ pressed }) => [styles.headerEnd, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("chat.switchA11y", { title })}>
+            <ChevronDownGlyph size={22} color={colors.tint} />
           </Pressable>
         </View>
 
@@ -891,21 +893,21 @@ function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
     header: {
-      height: 58,
+      height: 54,
       flexDirection: "row",
       alignItems: "center",
-      paddingLeft: 2,
-      paddingRight: 12,
+      paddingHorizontal: 6,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.border,
-      backgroundColor: c.bg,
+      borderBottomColor: c.separator,
+      backgroundColor: c.chrome,
     },
-    title: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 4, borderRadius: radius.md, gap: 2 },
+    back: { width: 48, height: 44, justifyContent: "center", paddingLeft: 4 },
+    headerEnd: { width: 48, height: 44, alignItems: "flex-end", justifyContent: "center", paddingRight: 8 },
+    title: { flex: 1, minWidth: 0, alignItems: "center", paddingVertical: 4, gap: 1 },
     titlePressed: { opacity: 0.6 },
-    titleRow: { flexDirection: "row", alignItems: "center", gap: 5, minWidth: 0 },
-    titleText: { flexShrink: 1, fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
-    subtitleRow: { flexDirection: "row", alignItems: "center", gap: 7, minWidth: 0 },
-    subtitle: { flexShrink: 1, fontFamily: MONO, fontSize: 11, lineHeight: 15, color: c.fgFaint },
+    titleText: { maxWidth: "100%", fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.3, color: c.fg, textAlign: "center" },
+    subtitleRow: { flexDirection: "row", alignItems: "center", gap: 5, minWidth: 0, maxWidth: "100%" },
+    subtitle: { flexShrink: 1, fontFamily: SANS, fontSize: 11.5, lineHeight: 15, color: c.fgFaint },
 
     offline: {
       paddingHorizontal: 16,

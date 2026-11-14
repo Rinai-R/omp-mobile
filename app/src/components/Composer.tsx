@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { Image, Pressable, StyleSheet, Text, TextInput, View, type PressableStateCallbackType } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import type { Attachment } from "../attachments";
+import { levelLabel } from "../ompText";
 import { t } from "../i18n/index.ts";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { BrandMark, GradientFill } from "./brand";
@@ -78,6 +79,11 @@ export function Composer({
   );
   return (
     <View style={[styles.root, { paddingBottom: 8 + bottomInset }]}>
+      {queued > 0 ? (
+        <Text style={styles.queued} maxFontSizeMultiplier={1.2}>
+          {t("composer.queued", { count: queued })}
+        </Text>
+      ) : null}
       <View>
       {menu ? (
         <View style={styles.menu}>
@@ -86,79 +92,81 @@ export function Composer({
           <MenuItem icon={<CameraGlyph size={18} color={colors.fg} />} label={t("composer.camera")} onPress={() => pick("camera")} />
         </View>
       ) : null}
-      <View style={[styles.box, focused && styles.boxFocused, readOnly && styles.boxOff]}>
-        {attachments.length > 0 ? (
-          <View style={styles.attachments}>
-            {attachments.map((item) => (
-              <View key={item.id} style={styles.attachment}>
-                <Image source={{ uri: item.uri }} style={styles.attachmentImage} />
-                <Pressable
-                  onPress={() => onRemoveAttachment(item.id)}
-                  hitSlop={8}
-                  style={styles.attachmentRemove}
-                  accessibilityRole="button"
-                  accessibilityLabel={t("composer.removePhoto")}
-                >
-                  <CloseGlyph size={10} color={colors.fg} />
-                </Pressable>
-              </View>
-            ))}
+      <View style={styles.row}>
+        <Pressable
+          onPress={() => (canAttach ? setMenu((open) => !open) : onAttach("library"))}
+          disabled={readOnly}
+          style={({ pressed }) => [menu ? styles.plusOn : styles.plus, pressed && styles.pressedScale]}
+          accessibilityRole="button"
+          accessibilityLabel={t("composer.attach")}
+          accessibilityState={{ expanded: menu }}
+        >
+          <View style={menu ? styles.plusTurned : undefined}>
+            <PlusGlyph size={18} color={menu ? colors.fgInverse : colors.fgMuted} />
           </View>
-        ) : null}
-        <View style={styles.row}>
-          <Pressable
-            onPress={() => (canAttach ? setMenu((open) => !open) : onAttach("library"))}
-            disabled={readOnly}
-            style={({ pressed }) => [menu ? styles.plusOn : styles.plus, pressed && styles.pressedScale]}
-            accessibilityRole="button"
-            accessibilityLabel={t("composer.attach")}
-            accessibilityState={{ expanded: menu }}
-          >
-            <View style={menu ? styles.plusTurned : undefined}>
-              <PlusGlyph size={18} color={menu ? colors.fgInverse : colors.fgMuted} />
+        </Pressable>
+        <View style={[styles.box, focused && styles.boxFocused, readOnly && styles.boxOff]}>
+          {attachments.length > 0 ? (
+            <View style={styles.attachments}>
+              {attachments.map((item) => (
+                <View key={item.id} style={styles.attachment}>
+                  <Image source={{ uri: item.uri }} style={styles.attachmentImage} />
+                  <Pressable
+                    onPress={() => onRemoveAttachment(item.id)}
+                    hitSlop={8}
+                    style={styles.attachmentRemove}
+                    accessibilityRole="button"
+                    accessibilityLabel={t("composer.removePhoto")}
+                  >
+                    <CloseGlyph size={10} color={colors.fg} />
+                  </Pressable>
+                </View>
+              ))}
             </View>
-          </Pressable>
-          <TextInput
-            value={draft}
-            onChangeText={onChangeDraft}
-            onFocus={() => {
-              setFocused(true);
-              setMenu(false);
-            }}
-            onBlur={() => setFocused(false)}
-            editable={!readOnly}
-            placeholder={
-              readOnly
-                ? t("composer.placeholder.closed")
-                : offline
-                  ? t("composer.placeholder.offline")
-                  : streaming
-                    ? t("composer.placeholder.steer")
-                    : t("composer.placeholder")
-            }
-            placeholderTextColor={colors.fgGhost}
-            selectionColor={colors.ring}
-            cursorColor={colors.accent}
-            multiline
-            style={styles.input}
-          />
-          <Pressable
-            onPress={action}
-            disabled={disabled && mode !== "stop"}
-            accessibilityRole="button"
-            accessibilityLabel={mode === "stop" ? t("composer.stop") : t("composer.send")}
-            hitSlop={6}
-            style={actionStyle}
-          >
-            {mode === "stop" ? (
-              <StopGlyph size={12} color={colors.bg} />
-            ) : (
-              <>
-                {disabled ? null : <GradientFill />}
-                <SendGlyph size={18} color={disabled ? colors.fgGhost : "#FFFFFF"} />
-              </>
-            )}
-          </Pressable>
+          ) : null}
+          <View style={styles.inputRow}>
+            <TextInput
+              value={draft}
+              onChangeText={onChangeDraft}
+              onFocus={() => {
+                setFocused(true);
+                setMenu(false);
+              }}
+              onBlur={() => setFocused(false)}
+              editable={!readOnly}
+              placeholder={
+                readOnly
+                  ? t("composer.placeholder.closed")
+                  : offline
+                    ? t("composer.placeholder.offline")
+                    : streaming
+                      ? t("composer.placeholder.steer")
+                      : t("composer.placeholder")
+              }
+              placeholderTextColor={colors.fgGhost}
+              selectionColor={colors.ring}
+              cursorColor={colors.tint}
+              multiline
+              style={styles.input}
+            />
+            <Pressable
+              onPress={action}
+              disabled={disabled && mode !== "stop"}
+              accessibilityRole="button"
+              accessibilityLabel={mode === "stop" ? t("composer.stop") : t("composer.send")}
+              hitSlop={6}
+              style={actionStyle}
+            >
+              {mode === "stop" ? (
+                <StopGlyph size={11} color={colors.fabFg} />
+              ) : (
+                <>
+                  {disabled ? null : <GradientFill />}
+                  <SendGlyph size={16} color={disabled ? colors.fgGhost : "#FFFFFF"} />
+                </>
+              )}
+            </Pressable>
+          </View>
         </View>
       </View>
       </View>
@@ -167,7 +175,7 @@ export function Composer({
           onPress={onModel}
           style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
           accessibilityRole="button"
-          accessibilityLabel={level !== undefined ? t("composer.modelLevelA11y", { model, level }) : t("composer.modelA11y", { model })}
+          accessibilityLabel={level !== undefined ? t("composer.modelLevelA11y", { model, level: levelLabel(level) }) : t("composer.modelA11y", { model })}
           hitSlop={6}
         >
           <BrandMark size={10} />
@@ -176,7 +184,7 @@ export function Composer({
           </Text>
           {level !== undefined ? (
             <Text style={styles.chipLevel} maxFontSizeMultiplier={1.2}>
-              · {level}
+              · {levelLabel(level)}
             </Text>
           ) : null}
         </Pressable>
@@ -185,13 +193,6 @@ export function Composer({
             <Ring percent={contextPercent} />
             <Text style={styles.chipText} maxFontSizeMultiplier={1.2}>
               {Math.round(contextPercent)}%
-            </Text>
-          </View>
-        ) : null}
-        {queued > 0 ? (
-          <View style={styles.chip}>
-            <Text style={styles.chipWarn} maxFontSizeMultiplier={1.2}>
-              {t("composer.queued", { count: queued })}
             </Text>
           </View>
         ) : null}
@@ -235,7 +236,7 @@ function Ring({ percent }: { percent: number }): ReactNode {
   );
 }
 
-const ACTION = 36;
+const ACTION = 32;
 /** Six lines of 21 px text plus padding. */
 const INPUT_MAX = 21 * 6 + 16;
 
@@ -254,48 +255,48 @@ function createStyles(c: Palette) {
     alignItems: "center",
     gap: 5,
     // Grows with the system font size; the model chip may take most of the row.
-    minHeight: 26,
-    paddingVertical: 3,
+    minHeight: 24,
+    paddingVertical: 2,
     maxWidth: "78%",
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     borderRadius: radius.pill,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-    backgroundColor: c.panel,
   } as const;
-  const chipText = { fontFamily: MONO, fontSize: 11, lineHeight: 14, color: c.fgFaint } as const;
+  const chipText = { fontFamily: SANS, fontSize: 12, lineHeight: 15, color: c.fgFaint } as const;
   return {
-    root: { paddingHorizontal: 12, paddingTop: 6, backgroundColor: c.bg },
+    root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.chrome, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
+    queued: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.tint, paddingHorizontal: 6, paddingBottom: 8 },
+    row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
     box: {
-      borderRadius: radius.xxl,
+      flex: 1,
+      borderRadius: 20,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c.borderStrong,
-      backgroundColor: c.panel,
-      padding: 7,
-      gap: 8,
+      borderColor: c.dark ? "#ffffff2a" : "#0000001f",
+      backgroundColor: c.dark ? "#ffffff08" : "#ffffff",
+      padding: 3,
+      gap: 6,
     },
-    boxFocused: { borderColor: c.dark ? "#ffffff38" : "#0000002e" },
+    boxFocused: { borderColor: c.dark ? "#ffffff48" : "#00000038" },
     boxOff: { opacity: 0.5 },
-    row: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
-    plus,
-    plusOn: { ...plus, backgroundColor: c.fg },
+    inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
+    plus: { ...plus, width: 34, height: 34, borderRadius: 17, marginBottom: 2, backgroundColor: c.search },
+    plusOn: { ...plus, width: 34, height: 34, borderRadius: 17, marginBottom: 2, backgroundColor: c.fg },
     plusTurned: { transform: [{ rotate: "45deg" }] },
     input: {
       flex: 1,
       minHeight: ACTION,
       maxHeight: INPUT_MAX,
-      paddingHorizontal: 6,
-      paddingTop: 7,
-      paddingBottom: 7,
+      paddingHorizontal: 10,
+      paddingTop: 6,
+      paddingBottom: 6,
       fontFamily: SANS,
-      fontSize: 15,
+      fontSize: 16,
       lineHeight: 21,
       color: c.fg,
       textAlignVertical: "top",
     },
     send: action,
     sendOff: { ...action, backgroundColor: c.well },
-    stop: { ...action, backgroundColor: c.fg },
+    stop: { ...action, backgroundColor: c.fab },
     pressedScale: { transform: [{ scale: 0.94 }] },
     attachments: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 3, paddingTop: 3 },
     attachment: { width: 58, height: 58 },
@@ -335,7 +336,7 @@ function createStyles(c: Palette) {
     menuItemPressed: { backgroundColor: c.hover },
     menuText: { fontFamily: SANS, fontSize: 15, lineHeight: 20, color: c.fg },
     menuDivider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border, marginHorizontal: 12 },
-    meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingTop: 8, paddingHorizontal: 2 },
+    meta: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 2, paddingTop: 6, paddingHorizontal: 38 },
     chip,
     chipPressed: { backgroundColor: c.hover },
     chipStrong: { ...chipText, flexShrink: 1, color: c.fgMuted },

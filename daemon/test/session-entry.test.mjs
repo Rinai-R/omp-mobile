@@ -63,9 +63,29 @@ test("a session waiting on an OMP question says so in its summary", async () => 
   const entry = new SessionEntry("/tmp/work", rpc);
   await entry.hydrate();
   assert.equal(entry.summary().waiting, 0);
-  rpc.extensionRequests.set("q1", { id: "q1", method: "select", title: "Allow tool: bash" });
-  assert.equal(entry.summary().waiting, 1);
+  assert.equal(entry.summary().request, undefined);
+  rpc.extensionRequests.set("q1", { id: "q1", method: "select", title: "Allow tool: bash", message: "ls", options: ["Approve", "Deny"], timeout: 5 });
+  rpc.extensionRequests.set("q2", { id: "q2", method: "input", title: "Name?" });
+  assert.equal(entry.summary().waiting, 2);
   assert.equal(entry.summary().status, "streaming");
+  // The oldest question, with only what a list needs to answer it.
+  assert.deepEqual(entry.summary().request, { id: "q1", method: "select", title: "Allow tool: bash", message: "ls", options: ["Approve", "Deny"] });
+});
+
+test("a session lists as running from the moment its run starts", async () => {
+  const rpc = Object.assign(new EventEmitter(), {
+    getState: async () => ({ sessionId: "s1", isStreaming: false }),
+    getMessages: async () => ({ messages: [] }),
+  });
+  const entry = new SessionEntry("/tmp/work", rpc);
+  await entry.hydrate();
+  entry.bind();
+  assert.equal(entry.summary().status, "idle");
+  rpc.emit("event", { type: "agent_start" });
+  assert.equal(entry.summary().status, "streaming");
+  rpc.emit("event", { type: "agent_end" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(entry.summary().status, "idle");
 });
 
 test("live session titles drop the Nerd Font icon OMP puts in names", async () => {
