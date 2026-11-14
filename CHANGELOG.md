@@ -4,11 +4,17 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.7.1
+
+Your message shows the moment you send it, queued messages show what they say, and a session's subagents can be opened from the chat.
+
 - Your message shows in the chat the moment you send it ("Sending…"), instead of only when OMP echoes it back, which over the relay could take seconds and arrive together with the answer. OMP's copy takes its place when it comes.
 - Queued messages show what they say: a message you send while OMP is busy reads "Queued" on its bubble until OMP takes it, and messages queued from elsewhere (the terminal, another phone) are listed above the field instead of an "n queued" count.
 - See what subagents do: open a "Delegate to subagents" step in a chat and it lists the subagents that call started, each with its status (running, done, failed, stopped); tap one to read its whole transcript with the chat's own rows, kept up to date while it runs. A subagent's own delegations open the same way. The daemon reads OMP's subagent session files (`GET /sessions/:id/subagents`, `GET /sessions/:id/subagents/:agent`), so it works for sessions whose omp has exited too, and asks a live omp which ones still run; the session socket sends a `subagent` frame as one starts or ends. Needs this daemon version (`subagents` feature).
 
 ### 中文
+
+发送的消息立即显示，排队的消息能看到内容，聊天里可以打开会话的子代理。
 
 - 发送后你的消息立即出现在聊天里（显示"发送中…"），不再等 OMP 回传；之前经中继时可能要等几秒，和回复一起出现。OMP 的回传到达后替换它。
 - 排队的消息能看到内容：OMP 忙时你发的消息气泡上显示"排队中"，直到 OMP 接收；从别处（终端、其他手机）排队的消息列在输入框上方，不再只显示"n 条排队中"。
