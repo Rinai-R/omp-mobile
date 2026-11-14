@@ -925,7 +925,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           }}
         />
       </Sheet>
-      <ToolSheet step={openStep} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
+      <ToolSheet step={openStep} machine={machine} cwd={session.cwd} sessionId={initialSession.id} onClose={() => setStep(null)} />
     </View>
   );
 }

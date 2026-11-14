@@ -418,6 +418,16 @@ export const en = {
   "tool.output": "Output",
   "tool.moreLines": { one: "… {count} more line", other: "… {count} more lines" },
 
+  // Subagents a task call started
+  "subagents.title": "Subagents",
+  "subagents.starting": "Starting subagents…",
+  "subagents.empty": "No messages yet",
+  "subagents.messages": { one: "{count} message", other: "{count} messages" },
+  "subagents.status.running": "Running",
+  "subagents.status.completed": "Done",
+  "subagents.status.failed": "Failed",
+  "subagents.status.aborted": "Stopped",
+
   // Notices the app writes into the transcript
   "notice.compacting": "Compacting the conversation…",
   "notice.retrySucceeded": "Retry succeeded.",

@@ -1,4 +1,4 @@
-import type { Hello, Machine, MessagePoint, SearchResult, SessionOwner, SessionSummary, ServerMessage, Transcript } from "./types";
+import type { Hello, Machine, MessagePoint, SearchResult, SessionOwner, SessionSummary, ServerMessage, Subagent, SubagentTranscript, Transcript } from "./types";
 import { heldQuery, type Held } from "./cache.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
 import { t } from "./i18n/index.ts";
@@ -158,6 +158,22 @@ export async function answerRequest(
 /** The daemon's optional feature names this app uses beyond protocol 1. */
 export const SEARCH_FEATURE = "session-search";
 export const FORK_FEATURE = "fork";
+export const SUBAGENTS_FEATURE = "subagents";
+
+/** The subagents a session delegated to (`subagents`), read from its files on the computer; nested ones name their `parent`. */
+export async function listSubagents(machine: Machine, sessionId: string): Promise<Subagent[]> {
+  const data = await request<{ subagents: Subagent[] }>(machine, `/sessions/${encodeURIComponent(sessionId)}/subagents`);
+  return Array.isArray(data.subagents) ? data.subagents : [];
+}
+
+/** One subagent and its messages: only those after `held` when the phone's copy lines up (as `fetchTranscript`). */
+export async function fetchSubagent(machine: Machine, sessionId: string, id: string, held: Held | undefined): Promise<SubagentTranscript> {
+  const query = heldQuery(held);
+  return request<SubagentTranscript>(
+    machine,
+    `/sessions/${encodeURIComponent(sessionId)}/subagents/${encodeURIComponent(id)}${query === "" ? "" : `?${query}`}`,
+  );
+}
 
 /** Sessions whose title or message text holds every word of `query` (`session-search`), best first. */
 export async function searchSessions(machine: Machine, query: string): Promise<SearchResult[]> {
