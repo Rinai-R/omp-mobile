@@ -24,6 +24,8 @@ function withoutBunFlag(env) {
   return rest;
 }
 const REQUEST_TIMEOUT_MS = 60_000;
+/** `get_subagents` reads OMP's in-memory roster: a slow answer means a busy omp, and the files answer without it. */
+const SUBAGENTS_TIMEOUT_MS = 5_000;
 /** Messages per `get_messages_page` request: OMP's maximum; a page also stays under 768 KiB. */
 const MESSAGE_PAGE_LIMIT = 256;
 /** OMP's `get_messages_page` codes that mean "page later or read it whole", as OMP's own client treats them. */
@@ -200,6 +202,9 @@ export class RpcSession extends EventEmitter {
       if (response.data?.protocolVersion !== 2) throw new Error("omp RPC protocol v2 negotiation failed");
       this.protocolVersion = 2;
     }
+    // Lifecycle frames say when a subagent starts and ends (the daemon forwards
+    // them); an omp without the command answers with an error, which is fine.
+    this.request("set_subagent_subscription", { level: "progress" }).catch(() => undefined);
     this.started = true;
     return this;
   }
@@ -310,6 +315,17 @@ export class RpcSession extends EventEmitter {
       });
       this.child.stdin.write(`${line}\n`);
     });
+  }
+
+  /**
+   * The subagents this omp runs now, as OMP's `get_subagents` lists them
+   * (pending and running only; one leaves the list as it ends).
+   * @returns {Promise<object[]>}
+   */
+  async subagents() {
+    const response = await this.request("get_subagents", {}, SUBAGENTS_TIMEOUT_MS);
+    const list = response.data?.subagents;
+    return Array.isArray(list) ? list : [];
   }
 
   /** @returns {Promise<object>} */

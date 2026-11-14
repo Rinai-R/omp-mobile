@@ -420,6 +420,16 @@ export const zhCN: Record<Key, Message> = {
   "tool.output": "输出",
   "tool.moreLines": "… 还有 {count} 行",
 
+  // 任务调用启动的子代理
+  "subagents.title": "子代理",
+  "subagents.starting": "正在启动子代理…",
+  "subagents.empty": "还没有消息",
+  "subagents.messages": "{count} 条消息",
+  "subagents.status.running": "运行中",
+  "subagents.status.completed": "已完成",
+  "subagents.status.failed": "失败",
+  "subagents.status.aborted": "已停止",
+
   // Notices the app writes into the transcript
   "notice.compacting": "正在压缩对话…",
   "notice.retrySucceeded": "重试成功。",

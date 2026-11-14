@@ -6,11 +6,13 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 - Your message shows in the chat the moment you send it ("Sending…"), instead of only when OMP echoes it back, which over the relay could take seconds and arrive together with the answer. OMP's copy takes its place when it comes.
 - Queued messages show what they say: a message you send while OMP is busy reads "Queued" on its bubble until OMP takes it, and messages queued from elsewhere (the terminal, another phone) are listed above the field instead of an "n queued" count.
+- See what subagents do: open a "Delegate to subagents" step in a chat and it lists the subagents that call started, each with its status (running, done, failed, stopped); tap one to read its whole transcript with the chat's own rows, kept up to date while it runs. A subagent's own delegations open the same way. The daemon reads OMP's subagent session files (`GET /sessions/:id/subagents`, `GET /sessions/:id/subagents/:agent`), so it works for sessions whose omp has exited too, and asks a live omp which ones still run; the session socket sends a `subagent` frame as one starts or ends. Needs this daemon version (`subagents` feature).
 
 ### 中文
 
 - 发送后你的消息立即出现在聊天里（显示"发送中…"），不再等 OMP 回传；之前经中继时可能要等几秒，和回复一起出现。OMP 的回传到达后替换它。
 - 排队的消息能看到内容：OMP 忙时你发的消息气泡上显示"排队中"，直到 OMP 接收；从别处（终端、其他手机）排队的消息列在输入框上方，不再只显示"n 条排队中"。
+- 可以看到子代理在做什么：在对话里打开“交给子代理”这一步，会列出这次调用启动的子代理及其状态（运行中、已完成、失败、已停止）；点开任一个即可用对话同样的样式查看它的完整记录，运行中会持续更新。子代理自己再委派的子代理也能这样打开。daemon 读取 OMP 的子代理会话文件（`GET /sessions/:id/subagents`、`GET /sessions/:id/subagents/:agent`），所以 omp 已退出的会话也能看，并会向运行中的 omp 询问哪些还在跑；子代理开始或结束时会话 socket 会发送 `subagent` 帧。需要本版本的守护进程（`subagents` 功能）。
 
 ## v0.7.0
 

@@ -11,7 +11,7 @@ import { STATUS_CODES, createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { renderQr } from "./qr.mjs";
@@ -25,6 +25,7 @@ import { SessionSearchIndex, matchOf, rankRecords, searchTokens, sessionFilesUnd
 import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
 import { DEFAULT_RELAY, runRelayCli } from "./relay-control.mjs";
+import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
@@ -112,9 +113,13 @@ export function promptImages(value) {
  * ask for a delta snapshot (`from`, `total`), and `GET /sessions/:id/transcript`
  * answers the same without starting an omp; `session-search`: `GET /sessions/search?q=`
  * finds sessions by title and message text; `fork`: `POST /sessions/:id/fork`
- * starts a new session from a whole session or from one of its messages.
+ * starts a new session from a whole session or from one of its messages;
+ * `subagents`: `GET /sessions/:id/subagents` lists the subagents a session
+ * delegated to and `GET /sessions/:id/subagents/:agent` reads one's transcript
+ * (`since`/`last` as `/transcript`); a live session's socket sends a `subagent`
+ * frame as one starts or ends.
  */
-const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork"];
+const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork", "subagents"];
 /** Search results a phone is sent at most. */
 const SEARCH_LIMIT = 50;
 /** Who a phone continues a session on, as the terminal it leaves is told. */
@@ -692,8 +697,32 @@ class SessionEntry {
     }
   }
 
+  /**
+   * A subagent started or ended, as a `subagent` frame: its id as the
+   * `/subagents` routes name it (the path of its transcript under the
+   * session's directory) and how it stands.
+   * @param {any} payload OMP's `subagent_lifecycle` payload
+   */
+  subagentFrame(payload) {
+    const dir = subagentDir(this.state?.sessionFile);
+    const file = typeof payload?.sessionFile === "string" ? payload.sessionFile : undefined;
+    const path = dir !== undefined && file?.endsWith(".jsonl") ? relative(dir, file.slice(0, -6)) : "";
+    const id = path !== "" && !path.startsWith("..") && !isAbsolute(path) ? path.split(sep).join("/") : String(payload?.id ?? "");
+    const status = payload?.status === "started" ? "running" : payload?.status;
+    return {
+      type: "subagent",
+      subagent: { id, agentId: payload?.id, agent: payload?.agent, description: payload?.description, status, parentToolCallId: payload?.parentToolCallId },
+    };
+  }
+
   bind() {
     this.rpc.on("event", (event) => {
+      if (event.type === "subagent_lifecycle") {
+        this.broadcast(this.subagentFrame(event.payload));
+        return;
+      }
+      // Progress ticks (and raw events, at OMP's "events" level) would flood a phone: the transcript route has them.
+      if (event.type === "subagent_progress" || event.type === "subagent_event") return;
       if (event.type === "message_end" && event.message) {
         // A new message is what makes a session the most recent one; opening it,
         // a lifecycle event from a resumed omp, or a state echo are not.
@@ -980,6 +1009,22 @@ class Daemon {
         sendJson(res, 200, this.transcript(decodeURIComponent(transcript[1]), deltaQuery(url.searchParams)));
         return;
       }
+      const subagents = /^\/sessions\/([^/]+)\/subagents$/.exec(url.pathname);
+      if (subagents !== null && req.method === "GET") {
+        const { sessionFile, running } = await this.subagentSource(decodeURIComponent(subagents[1]));
+        sendJson(res, 200, { subagents: listSubagents(sessionFile, running) });
+        return;
+      }
+      const subagent = /^\/sessions\/([^/]+)\/subagents\/([^/]+)$/.exec(url.pathname);
+      if (subagent !== null && req.method === "GET") {
+        const { sessionFile, running } = await this.subagentSource(decodeURIComponent(subagent[1]));
+        const body = subagentTranscript(sessionFile, decodeURIComponent(subagent[2]), running, deltaQuery(url.searchParams), (message) =>
+          phoneMessage(message, this.blobDir),
+        );
+        if (body === undefined) throw httpError(404, "unknown subagent");
+        sendJson(res, 200, body);
+        return;
+      }
       const answer = /^\/sessions\/([^/]+)\/answer$/.exec(url.pathname);
       if (answer !== null && req.method === "POST") {
         const body = await readBody(req);
@@ -1117,6 +1162,28 @@ class Daemon {
     const saved = this.transcripts.read(id, typeof known === "string" ? known : undefined);
     if (saved === undefined) throw httpError(404, "not cached");
     return deltaBody(saved, held);
+  }
+
+  /**
+   * Where a session's subagent transcripts are, without starting an omp, and
+   * which subagents its live omp runs now: null when that omp did not say (an
+   * older OMP), undefined when none runs.
+   * @param {string} id
+   */
+  async subagentSource(id) {
+    const live = this.sessions.get(id);
+    if (live !== undefined && !live.closed && typeof live.state?.sessionFile === "string") {
+      let running = null;
+      try {
+        running = await live.rpc.subagents();
+      } catch {
+        // The files still tell the story; only "still running" is a guess (see `statusOf`).
+      }
+      return { sessionFile: live.state.sessionFile, running };
+    }
+    const sessionFile = this.known(id)?.sessionFile;
+    if (typeof sessionFile !== "string") throw httpError(404, "unknown session");
+    return { sessionFile, running: undefined };
   }
 
   /** The omp of a session exited: save its transcript and when it was last active. */

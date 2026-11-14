@@ -217,6 +217,34 @@ export interface Snapshot extends Transcript {
   type: "snapshot";
 }
 
+/** A subagent a session delegated to, as `GET /sessions/:id/subagents` lists it (`subagents` feature). */
+export interface Subagent {
+  /** Its path from the session: "Scout", or "Scout/Helper" for one Scout started. */
+  id: string;
+  /** The name OMP gave it: the `task` call's `name`, `-2` on a repeat. */
+  agentId: string;
+  parent: string | null;
+  /** The agent type ("task", "scout"). */
+  agent?: string;
+  /** OMP's description, while it runs. */
+  description?: string;
+  /** The start of its assignment. */
+  task?: string;
+  status: "running" | "completed" | "failed" | "aborted";
+  messageCount: number;
+  updatedAt: number;
+  /** The `task` call that started it, while it runs. */
+  parentToolCallId?: string;
+}
+
+/** One subagent and its messages: `from` is the index of the first one carried (0: all of them). */
+export interface SubagentTranscript {
+  subagent: Subagent;
+  from: number;
+  total: number;
+  messages: AgentMessage[];
+}
+
 export interface ServerEvent {
   type: "event";
   event: { type: string; [key: string]: unknown };
@@ -238,4 +266,6 @@ export type ServerMessage =
   | { type: "accepted"; command: string }
   /** `command`: the frame that failed (daemons before 0.3 leave it out). */
   | { type: "error"; error: string; command?: string }
-  | { type: "protocol-error"; line: string };
+  | { type: "protocol-error"; line: string }
+  /** A subagent started or ended (`subagents`); the subagent list reads the rest from the computer. */
+  | { type: "subagent"; subagent: Pick<Subagent, "id" | "agentId" | "agent" | "description" | "status" | "parentToolCallId"> };
