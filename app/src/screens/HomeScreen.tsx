@@ -1,9 +1,9 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { createSession, deleteSession } from "../api";
+import { FORK_FEATURE, createSession, daemonFeatures, deleteSession, forkSession, knownFeatures } from "../api";
 import { GradientFill, LiveDot, PulseDot, Wordmark } from "../components/brand";
-import { ChatGlyph, ChevronDownGlyph, ComputerGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
+import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, ForkGlyph, PlusGlyph, SearchGlyph, SettingsGlyph } from "../components/icons";
 import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
 import { displayName, machineLabel } from "../machines";
 import { Banner, Button, ConfirmSheet, Field, IconButton, Sheet } from "../components/ui";
@@ -22,6 +22,8 @@ interface Props {
   onOpen: (machine: Machine, session: SessionSummary) => void;
   /** Open the computer picker (the computer card). */
   onPickMachine: () => void;
+  /** Open the session switcher to search this computer's sessions. */
+  onSearch: () => void;
   onSettings: () => void;
   onRetry: (machine: Machine) => void;
   /** Ask the home to open the New session sheet (from the switcher); a changing nonce opens it again. */
@@ -29,7 +31,7 @@ interface Props {
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onSettings, onRetry, newRequest }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onSearch, onSettings, onRetry, newRequest }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -42,6 +44,23 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   /** The session whose Close is being confirmed, and what the last close failed with. */
   const [closing, setClosing] = useState<SessionSummary | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
+  /** The session whose long-press actions are open (fork, close), and a fork in flight. */
+  const [actions, setActions] = useState<SessionSummary | null>(null);
+  const [forking, setForking] = useState(false);
+  const [canFork, setCanFork] = useState(() => knownFeatures(machine).includes(FORK_FEATURE));
+  // Asked again once the list loads: the computer may have been out of reach when the home opened.
+  const listed = sessions !== undefined;
+  useEffect(() => {
+    let live = true;
+    void daemonFeatures(machine).then((features) => {
+      if (live && features.length > 0) setCanFork(features.includes(FORK_FEATURE));
+    });
+    return () => {
+      live = false;
+    };
+    // A probe updates the machine object (lastSeen); only its address and the list's arrival matter here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machine.url, listed]);
   // Starts at 0, not at newRequest: a home opened with a request (New from the switcher) opens the sheet at once.
   const [lastRequest, setLastRequest] = useState(0);
   if (newRequest !== lastRequest) {
@@ -92,6 +111,32 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   const confirmDelete = useCallback((session: SessionSummary) => {
     if (session.origin === "daemon") setClosing(session);
   }, []);
+  /** A long press: the session's actions where the daemon can fork, else Close as before. */
+  const longPress = useCallback(
+    (session: SessionSummary) => {
+      if (canFork) setActions(session);
+      else confirmDelete(session);
+    },
+    [canFork, confirmDelete],
+  );
+  const fork = useCallback(
+    (session: SessionSummary) => {
+      setForking(true);
+      setCloseError(null);
+      void forkSession(machine, session.id)
+        .then((forked) => {
+          setActions(null);
+          setSessions((current) => [forked, ...(current ?? []).filter((item) => item.id !== forked.id)]);
+          onOpen(machine, forked);
+        })
+        .catch((cause: unknown) => {
+          setActions(null);
+          setCloseError(t("fork.failed", { error: cause instanceof Error ? cause.message : String(cause) }));
+        })
+        .finally(() => setForking(false));
+    },
+    [machine, onOpen, setSessions],
+  );
   const closeSession = useCallback(
     (session: SessionSummary) => {
       setCloseError(null);
@@ -118,6 +163,9 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
       <View style={styles.header}>
         <Wordmark />
         <View style={styles.headerRight}>
+          <IconButton onPress={onSearch} label={t("sessions.search")}>
+            <SearchGlyph size={20} color={colors.fgMuted} />
+          </IconButton>
           <IconButton onPress={onSettings} label={t("common.settings")}>
             <SettingsGlyph size={21} color={colors.fgMuted} />
           </IconButton>
@@ -209,7 +257,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
             <Text style={styles.emptyTitle}>{t("home.empty.title")}</Text>
           </View>
         ) : (
-          <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={confirmDelete} />
+          <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={longPress} />
         )}
       </ScrollView>
 
@@ -247,6 +295,29 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         <Button label={t("home.newSheet.start")} onPress={() => void create()} busy={busy} />
       </Sheet>
 
+      <Sheet visible={actions !== null} title={actions?.title ?? ""} onClose={() => setActions(null)}>
+        <Text style={styles.actionsBody}>{t("fork.sessionBody")}</Text>
+        <Button
+          label={t("fork.session")}
+          icon={<ForkGlyph size={16} color={colors.accentFg} />}
+          busy={forking}
+          onPress={() => {
+            if (actions !== null) fork(actions);
+          }}
+        />
+        {actions?.origin === "daemon" ? (
+          <Button
+            label={t("home.close.action")}
+            kind="plain"
+            icon={<CloseGlyph size={14} color={colors.fgMuted} />}
+            onPress={() => {
+              const session = actions;
+              setActions(null);
+              setClosing(session);
+            }}
+          />
+        ) : null}
+      </Sheet>
       <ConfirmSheet
         visible={closing !== null}
         title={t("home.close.title")}
@@ -341,5 +412,6 @@ function createStyles(c: Palette) {
     recentText: chipText,
     recentTextOn: { ...chipText, color: c.fg },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
+    actionsBody: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fgMuted, marginTop: -4 },
   } as const;
 }

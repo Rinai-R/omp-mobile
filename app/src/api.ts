@@ -1,4 +1,4 @@
-import type { Hello, Machine, SessionOwner, SessionSummary, ServerMessage, Transcript } from "./types";
+import type { Hello, Machine, MessagePoint, SearchResult, SessionOwner, SessionSummary, ServerMessage, Transcript } from "./types";
 import { heldQuery, type Held } from "./cache.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
 import { t } from "./i18n/index.ts";
@@ -140,6 +140,28 @@ export async function createSession(machine: Machine, cwd?: string): Promise<Ses
 
 export async function deleteSession(machine: Machine, id: string): Promise<void> {
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** The daemon's optional feature names this app uses beyond protocol 1. */
+export const SEARCH_FEATURE = "session-search";
+export const FORK_FEATURE = "fork";
+
+/** Sessions whose title or message text holds every word of `query` (`session-search`), best first. */
+export async function searchSessions(machine: Machine, query: string): Promise<SearchResult[]> {
+  const data = await request<{ results: SearchResult[] }>(machine, `/sessions/search?q=${encodeURIComponent(query)}`);
+  return data.results;
+}
+
+/**
+ * A new session from `id` (`fork`): all of it, or up to and including the
+ * message `at`. The original is left as it is, even when a terminal holds it.
+ */
+export async function forkSession(machine: Machine, id: string, at?: MessagePoint): Promise<SessionSummary> {
+  const data = await request<{ session: SessionSummary }>(machine, `/sessions/${encodeURIComponent(id)}/fork`, {
+    method: "POST",
+    body: JSON.stringify(at === undefined ? {} : { at }),
+  });
+  return data.session;
 }
 
 export async function openSession(machine: Machine, id: string): Promise<void> {

@@ -6,7 +6,7 @@ import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme
 import { heldDetail } from "../takeover";
 import { syncSessions } from "../sync";
 import { loadSessionList, saveSessionList } from "../transcripts";
-import type { Machine, SessionSummary } from "../types";
+import type { Machine, SearchResult, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
 import { BrandMark, LiveDot, Spinner } from "./brand";
 import { LockGlyph } from "./icons";
@@ -111,6 +111,7 @@ export function SessionRow({
   session,
   current = false,
   busy = false,
+  snippet,
   onPress,
   onLongPress,
 }: {
@@ -118,6 +119,8 @@ export function SessionRow({
   current?: boolean;
   /** The session is being opened: a spinner replaces its age. */
   busy?: boolean;
+  /** A search's line from the message that matched, under the detail. */
+  snippet?: string;
   onPress: (session: SessionSummary) => void;
   onLongPress?: (session: SessionSummary) => void;
 }): ReactNode {
@@ -162,6 +165,11 @@ export function SessionRow({
         <Text style={styles.detail} numberOfLines={1}>
           {detail}
         </Text>
+        {snippet !== undefined ? (
+          <Text style={styles.snippet} numberOfLines={2}>
+            {snippet}
+          </Text>
+        ) : null}
       </View>
       <View style={styles.trailing}>
         {busy ? (
@@ -225,6 +233,35 @@ export function SessionGroups({
   );
 }
 
+/**
+ * A computer-wide search's results (`session-search`), best first: the title
+ * or the line of the message that matched. Tapping one opens the session at
+ * that message.
+ */
+export function SearchResults({
+  results,
+  currentId,
+  onPress,
+}: {
+  results: readonly SearchResult[];
+  currentId?: string;
+  onPress: (session: SessionSummary, at: number | undefined) => void;
+}): ReactNode {
+  return (
+    <>
+      {results.map(({ session, match }) => (
+        <SessionRow
+          key={session.id}
+          session={session}
+          current={session.id === currentId}
+          snippet={match.kind === "message" ? match.snippet : undefined}
+          onPress={() => onPress(session, match.kind === "message" ? match.timestamp : undefined)}
+        />
+      ))}
+    </>
+  );
+}
+
 function createStyles(c: Palette) {
   const tile = {
     width: 30,
@@ -261,6 +298,7 @@ function createStyles(c: Palette) {
     title,
     titleDim: { ...title, color: c.fgFaint },
     detail: { ...mono, color: c.fgFaint },
+    snippet: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
     trailing: { minWidth: 28, alignItems: "flex-end" },
     time: mono,
     live: { ...mono, color: c.accentV },
