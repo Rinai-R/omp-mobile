@@ -32,7 +32,8 @@ export type Row =
   | { kind: "activity"; id: string; gap: number; turn: string; steps: Step[]; running: boolean; failed: number }
   | { kind: "reply"; id: string; gap: number; turn?: string; item: MessageItem }
   | { kind: "error"; id: string; gap: number; item: MessageItem }
-  | { kind: "tail"; id: string; gap: number; text: string; at?: number }
+  /** `last`: the turn's last answer, where a fork from this turn cuts. */
+  | { kind: "tail"; id: string; gap: number; text: string; at?: number; last?: MessageItem }
   | { kind: "notice"; id: string; gap: number; item: NoticeItem };
 
 /** How a finished turn ended. */
@@ -126,7 +127,7 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
         .map((item) => item.text.trim())
         .filter((value) => value !== "")
         .join("\n\n");
-      if (!running && text !== "") push<"tail">({ kind: "tail", id: `tail:${current.id}`, text, at: current.endedAt });
+      if (!running && text !== "") push<"tail">({ kind: "tail", id: `tail:${current.id}`, text, at: current.endedAt, last: answers.at(-1) });
     }
     turn = undefined;
     turnItems = [];
@@ -194,6 +195,31 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
   if (streaming && turn === undefined && askedId !== undefined) head(askedId);
   finish(true);
   return rows;
+}
+
+/**
+ * Where in `rows` the message sent at `timestamp` (a search hit) is: the row
+ * showing it, else the row of the last message before it (a match in a
+ * thought folded into an activity, or a message the layout leaves out).
+ * -1 when no row is that old. Works on rows in either order.
+ */
+export function rowAt(rows: readonly Row[], timestamp: number): number {
+  let best = -1;
+  let bestAt = -Infinity;
+  rows.forEach((row, index) => {
+    const times: (number | undefined)[] =
+      row.kind === "user" || row.kind === "reply" || row.kind === "thinking" || row.kind === "error"
+        ? [row.item.createdAt]
+        : row.kind === "activity"
+          ? row.steps.map((step) => (step.kind === "thought" ? step.item.createdAt : step.tool.startedAt))
+          : [];
+    for (const time of times) {
+      if (time === undefined || time > timestamp || time <= bestAt) continue;
+      best = index;
+      bestAt = time;
+    }
+  });
+  return best;
 }
 
 /** What a running turn is doing now: its running tool, else what its last message streams. */

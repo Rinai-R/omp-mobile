@@ -285,6 +285,18 @@ export function CopyGlyph({ size = 16, color }: GlyphProps): ReactNode {
   );
 }
 
+/** Fork: a branch leaving a line, as in a version history. */
+export function ForkGlyph({ size = 16, color }: GlyphProps): ReactNode {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={7} cy={5.5} r={2} stroke={color} strokeWidth={1.6} />
+      <Circle cx={7} cy={18.5} r={2} stroke={color} strokeWidth={1.6} />
+      <Circle cx={17} cy={5.5} r={2} stroke={color} strokeWidth={1.6} />
+      <Path d="M7 7.5v9M17 7.5v1.5a4 4 0 0 1-4 4h-2a4 4 0 0 0-4 3.5" stroke={color} {...STROKE} />
+    </Svg>
+  );
+}
+
 /** Thinking: an atom, two crossed orbits around a core. */
 export function ThinkGlyph({ size = 14, color }: GlyphProps): ReactNode {
   return (

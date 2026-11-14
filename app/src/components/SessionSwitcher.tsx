@@ -20,8 +20,9 @@ import type { Machine, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
 import { LiveDot } from "./brand";
 import { CloseGlyph, PlusGlyph, SearchGlyph } from "./icons";
-import { SessionGroups, useMachineSessions } from "./SessionList";
+import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch } from "./SessionList";
 import { sheetTransforms, useSheetMotion } from "./ui";
+
 
 interface Props {
   visible: boolean;
@@ -30,16 +31,21 @@ interface Props {
   /** The machine and session on screen, if any: its machine's tab opens first and the row is marked. */
   machine: Machine | undefined;
   currentSessionId?: string;
-  onPick: (machine: Machine, session: SessionSummary) => void;
+  /** `at`: the timestamp of the message a search matched, for the chat to open on. */
+  onPick: (machine: Machine, session: SessionSummary, at?: number) => void;
   onNew: (machine: Machine) => void;
   onClose: () => void;
+  /** Opened to search: the field takes the keyboard at once. */
+  search?: boolean;
 }
 
 /**
  * Every session on every paired computer, one tap from any chat: search,
- * a tab per computer, the same groups as the home screen.
+ * a tab per computer, the same groups as the home screen. A computer whose
+ * daemon offers `session-search` is searched by title and message text;
+ * older ones filter the list by title.
  */
-export function SessionSwitcher({ visible, machines, probes, machine, currentSessionId, onPick, onNew, onClose }: Props): ReactNode {
+export function SessionSwitcher({ visible, machines, probes, machine, currentSessionId, onPick, onNew, onClose, search = false }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -58,6 +64,8 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
   const { sessions, loading, error } = useMachineSessions(selected, visible);
   const groups = useMemo(() => groupSessions(sessions ?? [], Date.now(), query), [query, sessions]);
   const counts = useMemo(() => attentionCount(sessions ?? []), [sessions]);
+
+  const { remote, results, error: searchError } = useSessionSearch(selected, query, visible);
 
   return (
     <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
@@ -96,6 +104,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
               autoCorrect={false}
               autoCapitalize="none"
               returnKeyType="search"
+              autoFocus={search}
             />
             {query !== "" ? (
               <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("sessions.clearSearch")}>
@@ -132,7 +141,25 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
             </ScrollView>
           ) : null}
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            {sessions === undefined ? (
+            {remote ? (
+              results === null ? (
+                <View style={styles.center}>
+                  {searchError !== null ? <Text style={styles.error}>{searchError}</Text> : <ActivityIndicator color={colors.fgFaint} />}
+                </View>
+              ) : results.length === 0 ? (
+                <View style={styles.center}>
+                  <Text style={styles.emptyText}>{t("sessions.noMatch")}</Text>
+                </View>
+              ) : (
+                <SearchResults
+                  results={results}
+                  currentId={selected?.id === machine?.id ? currentSessionId : undefined}
+                  onPress={(session, at) => {
+                    if (selected !== undefined) onPick(selected, session, at);
+                  }}
+                />
+              )
+            ) : sessions === undefined ? (
               <View style={styles.center}>
                 {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.fgFaint} />}
               </View>

@@ -40,7 +40,8 @@ type Route =
   | { kind: "machines" }
   /** The tabbed shell on `machine`; `create` is a nonce: a new value opens the New session sheet once. */
   | { kind: "home"; machine: Machine; tab: Tab; create?: number }
-  | { kind: "chat"; machine: Machine; session: SessionSummary }
+  /** `focus`: the timestamp of a message to open on (a search hit). */
+  | { kind: "chat"; machine: Machine; session: SessionSummary; focus?: number }
   /** Settings on their own: only from the computers screen before any computer is paired. */
   | { kind: "settings" }
   | { kind: "scan" };
@@ -314,14 +315,14 @@ export default function App(): ReactNode {
     return () => subscription.remove();
   }, [backOf, goHome, route]);
 
-  const [switcher, setSwitcher] = useState<{ machine: Machine; sessionId?: string } | null>(null);
+  const [switcher, setSwitcher] = useState<{ machine: Machine; sessionId?: string; search?: boolean } | null>(null);
   const [machinePicker, setMachinePicker] = useState(false);
-  const openChat = useCallback((machine: Machine, session: SessionSummary) => {
+  const openChat = useCallback((machine: Machine, session: SessionSummary, focus?: number) => {
     setSwitcher(null);
     setRoute((current) =>
-      current.kind === "chat" && current.machine.id === machine.id && current.session.id === session.id
+      current.kind === "chat" && current.machine.id === machine.id && current.session.id === session.id && focus === undefined
         ? current
-        : { kind: "chat", machine, session },
+        : { kind: "chat", machine, session, focus },
     );
   }, []);
 
@@ -490,8 +491,10 @@ export default function App(): ReactNode {
         key={`${route.machine.id}\n${route.session.id}`}
         machine={liveMachine(route.machine)}
         session={route.session}
+        focus={route.focus}
         onBack={() => goHome(route.machine)}
         onSwitch={() => setSwitcher({ machine: route.machine, sessionId: route.session.id })}
+        onOpenSession={openChat}
       />
     );
   } else if (route.kind === "home") {
@@ -554,6 +557,7 @@ export default function App(): ReactNode {
           probes={probes}
           machine={switcher?.machine}
           currentSessionId={switcher?.sessionId}
+          search={switcher?.search === true}
           onPick={openChat}
           onNew={(machine) => {
             setSwitcher(null);

@@ -22,6 +22,7 @@ OMP Mobile is a native phone app for [oh-my-pi](https://github.com/can1357/oh-my
 - **Terminal sessions:** Sessions you started in a terminal on the computer are listed too and continue on the phone. One still open in a terminal waits until that terminal exits.
 - **Notifications:** Android notifications for approvals, questions, and finished turns while the app is in the background.
 - **All your machines:** Pair each computer by QR code and give it a name on the phone. Tap a chat's title for every session on every computer — searchable, with what needs you first. The app opens on the computer you used last; a reopened chat shows at once, also offline.
+- **Search and fork:** Search a computer's sessions by title and by anything said in them; a hit opens the chat at that message. Long-press a session to fork it whole, or long-press a message in a chat to fork from there. A fork is a new session; the original file is never changed, even while a terminal has it open.
 - **Tailscale, or a relay:** The daemon listens on the computer's Tailscale address and admits only your own devices. Without Tailscale, it can be reached through the open-source ds-harness-remote relay, end-to-end encrypted.
 - **An OMP plugin:** `/mobile` in OMP starts the daemon in the background and shows the pairing code. The daemon keeps running after the terminal closes.
 

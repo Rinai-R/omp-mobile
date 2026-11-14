@@ -67,6 +67,7 @@ const IGNORED_UI = new Set(["setStatus", "setWidget", "setTitle", "set_editor_te
  * @property {string[]} [extraArgs]
  * @property {string} [sessionDir]
  * @property {string} [resume]
+ * @property {string} [fork] a session file `omp --fork` copies into a new session (only read)
  * @property {boolean} [autoApprove]
  */
 
@@ -109,6 +110,7 @@ export class RpcSession extends EventEmitter {
     this.extraArgs = options.extraArgs ?? [];
     this.sessionDir = options.sessionDir;
     this.resume = options.resume;
+    this.fork = options.fork;
     this.autoApprove = options.autoApprove === true;
     /** @type {import("node:child_process").ChildProcessWithoutNullStreams | undefined} */
     this.child = undefined;
@@ -134,6 +136,7 @@ export class RpcSession extends EventEmitter {
     // phone as an extension `select` request instead of failing closed.
     const args = ["--mode", "rpc-ui", "--cwd", this.cwd, ...this.extraArgs];
     if (this.resume) args.push("--resume", this.resume);
+    else if (this.fork) args.push("--fork", this.fork);
     if (this.autoApprove) args.push("--auto-approve");
     if (this.sessionDir) args.push("--session-dir", this.sessionDir);
     const child = spawn(this.ompBin, args, {
