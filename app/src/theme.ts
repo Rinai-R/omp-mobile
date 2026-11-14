@@ -9,12 +9,19 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  * magenta → violet → cyan (`accentA` → `accentV` → `accentB`) and is used
  * sparingly; `accent` is the solid magenta. `codeBg`, `codeHead` and
  * `inlineCode` tint code in replies: a block, its header, a span in prose.
+ *
+ * The iOS-flavoured layer on top: `group` rows on `bg` with `separator`
+ * hairlines, `tint` for links and the back button, `search`/`segment` fills,
+ * the user's bubble gradient (`userA` → `userB`), the reply's translucent
+ * `bubble`, tool `card`s with violet `tile`s, the approval widget gradient
+ * (`widgetA` → `widgetB` → `widgetC`), the New button (`fab`), and the system
+ * colours (`sysRed`, `sysGreen`, `sysBlue`, `sysOrange`, `sysYellow`).
  */
 export function palette(scheme: ColorSchemeName) {
   return scheme === "light"
     ? {
         dark: false,
-        bg: "#f7f7f8",
+        bg: "#f2f2f7",
         panel: "#ffffff",
         raised: "#ffffff",
         inset: "#f3f3f5",
@@ -52,6 +59,34 @@ export function palette(scheme: ColorSchemeName) {
         ring: "#0a9cb0",
         ringSoft: "#0a9cb029",
         backdrop: "#00000059",
+        group: "#ffffff",
+        separator: "#c6c6c8",
+        tint: "#9b3fd1",
+        search: "#7676801f",
+        segment: "#ffffff",
+        userA: "#f8e1f3",
+        userB: "#e0e6fb",
+        userBorder: "#0000000a",
+        bubble: "#ffffff",
+        bubbleBorder: "#0000000d",
+        card: "#ffffff",
+        tile: "#7a45e01a",
+        tileFg: "#7a45e0",
+        term: "#111318",
+        termFg: "#b8f5d7",
+        widgetA: "#fbe3f5",
+        widgetB: "#e9e3fd",
+        widgetC: "#dcf3f8",
+        widgetButton: "#ffffffb3",
+        fab: "#111114",
+        fabFg: "#ffffff",
+        badge: "#ff2d55",
+        sysRed: "#ff3b30",
+        sysGreen: "#34c759",
+        sysBlue: "#007aff",
+        sysOrange: "#ff9500",
+        sysYellow: "#b88400",
+        chrome: "#f9f9f9e6",
       }
     : {
         dark: true,
@@ -93,6 +128,34 @@ export function palette(scheme: ColorSchemeName) {
         ring: "#00dbe4",
         ringSoft: "#00dbe42e",
         backdrop: "#000000a6",
+        group: "#1c1c1e",
+        separator: "#38383a",
+        tint: "#e08dff",
+        search: "#ffffff14",
+        segment: "#636366",
+        userA: "#3a1d4a",
+        userB: "#1a2448",
+        userBorder: "#ffffff1f",
+        bubble: "#ffffff0b",
+        bubbleBorder: "#ffffff12",
+        card: "#ffffff08",
+        tile: "#8b5cf622",
+        tileFg: "#c4b5fd",
+        term: "#05080a",
+        termFg: "#b8f5d7",
+        widgetA: "#3a1748",
+        widgetB: "#1e1a52",
+        widgetC: "#0c2c3a",
+        widgetButton: "#ffffff26",
+        fab: "#f5f5f7",
+        fabFg: "#000000",
+        badge: "#ff375f",
+        sysRed: "#ff453a",
+        sysGreen: "#30d158",
+        sysBlue: "#0a84ff",
+        sysOrange: "#ff9f0a",
+        sysYellow: "#ffd60a",
+        chrome: "#121214e6",
       };
 }
 

@@ -16,36 +16,43 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ApprovalRequest } from "../types";
 import { t } from "../i18n/index.ts";
-import { GradientDot } from "./brand";
-import { Button, sheetSurface, sheetTransforms, useSheetMotion } from "./ui";
+import { approvalText, optionLabel } from "../ompText";
+import { haptic } from "../haptics";
+import { BrandMark, GradientFill } from "./brand";
+import { sheetTransforms, useSheetMotion } from "./ui";
 
 type Answer = { value?: string; confirmed?: boolean; cancelled?: boolean };
 
-/** One choice: a mono index in accent, the label and its description; pressed, it takes the ring. */
+/** Answers that refuse: drawn in the system red, like a destructive action. */
+const REFUSAL = /^(?:(?:deny|reject|no|cancel|abort)\b|否|拒绝)/i;
+
+/** One choice: a full-width row in the action sheet under a hairline, its description under it; refusals in red. */
 function Option({
-  index,
   label,
   description,
+  primary,
   onPress,
 }: {
-  index: number;
   label: string;
   description?: string;
+  primary: boolean;
   onPress: () => void;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const style = useCallback(
-    ({ pressed }: PressableStateCallbackType) => (pressed ? styles.optionPressed : styles.option),
+    ({ pressed }: PressableStateCallbackType) => [styles.option, pressed && styles.optionPressed],
     [styles],
   );
+  const refusal = REFUSAL.test(label.trim());
+  const shown = optionLabel(label);
   return (
-    <Pressable onPress={onPress} style={style} accessibilityRole="button" accessibilityLabel={label}>
-      <Text style={styles.optionMarker}>{index + 1}</Text>
-      <View style={styles.optionText}>
-        <Text style={styles.optionLabel}>{label}</Text>
+    <>
+      <View style={styles.separator} />
+      <Pressable onPress={onPress} style={style} accessibilityRole="button" accessibilityLabel={shown}>
+        <Text style={refusal ? styles.optionRefuse : primary ? styles.optionPrimary : styles.optionLabel}>{shown}</Text>
         {description !== undefined ? <Text style={styles.optionDetail}>{description}</Text> : null}
-      </View>
-    </Pressable>
+      </Pressable>
+    </>
   );
 }
 
@@ -70,72 +77,93 @@ export function ApprovalSheet({
     setValue(request.prefill ?? "");
   }, [request.id, request.prefill]);
 
+  const reply = useCallback(
+    (answer: Answer) => {
+      haptic.select();
+      onAnswer(answer);
+    },
+    [onAnswer],
+  );
   const cancel = useCallback(() => onAnswer({ cancelled: true }), [onAnswer]);
   const cancelStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [styles.cancel, pressed && styles.pressed],
+    ({ pressed }: PressableStateCallbackType) => [styles.cancel, pressed && styles.optionPressed],
     [styles],
   );
   const input = request.method === "input" || request.method === "editor";
   const options = request.options ?? [];
+  const text = approvalText(request.title, request.message);
   return (
     <KeyboardAvoidingView style={styles.wrap} behavior="padding">
       <Animated.View style={[styles.scrim, motion.backdrop]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={cancel} accessibilityLabel={t("common.cancel")} />
       </Animated.View>
-      <Animated.View style={[styles.sheet, { paddingBottom: 12 + insets.bottom }, motion.sheet]}>
-        <View style={styles.grab} />
-        <View style={styles.head}>
-          <View style={styles.headDot}>
-            <GradientDot size={8} />
-          </View>
-          <Text style={styles.title}>{request.title}</Text>
-        </View>
-        {request.message !== undefined ? <Text style={styles.message}>{request.message}</Text> : null}
-
-        {request.method === "select" ? (
-          <ScrollView style={styles.options} contentContainerStyle={styles.optionList} bounces={false}>
-            {options.map((option, index) => (
-              <Option
-                key={`${option}-${index}`}
-                index={index}
-                label={option}
-                description={request.optionDetails?.[index]?.description}
-                onPress={() => onAnswer({ value: option })}
-              />
-            ))}
+      <Animated.View style={[styles.sheet, { paddingBottom: 10 + insets.bottom }, motion.sheet]}>
+        <View style={styles.group}>
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.head} bounces={false}>
+            <View style={styles.icon}>
+              <GradientFill colors={[colors.accentA, colors.accentV]} radius={26} />
+              <BrandMark size={22} color="#ffffff" />
+            </View>
+            <Text style={styles.title}>{text.heading}</Text>
+            {text.details.length > 0 ? (
+              <View style={styles.cmd}>
+                {text.details.map((detail, index) =>
+                  detail.command ? (
+                    <Text key={index} style={styles.cmdText} selectable>
+                      <Text style={styles.cmdPrompt}>$ </Text>
+                      {detail.value}
+                    </Text>
+                  ) : (
+                    <Text key={index} style={styles.cmdText} selectable>
+                      {detail.label !== undefined ? <Text style={styles.cmdLabel}>{`${detail.label}  `}</Text> : null}
+                      {detail.value}
+                    </Text>
+                  ),
+                )}
+              </View>
+            ) : null}
+            {input ? (
+              <View style={[focused ? styles.haloOn : styles.halo, styles.inputWrap]}>
+                <TextInput
+                  value={value}
+                  onChangeText={setValue}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  placeholder={request.placeholder}
+                  placeholderTextColor={colors.fgFaint}
+                  selectionColor={colors.ring}
+                  multiline
+                  autoFocus
+                  style={focused ? styles.inputFocused : styles.input}
+                />
+              </View>
+            ) : null}
           </ScrollView>
-        ) : null}
 
-        {request.method === "confirm" ? (
-          <View style={styles.row}>
-            <View style={styles.flex}>
-              <Button label={t("approval.no")} kind="plain" onPress={() => onAnswer({ confirmed: false })} />
-            </View>
-            <View style={styles.flex}>
-              <Button label={t("approval.yes")} onPress={() => onAnswer({ confirmed: true })} />
-            </View>
-          </View>
-        ) : null}
+          {request.method === "select" ? (
+            <ScrollView style={styles.options} bounces={false}>
+              {options.map((option, index) => (
+                <Option
+                  key={`${option}-${index}`}
+                  label={option}
+                  description={request.optionDetails?.[index]?.description}
+                 
+                  primary={index === 0}
+                  onPress={() => reply({ value: option })}
+                />
+              ))}
+            </ScrollView>
+          ) : null}
 
-        {input ? (
-          <>
-            <View style={focused ? styles.haloOn : styles.halo}>
-              <TextInput
-                value={value}
-                onChangeText={setValue}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
-                placeholder={request.placeholder}
-                placeholderTextColor={colors.fgFaint}
-                selectionColor={colors.ring}
-                multiline
-                autoFocus
-                style={focused ? styles.inputFocused : styles.input}
-              />
-            </View>
-            <Button label={t("approval.submit")} onPress={() => onAnswer({ value })} />
-          </>
-        ) : null}
+          {request.method === "confirm" ? (
+            <>
+              <Option label={t("approval.yes")} primary onPress={() => reply({ confirmed: true })} />
+              <Option label={t("approval.no")} primary={false} onPress={() => reply({ confirmed: false })} />
+            </>
+          ) : null}
+
+          {input ? <Option label={t("approval.submit")} primary onPress={() => reply({ value })} /> : null}
+        </View>
 
         <Pressable onPress={cancel} style={cancelStyle} accessibilityRole="button">
           <Text style={styles.cancelText}>{t("common.cancel")}</Text>
@@ -146,19 +174,8 @@ export function ApprovalSheet({
 }
 
 function createStyles(c: Palette) {
-  const option = {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-    minHeight: 48,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-    backgroundColor: c.raised,
-  } as const;
-  const input = { fontFamily: SANS,
+  const input = {
+    fontFamily: SANS,
     minHeight: 96,
     maxHeight: 220,
     textAlignVertical: "top",
@@ -172,31 +189,35 @@ function createStyles(c: Palette) {
     borderColor: c.borderStrong,
   } as const;
   const halo = { borderRadius: radius.md + 3, borderWidth: 3, margin: -3, borderColor: "transparent" } as const;
+  const option = { fontFamily: SANS, fontSize: 18, lineHeight: 23, textAlign: "center", color: c.tint } as const;
+  const surface = c.dark ? "#1c1c1e" : "#f9f9f9";
   return {
     wrap: { ...StyleSheet.absoluteFill, justifyContent: "flex-end" },
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
-    sheet: { ...sheetSurface(c), maxHeight: "85%", gap: 12 },
-    grab: { alignSelf: "center", width: 36, height: 4, borderRadius: 2, backgroundColor: c.borderStrong },
-    head: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginHorizontal: 2, marginTop: 6 },
-    headDot: { height: 24, justifyContent: "center" },
-    title: { flex: 1, fontFamily: SANS, fontSize: 17, lineHeight: 24, fontWeight: "600", letterSpacing: -0.2, color: c.fg },
-    message: { fontFamily: SANS, fontSize: 14, lineHeight: 21, color: c.fgMuted, marginHorizontal: 2 },
-    options: { flexGrow: 0 },
-    optionList: { gap: 6 },
-    option,
-    optionPressed: { ...option, borderColor: c.ring, backgroundColor: c.ringSoft },
-    optionMarker: { width: 16, fontFamily: MONO, fontSize: 12.5, lineHeight: 20, color: c.accent },
-    optionText: { flex: 1, gap: 2 },
-    optionLabel: { fontFamily: SANS, fontSize: 14.5, lineHeight: 20, fontWeight: "500", color: c.fg },
-    optionDetail: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.fgMuted },
-    pressed: { backgroundColor: c.hover },
-    row: { flexDirection: "row", gap: 10 },
-    flex: { flex: 1 },
+    sheet: { maxHeight: "88%", paddingHorizontal: 8, gap: 8 },
+    group: { borderRadius: 14, overflow: "hidden", backgroundColor: surface, flexShrink: 1 },
+    scroll: { flexGrow: 0, flexShrink: 1 },
+    head: { alignItems: "center", paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16, gap: 10 },
+    icon: { width: 52, height: 52, borderRadius: 26, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+    title: { fontFamily: SANS, fontSize: 17, lineHeight: 22, fontWeight: "600", letterSpacing: -0.3, color: c.fg, textAlign: "center" },
+    cmd: { alignSelf: "stretch", padding: 12, gap: 4, borderRadius: 12, backgroundColor: c.term },
+    cmdText: { fontFamily: MONO, fontSize: 12.5, lineHeight: 19, color: c.termFg },
+    cmdPrompt: { color: c.cyan },
+    cmdLabel: { color: c.dark ? "#8a8b91" : "#9a9ba3" },
+    inputWrap: { alignSelf: "stretch" },
+    options: { flexGrow: 0, maxHeight: 340 },
+    separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator },
+    option: { minHeight: 56, paddingVertical: 14, paddingHorizontal: 16, justifyContent: "center", gap: 2 },
+    optionPressed: { backgroundColor: c.selected },
+    optionLabel: option,
+    optionPrimary: { ...option, fontWeight: "600" },
+    optionRefuse: { ...option, color: c.sysRed },
+    optionDetail: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgFaint, textAlign: "center" },
     halo,
     haloOn: { ...halo, borderColor: c.ringSoft },
     input,
     inputFocused: { ...input, borderColor: c.ring },
-    cancel: { height: 44, alignItems: "center", justifyContent: "center", borderRadius: radius.md },
-    cancelText: { fontFamily: SANS, fontSize: 15, fontWeight: "500", color: c.fgMuted },
+    cancel: { minHeight: 56, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: c.dark ? "#2c2c2e" : "#ffffff" },
+    cancelText: { fontFamily: SANS, fontSize: 18, lineHeight: 23, fontWeight: "600", color: c.tint },
   } as const;
 }

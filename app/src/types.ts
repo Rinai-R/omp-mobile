@@ -45,6 +45,8 @@ export interface SessionSummary {
   owner?: SessionOwner;
   /** OMP questions and tool approvals waiting for an answer (live sessions, newer daemons). */
   waiting?: number;
+  /** The oldest of them (daemons with the `answer` feature): the home answers it without opening the session. */
+  request?: Pick<ApprovalRequest, "id" | "method" | "title" | "message" | "options">;
 }
 
 /** The omp process on the computer that holds a session (issue #28). */

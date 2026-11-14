@@ -31,6 +31,8 @@ import { hostname } from "node:os";
 export const HEARTBEAT_MS = 25_000;
 /** OMP's tool approval is a `select` whose title starts with this. */
 export const TOOL_APPROVAL_PREFIX = "Allow tool:";
+/** The labels OMP starts approval details with (`Command: `, `Path: `), from its `tools/approval.ts` and each tool. */
+const DETAIL_LABEL = /^(?:Command|Path|Paths|Pattern|Language|Code|Content|URL|Reason|Origin):\s*/;
 const ASKING = new Set(["select", "confirm", "input", "editor"]);
 const TEXT_MAX = 280;
 
@@ -127,7 +129,10 @@ export class AttentionTracker {
         const approval = isToolApproval(request);
         const title = typeof request.title === "string" ? request.title : "";
         // OMP's tool approval title is `Allow tool: bash\nCommand: echo hi`: the tool, then its details.
-        const lines = (approval ? title.slice(TOOL_APPROVAL_PREFIX.length) : title).split("\n").map((line) => line.trim());
+        // A notification reads in the phone's language, so OMP's English labels (`Command:`) are left out.
+        const lines = (approval ? title.slice(TOOL_APPROVAL_PREFIX.length) : title)
+          .split("\n")
+          .map((line, index) => (approval && index > 0 ? line.replace(DETAIL_LABEL, "") : line).trim());
         const text = [...lines, request.message].filter(Boolean).join(" · ");
         state.open.set(request.id, emit(approval ? "approval" : "question", request.id, text));
         break;

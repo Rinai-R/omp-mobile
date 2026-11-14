@@ -119,7 +119,8 @@ const OPEN_FAILED_CLOSE_CODE = 4000;
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
 /** @typedef {{pid: number, busy: boolean, terminal: boolean}} SessionOwner */
-/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, owner?: SessionOwner, waiting?: number}} SessionSummary */
+/** @typedef {{id: string, method: string, title: string, message?: string, options?: string[]}} PendingRequest */
+/** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, owner?: SessionOwner, waiting?: number, request?: PendingRequest}} SessionSummary */
 
 /** An error with the HTTP status it answers, and any detail its JSON answer carries. */
 function httpError(status, message, detail = {}) {
@@ -130,6 +131,29 @@ function httpError(status, message, detail = {}) {
 function errorBody(error) {
   const detail = error !== null && typeof error === "object" && typeof error.detail === "object" ? error.detail : {};
   return { error: error instanceof Error ? error.message : String(error), ...detail };
+}
+
+/**
+ * The part of an open extension request a session list shows: enough to answer
+ * a tool approval or a short choice from the home, nothing for a text prompt.
+ * @param {any} request
+ * @returns {PendingRequest | undefined}
+ */
+function pendingOf(request) {
+  if (request === null || typeof request !== "object" || typeof request.id !== "string") return undefined;
+  const pending = { id: request.id, method: String(request.method), title: typeof request.title === "string" ? request.title : "" };
+  if (typeof request.message === "string") pending.message = request.message;
+  if (Array.isArray(request.options)) pending.options = request.options.filter((option) => typeof option === "string");
+  return pending;
+}
+
+/** The answer fields a phone sends, over the session socket or `POST /sessions/:id/answer`. */
+function answerOf(message) {
+  const answer = {};
+  if (typeof message.value === "string") answer.value = message.value;
+  if (typeof message.confirmed === "boolean") answer.confirmed = message.confirmed;
+  if (message.cancelled === true) answer.cancelled = true;
+  return answer;
 }
 
 function parseArgs(argv) {
@@ -631,6 +655,8 @@ class SessionEntry {
       origin: "daemon",
       // OMP questions and tool approvals still waiting for an answer: the session needs the user.
       waiting: this.openRequests().length,
+      // The oldest of them, so a list can answer it without opening the session.
+      request: pendingOf(this.openRequests()[0]),
     };
   }
 
@@ -683,6 +709,8 @@ class SessionEntry {
       if (STATE_EVENTS.has(event.type)) void this.refreshState();
       // A `todo` tool call rewrites the list before any reminder fires.
       if (event.type === "tool_execution_end" && event.toolName === "todo") void this.refreshState();
+      // A run starting is what makes a session "running" in the list; OMP's state read would lag behind.
+      if (event.type === "agent_start" && this.state !== null && typeof this.state === "object") this.state = { ...this.state, isStreaming: true };
       if (event.type === "turn_end" || event.type === "agent_end") void this.refreshState();
       this.broadcast({ type: "event", event });
     });
@@ -920,6 +948,18 @@ class Daemon {
       const transcript = /^\/sessions\/([^/]+)\/transcript$/.exec(url.pathname);
       if (transcript !== null && req.method === "GET") {
         sendJson(res, 200, this.transcript(decodeURIComponent(transcript[1]), deltaQuery(url.searchParams)));
+        return;
+      }
+      const answer = /^\/sessions\/([^/]+)\/answer$/.exec(url.pathname);
+      if (answer !== null && req.method === "POST") {
+        const body = await readBody(req);
+        const live = this.sessions.get(decodeURIComponent(answer[1]));
+        if (live === undefined) throw httpError(404, "session is not running");
+        if (typeof body.id !== "string" || !live.openRequests().some((request) => request.id === body.id)) {
+          throw httpError(409, "that question was already answered");
+        }
+        live.rpc.respondExtension(body.id, answerOf(body));
+        sendJson(res, 200, { ok: true });
         return;
       }
       const match = /^\/sessions\/([^/]+)$/.exec(url.pathname);
@@ -1318,11 +1358,7 @@ class Daemon {
           return;
         case "approval": {
           if (typeof message.id !== "string") throw new Error("missing approval id");
-          const answer = {};
-          if (typeof message.value === "string") answer.value = message.value;
-          if (typeof message.confirmed === "boolean") answer.confirmed = message.confirmed;
-          if (message.cancelled === true) answer.cancelled = true;
-          entry.rpc.respondExtension(message.id, answer);
+          entry.rpc.respondExtension(message.id, answerOf(message));
           ws.send(JSON.stringify({ type: "accepted", command: "approval" }));
           return;
         }

@@ -44,7 +44,7 @@ import {
 } from "../rows";
 import { MONO, SANS, SCALE, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem, ToolItem } from "../types";
-import { BrandMark, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
+import { BrandMark, GradientFill, Orb, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
 import {
   AgentsGlyph,
   CheckGlyph,
@@ -397,12 +397,14 @@ export function Thumbs({
 /** The user's message: images above, then a tinted bubble, both on the right. */
 function UserMessage({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
   const styles = useStyles(createStyles);
+  const colors = useColors();
   const hasText = item.text.trim() !== "";
   return (
     <View style={styles.userRow}>
       <Thumbs parts={item.images} machine={machine} size={hasText ? 96 : 140} end />
       {hasText ? (
         <View style={styles.bubble}>
+          <GradientFill colors={[colors.userA, colors.userB]} />
           <Text style={styles.bubbleText} selectable maxFontSizeMultiplier={SCALE.body}>
             {item.text.trim()}
           </Text>
@@ -419,7 +421,7 @@ function Caret(): ReactNode {
   return <Animated.Text style={[styles.caret, { opacity }]}>▍</Animated.Text>;
 }
 
-/** The reply: prose straight on the page, with no bubble. */
+/** The reply: a translucent bubble on the left; images above its prose. */
 function Reply({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
   const styles = useStyles(createStyles);
   const streaming = item.streaming === true;
@@ -427,7 +429,11 @@ function Reply({ item, machine }: { item: MessageItem; machine: Machine }): Reac
   return (
     <View style={styles.reply}>
       <Thumbs parts={item.images} machine={machine} />
-      {hasText ? <Markdown text={item.text} caret={streaming ? <Caret /> : undefined} /> : null}
+      {hasText ? (
+        <View style={styles.replyBubble}>
+          <Markdown text={item.text} caret={streaming ? <Caret /> : undefined} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -455,7 +461,7 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
     <View>
       <Pressable onPress={toggle} hitSlop={SLOP} style={styles.line} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={label}>
         <Lead open={open}>
-          <ThinkGlyph size={14} color={active ? colors.accentV : colors.fgFaint} />
+          {active ? <Orb size={15} /> : <ThinkGlyph size={14} color={colors.fgFaint} />}
         </Lead>
         {active ? (
           <ShimmerText text={label} style={styles.lineTitle} maxFontSizeMultiplier={SCALE.meta} />
@@ -611,35 +617,38 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const edit = stat !== undefined && /^\+\d+ −\d+$/.test(stat) ? stat.split(" ") : undefined;
   const title = toolTitle(tool);
   return (
-    <View>
+    <View style={running ? styles.toolCardRun : styles.toolCard}>
+      {running ? <GradientFill colors={[colors.accentV, colors.accentB]} radius={18} stroke={1.2} /> : null}
       <Pressable
         onPress={toggle}
         onLongPress={details}
         hitSlop={SLOP}
-        style={styles.line}
+        style={styles.toolLine}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={t("common.pair", { label: `${title} ${summary ?? ""}`.trim(), value: t(`step.status.${tool.status}`) })}
       >
-        <Lead open={open}>
-          <KindGlyph kind={kind} size={14} color={failed ? colors.err : colors.fgFaint} />
-        </Lead>
-        <Text style={styles.lineTitle} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
-          {title}
-        </Text>
-        {summary !== undefined ? (
-          <>
-            <View style={styles.sep} />
-            <Text style={failed ? styles.lineSummaryErr : styles.lineSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+        <View style={failed ? styles.tileErr : styles.tile}>
+          {running ? <GradientFill radius={11} /> : null}
+          <KindGlyph kind={kind} size={15} color={running ? "#ffffff" : failed ? colors.err : colors.tileFg} />
+        </View>
+        <View style={styles.toolText}>
+          {running ? (
+            <ShimmerText text={title} style={styles.toolTitle} maxFontSizeMultiplier={SCALE.meta} />
+          ) : (
+            <Text style={styles.toolTitle} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+              {title}
+            </Text>
+          )}
+          {summary !== undefined ? (
+            <Text style={failed ? styles.toolSummaryErr : styles.toolSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
               {summary}
             </Text>
-          </>
-        ) : (
-          <View style={styles.fill} />
-        )}
+          ) : null}
+        </View>
         {running ? (
           <View style={styles.statSlot}>
-            <Spinner size={10} color={colors.accentV} />
+            <Spinner size={11} color={colors.accentB} />
           </View>
         ) : failed ? (
           <View style={styles.badge}>
@@ -650,12 +659,18 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
           </View>
         ) : edit !== undefined ? (
           <Text style={styles.stat} maxFontSizeMultiplier={SCALE.ui}>
-            <Text style={open ? styles.statAdd : undefined}>{edit[0]}</Text>
-            <Text style={open ? styles.statRemove : undefined}>{edit[1]?.replace("−", " −")}</Text>
+            <Text style={styles.statAdd}>{edit[0]}</Text>
+            <Text style={styles.statRemove}>{edit[1]?.replace("−", " −")}</Text>
           </Text>
+        ) : open ? (
+          <ChevronUpGlyph size={14} color={colors.fgFaint} />
         ) : null}
       </Pressable>
-      {open ? <ToolBody tool={tool} cwd={cwd} onDetails={details} /> : null}
+      {open || (running && kind === "run") ? (
+        <View style={styles.toolBody}>
+          <ToolBody tool={tool} cwd={cwd} onDetails={details} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -935,18 +950,45 @@ function createStyles(c: Palette) {
     dividerElapsed: { ...meta, fontSize: 13.5, lineHeight: 24, color: c.fgGhost, fontVariant: ["tabular-nums"] as FontVariant[] },
     dividerChevron: { marginLeft: 4 },
 
-    userRow: { alignItems: "flex-end", gap: 8 },
+    userRow: { alignItems: "flex-end", gap: 8, paddingLeft: 48 },
     bubble: {
-      maxWidth: "82%",
+      maxWidth: "100%",
       paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderRadius: radius.xl,
-      backgroundColor: c.userBubble,
+      paddingVertical: 12,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderBottomLeftRadius: 24,
+      borderBottomRightRadius: 8,
+      borderWidth: 1,
+      borderColor: c.userBorder,
+      overflow: "hidden",
     },
     bubbleText: { fontFamily: SANS, fontSize: 15, lineHeight: 22, fontWeight: "400", color: c.fg },
 
     reply: { gap: 10 },
+    replyBubble: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      borderBottomRightRadius: 24,
+      borderBottomLeftRadius: 8,
+      borderWidth: 1,
+      borderColor: c.bubbleBorder,
+      backgroundColor: c.bubble,
+    },
     caret: { fontFamily: SANS, color: c.accentV },
+
+    toolCard: { borderRadius: 18, borderWidth: 1, borderColor: c.bubbleBorder, backgroundColor: c.card, overflow: "hidden", paddingBottom: 0 },
+    toolCardRun: { borderRadius: 18, backgroundColor: c.dark ? "#0b1418" : "#f1fbfc", overflow: "hidden" },
+    toolLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, paddingHorizontal: 10 },
+    tile: { width: 32, height: 32, borderRadius: 11, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
+    tileErr: { width: 32, height: 32, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.errSoft },
+    toolText: { flex: 1, minWidth: 0, gap: 1 },
+    toolTitle: { fontFamily: SANS, fontSize: 14, lineHeight: 19, fontWeight: "500", color: c.fg },
+    toolSummary: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
+    toolSummaryErr: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.err },
+    toolBody: { paddingHorizontal: 8, paddingBottom: 8, marginTop: -2 },
 
     line,
     lead: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },

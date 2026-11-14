@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
 import type { ModelOption } from "../types";
+import { levelLabel } from "../ompText";
 import { t } from "../i18n/index.ts";
 import { CheckGlyph } from "./icons";
 import { Group, Row, SectionHeader, Sheet } from "./ui";
@@ -53,9 +54,9 @@ function LevelChip({
       style={style}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      accessibilityLabel={t("model.levelA11y", { level })}
+      accessibilityLabel={t("model.levelA11y", { level: levelLabel(level) })}
     >
-      <Text style={active ? styles.levelTextOn : styles.levelText}>{level}</Text>
+      <Text style={active ? styles.levelTextOn : styles.levelText}>{levelLabel(level)}</Text>
     </Pressable>
   );
 }
