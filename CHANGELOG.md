@@ -4,6 +4,10 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.7.0
+
+Search sessions by what was said in them, fork a session or a message, a real live activity in the status bar, Sessions / Computers / Settings as tabs, messages that reach OMP mid-run, and a dark mode switch.
+
 - The in-app "island" capsule is gone. In its place, a real **live activity**: while a session runs or waits for you, one ongoing notification shows it, with a running clock, or "Approve · bash · npm test" while it waits; tapping it opens the session, and it disappears when nothing runs. On Android 16 it becomes a Live Update in the status-bar chip and on the lock screen (HyperOS, ColorOS and MagicOS show it in their islands) once you allow Live Updates for OMP (Settings → Live activity). It needs background notifications on, and this daemon version (`/events?live=1`).
 - Sessions, Computers and Settings are now three tabs under one tab bar, with the same large titles and grouped lists, instead of separate pages with a back button.
 - The chat no longer shows Send while a run started elsewhere (the terminal, another phone) is still going: it follows OMP's run start and end, not each turn's, so a message sent then is passed to OMP mid-run. If the computer runs an omp-mobile older than 0.6, which cannot pass it, the chat says so and keeps your text.
@@ -14,6 +18,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Fork a session: long-press it on the Sessions tab to fork the whole session, or long-press one of your messages in a chat (or tap the fork button under a reply) to fork from there. The fork is a new session that opens right away; the original file is only read, so a session a terminal omp holds can be forked without taking it over.
 
 ### 中文
+
+按会话内容搜索，分叉会话或从某条消息分叉，状态栏里真正的实时活动，会话 / 电脑 / 设置改为标签页，运行中发的消息能送达 OMP，以及深色模式开关。
 
 - 按会话里说过的内容搜索，而不只是标题：会话页的搜索框会让电脑在它上面所有的 OMP 会话文件里查找（标题和消息；不搜思考过程和工具输出），每条结果显示匹配到的那句消息，点开直接跳到那里。需要本版本的守护进程；旧版本下仍只按标题、目录和模型搜索。
 - 会话列表去掉了彩色首字母图标：只显示标题、目录和时间，等你处理时显示角标。
