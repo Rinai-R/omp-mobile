@@ -11,6 +11,7 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Settings → Appearance: Same as phone, Dark or Light. The app followed only the phone's setting until now, so with the phone in light mode there was no way to get the dark look.
 - Search finds sessions by what was said in them, not only by title: the search field on the Sessions tab asks the computer, which looks through every OMP session file on it (titles and messages; thinking and tool output are not searched), and each result shows the message that matched. Tapping it opens the session at that message. Needs this daemon version; with an older one the field searches titles, folders and models as before.
 - Fork a session: long-press it on the Sessions tab to fork the whole session, or long-press one of your messages in a chat (or tap the fork button under a reply) to fork from there. The fork is a new session that opens right away; the original file is only read, so a session a terminal omp holds can be forked without taking it over.
+
 ### 中文
 
 - 按会话里说过的内容搜索，而不只是标题：会话页的搜索框会让电脑在它上面所有的 OMP 会话文件里查找（标题和消息；不搜思考过程和工具输出），每条结果显示匹配到的那句消息，点开直接跳到那里。需要本版本的守护进程；旧版本下仍只按标题、目录和模型搜索。

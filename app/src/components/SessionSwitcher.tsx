@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -12,21 +12,17 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { SEARCH_FEATURE, daemonFeatures, knownFeatures, searchSessions } from "../api";
 import { machineLabel } from "../machines";
 import { summaryOf, type Probe } from "../probe";
 import { attentionCount, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
-import type { Machine, SearchResult, SessionSummary } from "../types";
+import type { Machine, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
 import { LiveDot } from "./brand";
 import { CloseGlyph, PlusGlyph, SearchGlyph } from "./icons";
-import { SearchResults, SessionGroups, useMachineSessions } from "./SessionList";
+import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch } from "./SessionList";
 import { sheetTransforms, useSheetMotion } from "./ui";
 
-/** How long typing pauses before the computer is searched, and the shortest query sent. */
-const SEARCH_DELAY_MS = 300;
-const SEARCH_MIN_CHARS = 2;
 
 interface Props {
   visible: boolean;
@@ -69,39 +65,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
   const groups = useMemo(() => groupSessions(sessions ?? [], Date.now(), query), [query, sessions]);
   const counts = useMemo(() => attentionCount(sessions ?? []), [sessions]);
 
-  const [canSearch, setCanSearch] = useState(false);
-  useEffect(() => {
-    if (!visible || selected === undefined) return undefined;
-    let live = true;
-    setCanSearch(knownFeatures(selected).includes(SEARCH_FEATURE));
-    void daemonFeatures(selected).then((features) => {
-      if (live && features.length > 0) setCanSearch(features.includes(SEARCH_FEATURE));
-    });
-    return () => {
-      live = false;
-    };
-  }, [selected, visible]);
-  /** The computer's answer for the query typed last; `null` while it is asked. */
-  const [results, setResults] = useState<SearchResult[] | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const asked = useRef(0);
-  const remote = canSearch && query.trim().length >= SEARCH_MIN_CHARS;
-  useEffect(() => {
-    if (!remote || selected === undefined) return undefined;
-    const ask = ++asked.current;
-    setResults(null);
-    setSearchError(null);
-    const timer = setTimeout(() => {
-      searchSessions(selected, query)
-        .then((found) => {
-          if (ask === asked.current) setResults(found);
-        })
-        .catch((cause: unknown) => {
-          if (ask === asked.current) setSearchError(cause instanceof Error ? cause.message : String(cause));
-        });
-    }, SEARCH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [query, remote, selected]);
+  const { remote, results, error: searchError } = useSessionSearch(selected, query, visible);
 
   return (
     <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>

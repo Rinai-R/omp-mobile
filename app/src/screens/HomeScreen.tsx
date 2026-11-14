@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FORK_FEATURE, answerRequest, createSession, daemonFeatures, deleteSession, forkSession, knownFeatures } from "../api";
 import { ApprovalWidget } from "../components/ApprovalWidget";
 import { LiveDot, PulseDot } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, ForkGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
-import { SessionGroups, useMachineSessions, useTranscriptSync } from "../components/SessionList";
+import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch, useTranscriptSync } from "../components/SessionList";
 import { haptic } from "../haptics";
 import { displayName, machineLabel } from "../machines";
 import { Banner, Button, ConfirmSheet, Field, Sheet } from "../components/ui";
@@ -32,7 +32,8 @@ interface Props {
   /** Every computer on the phone: one named like another is told apart by its address. */
   machines: readonly Machine[];
   probe: Probe | undefined;
-  onOpen: (machine: Machine, session: SessionSummary) => void;
+  /** `at`: the timestamp of the message a search matched, for the chat to open on. */
+  onOpen: (machine: Machine, session: SessionSummary, at?: number) => void;
   /** Open the computer picker (the computer card). */
   onPickMachine: () => void;
   /** How many sessions wait for an answer, for the tab bar's badge. */
@@ -86,6 +87,9 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
 
   const [query, setQuery] = useState("");
   const [segment, setSegment] = useState<Segment>("all");
+  // Title and message text, asked of the computer; an older daemon leaves the local title filter below.
+  const search = useSessionSearch(machine, query);
+  const found = useMemo(() => (search.results ?? []).filter(({ session }) => inSegment(session, segment)), [search.results, segment]);
   const groups = useMemo(
     () => groupSessions((sessions ?? []).filter((session) => inSegment(session, segment)), Date.now(), query),
     [sessions, segment, query],
@@ -309,7 +313,21 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
           </View>
         ) : null}
 
-        {sessions === undefined ? (
+        {search.remote ? (
+          search.results === null ? (
+            <View style={styles.empty}>
+              {search.error !== null ? <Text style={styles.emptyBody}>{search.error}</Text> : <ActivityIndicator color={colors.fgFaint} />}
+            </View>
+          ) : found.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={styles.emptyTitle}>{t("home.noMatch")}</Text>
+            </View>
+          ) : (
+            <View style={styles.results}>
+              <SearchResults results={found} onPress={(session, at) => onOpen(machine, session, at)} />
+            </View>
+          )
+        ) : sessions === undefined ? (
           error !== null ? (
             <View style={styles.empty}>
               <Text style={styles.emptyTitle}>{t("home.cantReach", { name: displayName(machine) })}</Text>
@@ -444,6 +462,7 @@ function createStyles(c: Palette) {
     segmentText: { ...segmentText, color: c.fgMuted },
     segmentTextOn: { ...segmentText, fontWeight: "600" },
     bannerWrap: { marginBottom: 12, marginHorizontal: 16, borderRadius: radius.md, overflow: "hidden" },
+    results: { marginHorizontal: 16, borderRadius: 14, overflow: "hidden", backgroundColor: c.group },
     skeleton: { marginTop: 24, marginHorizontal: 16, gap: 1, borderRadius: 14, overflow: "hidden" },
     skeletonRow: { height: 58, backgroundColor: c.group, opacity: 0.6 },
     empty: { alignItems: "center", paddingHorizontal: 36, paddingTop: 56 },

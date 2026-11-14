@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
-import { listSessions } from "../api";
+import { SEARCH_FEATURE, daemonFeatures, knownFeatures, listSessions, searchSessions } from "../api";
 import { age, folderOf, type SessionGroup } from "../sessionGroups";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { heldDetail } from "../takeover";
@@ -8,8 +8,8 @@ import { syncSessions } from "../sync";
 import { loadSessionList, saveSessionList } from "../transcripts";
 import type { Machine, SearchResult, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
-import { GradientFill, ShimmerText, Spinner } from "./brand";
-import { ChevronGlyph, ComputerGlyph, LockGlyph, QuestionGlyph, TerminalGlyph } from "./icons";
+import { ShimmerText, Spinner } from "./brand";
+import { ChevronGlyph } from "./icons";
 
 /**
  * A computer's sessions, as the phone last saw them while the daemon answers,
@@ -66,6 +66,54 @@ export function useMachineSessions(machine: Machine | undefined, active = true) 
   }, [active, machineId, refresh]);
 
   return { sessions, loading, error, refresh, setSessions };
+}
+
+/** How long typing pauses before the computer is searched, and the shortest query sent. */
+const SEARCH_DELAY_MS = 300;
+const SEARCH_MIN_CHARS = 2;
+
+/**
+ * Search a computer's sessions by title and message text (`session-search`).
+ * `remote` is false when its daemon predates the feature or the query is too
+ * short: then filter the list locally. `results` is null while the computer is asked.
+ */
+export function useSessionSearch(machine: Machine | undefined, query: string, active = true) {
+  const [canSearch, setCanSearch] = useState(() => machine !== undefined && knownFeatures(machine).includes(SEARCH_FEATURE));
+  useEffect(() => {
+    if (!active || machine === undefined) return undefined;
+    let live = true;
+    setCanSearch(knownFeatures(machine).includes(SEARCH_FEATURE));
+    void daemonFeatures(machine).then((features) => {
+      if (live && features.length > 0) setCanSearch(features.includes(SEARCH_FEATURE));
+    });
+    return () => {
+      live = false;
+    };
+    // A probe updates the machine object (lastSeen); only its address matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machine?.url, active]);
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const asked = useRef(0);
+  const remote = canSearch && query.trim().length >= SEARCH_MIN_CHARS;
+  useEffect(() => {
+    if (!remote || machine === undefined) return undefined;
+    const ask = ++asked.current;
+    setResults(null);
+    setError(null);
+    const timer = setTimeout(() => {
+      searchSessions(machine, query)
+        .then((found) => {
+          if (ask === asked.current) setResults(found);
+        })
+        .catch((cause: unknown) => {
+          if (ask === asked.current) setError(cause instanceof Error ? cause.message : String(cause));
+        });
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, remote, machine?.url]);
+  return { remote, results, error };
 }
 
 /** How often the home refreshes its list, and with it the cached transcripts, while the app is in the foreground. */
@@ -129,7 +177,6 @@ export function SessionRow({
   const running = session.status === "streaming";
   const waiting = (session.waiting ?? 0) > 0;
   const locked = session.openElsewhere === true;
-  const terminal = session.origin === "omp";
   const when = age(session.updatedAt);
   // A waiting session says so in its group and its badge; its detail stays the folder and the model.
   const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : when].filter(Boolean).join(" · ");
@@ -145,20 +192,6 @@ export function SessionRow({
       })}
       accessibilityState={{ selected: current }}
     >
-      <View style={[styles.tile, { backgroundColor: waiting ? colors.sysOrange : running ? "transparent" : terminal || locked ? colors.fgGhost : hueOf(session.cwd) }]}>
-        {waiting ? (
-          <QuestionGlyph size={16} color="#ffffff" />
-        ) : running ? (
-          <>
-            <GradientFill radius={8} />
-            <TerminalGlyph size={16} color="#ffffff" />
-          </>
-        ) : terminal || locked ? (
-          locked ? <LockGlyph size={14} color="#ffffff" /> : <ComputerGlyph size={16} color="#ffffff" />
-        ) : (
-          <Text style={styles.initial}>{initialOf(session.cwd)}</Text>
-        )}
-      </View>
       <View style={styles.text}>
         <Text style={locked ? styles.titleDim : styles.title} numberOfLines={1}>
           {session.title}
@@ -188,22 +221,6 @@ export function SessionRow({
       </View>
     </Pressable>
   );
-}
-
-/** The colours a folder's tile cycles through: iOS's own, so the list reads like Settings. */
-const HUES = ["#5e5ce6", "#0a84ff", "#30b0c7", "#34c759", "#ff9f0a", "#ff375f", "#bf5af2", "#ac8e68"];
-
-/** A folder's tile colour, the same every time it appears. */
-function hueOf(path: string): string {
-  let hash = 0;
-  for (const char of folderOf(path)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return HUES[hash % HUES.length] ?? "#5e5ce6";
-}
-
-/** The folder's first letter or digit, for its tile. */
-function initialOf(path: string): string {
-  const match = /[\p{L}\p{N}]/u.exec(folderOf(path));
-  return (match?.[0] ?? "·").toUpperCase();
 }
 
 /** Groups as labelled cards; `flat` drops the cards for use inside a sheet. */
@@ -285,11 +302,9 @@ function createStyles(c: Palette) {
   // Uppercased in JS and without letter spacing: Android clips the last glyph of such labels otherwise.
   const label = { fontFamily: SANS, fontSize: 13, lineHeight: 18, fontWeight: "400", color: c.fgFaint } as const;
   return {
-    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 58, paddingVertical: 10, paddingLeft: 14, paddingRight: 12 },
+    row: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 58, paddingVertical: 10, paddingLeft: 16, paddingRight: 12 },
     rowCurrent: { backgroundColor: c.selected },
     rowPressed: { backgroundColor: c.hover },
-    tile: { width: 32, height: 32, borderRadius: 8, overflow: "hidden", alignItems: "center", justifyContent: "center" },
-    initial: { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "600", color: "#ffffff" },
     text: { flex: 1, minWidth: 0, gap: 2 },
     title,
     titleDim: { ...title, color: c.fgFaint },
@@ -303,6 +318,6 @@ function createStyles(c: Palette) {
     labelAccent: { ...label, color: c.sysOrange },
     labelCount: label,
     card: { marginHorizontal: 16, borderRadius: 14, backgroundColor: c.group, overflow: "hidden" },
-    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: 58 },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: 16 },
   } as const;
 }
