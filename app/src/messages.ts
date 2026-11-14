@@ -259,6 +259,22 @@ function blank(item: MessageItem): boolean {
 }
 
 /**
+ * The user's message as the phone shows it the moment it is sent, before OMP
+ * echoes it back (over a relay that echo can take seconds): `local` until
+ * OMP's own copy replaces it.
+ */
+export function localUserMessage(text: string, images: ImagePart[] | undefined, now = Date.now()): MessageItem {
+  return { kind: "message", id: nextId("local"), role: "user", text, images: images?.length ? images : undefined, local: true, createdAt: now };
+}
+
+/** Drop the oldest local copy of a user message OMP has now sent back (same text). */
+export function dropEchoed(items: ChatItem[], text: string): ChatItem[] {
+  const echoed = text.trim();
+  const at = items.findIndex((entry) => entry.kind === "message" && entry.local === true && entry.text.trim() === echoed);
+  return at === -1 ? items : items.filter((_, index) => index !== at);
+}
+
+/**
  * Fold one OMP session event into the transcript.
  * Events are the same union `omp --mode rpc` emits; only the parts the native
  * UI renders are interpreted.
@@ -280,6 +296,12 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
       open: true,
       createdAt: typeof message.timestamp === "number" ? message.timestamp : Date.now(),
     };
+    if (item.role === "user") {
+      // OMP's copy takes the place (and row id) of the one the phone showed: no jump, no second entrance.
+      const echoed = text.trim();
+      const at = items.findIndex((entry) => entry.kind === "message" && entry.local === true && entry.text.trim() === echoed);
+      if (at !== -1) return items.map((entry, index) => (index === at ? { ...item, id: entry.id } : entry));
+    }
     return [...items.filter((entry) => entry.id !== item.id), item];
   }
   if (type === "message_update") {
@@ -347,7 +369,10 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     const keep =
       final.stop !== undefined ||
       (!blank(final) && !(role !== "assistant" && final.text.trim() === "" && final.images === undefined));
-    if (at === -1) return keep ? [...items, final] : items;
+    if (at === -1) {
+      const kept = role === "user" ? dropEchoed(items, final.text) : items;
+      return keep ? [...kept, final] : kept;
+    }
     if (!keep) return items.filter((_, index) => index !== at);
     return items.map((entry, index) => (index === at ? final : entry));
   }

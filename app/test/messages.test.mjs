@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { applyEvent, snapshotItems, textOf, toolSummary } from "../src/messages.ts";
+import { applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary } from "../src/messages.ts";
 
 const user = { role: "user", content: [{ type: "text", text: "List the files" }] };
 const toolTurn = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }] };
@@ -333,4 +333,21 @@ test("thinking deltas are not doubled either", () => {
   assert.equal(items[0].thinking, "Let me count");
   items = applyEvent(items, { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "." } });
   assert.equal(items[0].thinking, "Let me count.");
+});
+
+test("a message shown on send is replaced in place by OMP's copy; a refused one is dropped", () => {
+  const earlier = { kind: "message", id: "a1", role: "assistant", text: "earlier", open: false };
+  const sent = localUserMessage("List the files", undefined);
+  let items = applyEvent([earlier, sent], { type: "message_start", message: user });
+  assert.equal(items.length, 2, "not shown twice");
+  assert.equal(items[1].id, sent.id, "the row keeps its id: no second entrance");
+  assert.equal(items[1].local, undefined);
+  items = applyEvent(items, { type: "message_end", message: user });
+  assert.deepEqual(items.map((item) => [item.id, item.text, item.open]), [["a1", "earlier", false], [sent.id, "List the files", false]]);
+  // Another text from the terminal does not take a local copy's place.
+  const other = localUserMessage("Something else", undefined);
+  items = applyEvent([...items, other], { type: "message_start", message: user });
+  assert.ok(items.some((item) => item.id === other.id && item.local === true));
+  // The daemon refused it: the copy goes, the composer gets the text back.
+  assert.equal(dropEchoed(items, "Something else").some((item) => item.id === other.id), false);
 });

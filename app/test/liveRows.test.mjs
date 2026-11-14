@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { keepLive, prependHistory } from "../src/liveRows.ts";
-import { applyEvent, snapshotItems } from "../src/messages.ts";
+import { applyEvent, localUserMessage, snapshotItems } from "../src/messages.ts";
 
 /** A cached copy and its tail, as a long chat opens on them. */
 function cachedTailRows() {
@@ -63,4 +63,14 @@ test("a snapshot mid-turn keeps the open reply and a running tool's output; afte
   assert.deepEqual(keepLive(rebuilt, items, false), rebuilt, "not streaming: nothing stays open");
   const ended = applyEvent(items, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Done" }] } });
   assert.equal(keepLive(rebuilt, ended, true).some((item) => item.kind === "message" && item.text === "Done"), false, "an ended message is the snapshot's to bring");
+});
+
+test("a snapshot keeps a message sent from here until the transcript holds it", () => {
+  const sent = localUserMessage("Run the tests", undefined);
+  const before = snapshotItems([{ role: "user", content: "Earlier" }], 0);
+  assert.deepEqual(keepLive(before, [...before, sent], false).map((item) => item.text), ["Earlier", "Run the tests"]);
+  const after = snapshotItems([{ role: "user", content: "Earlier" }, { role: "user", content: "Run the tests" }], 0);
+  const merged = keepLive(after, [...before, sent], false);
+  assert.deepEqual(merged.map((item) => item.text), ["Earlier", "Run the tests"], "OMP's copy, not both");
+  assert.equal(merged.some((item) => item.local === true), false);
 });

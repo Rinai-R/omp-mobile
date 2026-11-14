@@ -1,12 +1,15 @@
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { SUBAGENTS_FEATURE, knownFeatures } from "../api";
 import { editDiff } from "../diff";
 import { resultText } from "../messages";
 import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
+import { taskNames } from "../subagents";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
-import type { Machine } from "../types";
+import type { Machine, Subagent } from "../types";
 import { t } from "../i18n/index.ts";
 import { Markdown } from "./Markdown";
+import { SubagentList, SubagentScreen } from "./Subagents";
 import { KindGlyph, Thumbs } from "./Transcript";
 import { Sheet } from "./ui";
 
@@ -39,13 +42,24 @@ export function ToolSheet({
   step,
   machine,
   cwd,
+  sessionId,
+  subagentParent = null,
   onClose,
 }: {
   step: Step | null;
   machine: Machine;
   cwd: string;
+  /** The session the step is in: a `task` call then lists its subagents (`subagents`). */
+  sessionId?: string;
+  /** The subagent whose transcript holds the step; null for the session's own. */
+  subagentParent?: string | null;
   onClose: () => void;
 }): ReactNode {
+  const [subagent, setSubagent] = useState<Subagent | null>(null);
+  // A closed sheet takes the subagent it opened with it.
+  useEffect(() => {
+    if (step === null) setSubagent(null);
+  }, [step]);
   const styles = useStyles(createStyles);
   const colors = useColors();
   const { height } = useWindowDimensions();
@@ -83,6 +97,17 @@ export function ToolSheet({
               {stat !== undefined ? ` · ${stat}` : tool.status === "running" ? ` · ${t("step.status.running")}` : ""}
             </Text>
           </View>
+          {sessionId !== undefined && tool.name === "task" && knownFeatures(machine).includes(SUBAGENTS_FEATURE) ? (
+            <SubagentList
+              machine={machine}
+              sessionId={sessionId}
+              parent={subagentParent}
+              toolCallId={tool.id}
+              names={taskNames(tool.args)}
+              running={tool.status === "running"}
+              onOpen={setSubagent}
+            />
+          ) : null}
           {command !== undefined ? (
             // The `$` says it is the command: no label over it, nor over the output that follows it.
             <Block wrap>
@@ -145,13 +170,25 @@ export function ToolSheet({
         </>
       ),
     };
-  }, [colors, cwd, machine, step, styles]);
+  }, [colors, cwd, machine, sessionId, step, styles, subagentParent]);
 
   return (
     <Sheet visible={step !== null} title={content?.title ?? ""} onClose={onClose} scroll={false}>
       <ScrollView style={{ maxHeight: height * 0.72 }} contentContainerStyle={styles.scroll}>
         {content?.body}
       </ScrollView>
+      {sessionId !== undefined ? (
+        <SubagentScreen
+          machine={machine}
+          sessionId={sessionId}
+          subagent={subagent}
+          cwd={cwd}
+          onClose={() => setSubagent(null)}
+          renderStep={(inner, close, parent) => (
+            <ToolSheet step={inner} machine={machine} cwd={cwd} sessionId={sessionId} subagentParent={parent} onClose={close} />
+          )}
+        />
+      ) : null}
     </Sheet>
   );
 }

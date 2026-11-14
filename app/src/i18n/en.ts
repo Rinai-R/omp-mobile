@@ -76,6 +76,7 @@ export const en = {
   "home.widget.failed": "Could not answer: {error}",
 
   // Chat
+  "chat.sending": "Sending…",
   "chat.steerNeedsUpdate": "OMP is still working, and the omp-mobile on your computer is too old to pass a message to it mid-run. Update it (omp plugin upgrade omp-mobile, or npm i -g omp-mobile), or send again when it finishes.",
   "chat.failure.gone.title": "This session is gone",
   "chat.failure.terminal.title": "Open in a terminal",
@@ -127,6 +128,8 @@ export const en = {
   "composer.modelLevelA11y": "Model {model}, thinking {level}. Change",
   "composer.contextA11y": "Context {percent} percent used",
   "composer.queued": "{count} queued",
+  "composer.queuedLabel": "Queued",
+  "composer.queuedMore": "+{count} more queued",
 
   // OMP's questions
   "approval.no": "No",
@@ -417,6 +420,16 @@ export const en = {
   "tool.error": "Error",
   "tool.output": "Output",
   "tool.moreLines": { one: "… {count} more line", other: "… {count} more lines" },
+
+  // Subagents a task call started
+  "subagents.title": "Subagents",
+  "subagents.starting": "Starting subagents…",
+  "subagents.empty": "No messages yet",
+  "subagents.messages": { one: "{count} message", other: "{count} messages" },
+  "subagents.status.running": "Running",
+  "subagents.status.completed": "Done",
+  "subagents.status.failed": "Failed",
+  "subagents.status.aborted": "Stopped",
 
   // Notices the app writes into the transcript
   "notice.compacting": "Compacting the conversation…",

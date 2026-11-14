@@ -75,6 +75,7 @@ export const zhCN: Record<Key, Message> = {
   "home.widget.failed": "无法回复：{error}",
 
   // Chat
+  "chat.sending": "发送中…",
   "chat.steerNeedsUpdate": "OMP 还在运行，而电脑上的 omp-mobile 版本太旧，不能在运行中插话。请更新它（omp plugin upgrade omp-mobile，或 npm i -g omp-mobile），或等它跑完再发。",
   "chat.failure.gone.title": "这个会话已不存在",
   "chat.failure.terminal.title": "已在终端中打开",
@@ -126,6 +127,8 @@ export const zhCN: Record<Key, Message> = {
   "composer.modelLevelA11y": "模型 {model}，思考等级 {level}。点按更改",
   "composer.contextA11y": "上下文已用 {percent}%",
   "composer.queued": "{count}条排队中",
+  "composer.queuedLabel": "排队中",
+  "composer.queuedMore": "另有 {count} 条排队",
 
   // OMP's questions
   "approval.no": "否",
@@ -416,6 +419,16 @@ export const zhCN: Record<Key, Message> = {
   "tool.error": "错误",
   "tool.output": "输出",
   "tool.moreLines": "… 还有 {count} 行",
+
+  // 任务调用启动的子代理
+  "subagents.title": "子代理",
+  "subagents.starting": "正在启动子代理…",
+  "subagents.empty": "还没有消息",
+  "subagents.messages": "{count} 条消息",
+  "subagents.status.running": "运行中",
+  "subagents.status.completed": "已完成",
+  "subagents.status.failed": "失败",
+  "subagents.status.aborted": "已停止",
 
   // Notices the app writes into the transcript
   "notice.compacting": "正在压缩对话…",

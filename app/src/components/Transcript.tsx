@@ -421,7 +421,8 @@ function UserMessage({ item, machine }: { item: MessageItem; machine: Machine })
   const action = useContext(MessageActionContext);
   const hasText = item.text.trim() !== "";
   // The actions offer Copy, so the bubble gives up text selection, which would take the long press.
-  const actionable = action !== undefined && item.createdAt !== undefined;
+  // Not until OMP has it: a fork from here needs OMP's copy of the message.
+  const actionable = action !== undefined && item.createdAt !== undefined && item.local !== true;
   return (
     <View style={styles.userRow}>
       <Thumbs parts={item.images} machine={machine} size={hasText ? 96 : 140} end />
@@ -429,7 +430,7 @@ function UserMessage({ item, machine }: { item: MessageItem; machine: Machine })
         <Pressable
           onLongPress={actionable ? () => action(item) : undefined}
           disabled={!actionable}
-          style={styles.bubble}
+          style={item.local === true ? [styles.bubble, styles.bubbleSending] : styles.bubble}
           accessibilityHint={actionable ? t("fork.messageHint") : undefined}
         >
           <GradientFill colors={[colors.userA, colors.userB]} />
@@ -438,6 +439,7 @@ function UserMessage({ item, machine }: { item: MessageItem; machine: Machine })
           </Text>
         </Pressable>
       ) : null}
+      {item.local === true ? <Text style={styles.sending}>{item.queued === true ? t("composer.queuedLabel") : t("chat.sending")}</Text> : null}
     </View>
   );
 }
@@ -991,6 +993,8 @@ function createStyles(c: Palette) {
     dividerChevron: { marginLeft: 4 },
 
     userRow: { alignItems: "flex-end", gap: 8, paddingLeft: 48 },
+    bubbleSending: { opacity: 0.7 },
+    sending: { fontFamily: SANS, fontSize: 11.5, lineHeight: 15, color: c.fgFaint, marginTop: -4, marginRight: 6 },
     bubble: {
       maxWidth: "100%",
       paddingHorizontal: 16,

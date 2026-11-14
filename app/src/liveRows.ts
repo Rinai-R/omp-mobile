@@ -12,6 +12,13 @@ function isLive(item: ChatItem): boolean {
   return (item.kind === "message" && item.open === true) || (item.kind === "tool" && item.status === "running");
 }
 
+/** A message the phone sent that the transcript does not hold yet (matched by text). */
+function unechoed(item: ChatItem, rebuilt: readonly ChatItem[]): boolean {
+  if (item.kind !== "message" || item.local !== true) return false;
+  const text = item.text.trim();
+  return !rebuilt.some((entry) => entry.kind === "message" && entry.role === "user" && entry.local !== true && entry.text.trim() === text);
+}
+
 /**
  * The older part of the copy (the rows of the messages before the tail) put
  * above the rows on screen. The rows on screen stay exactly as they are,
@@ -31,6 +38,12 @@ export function prependHistory(current: readonly ChatItem[], older: readonly Cha
  * whole truth (a turn that ended while the link was down must not stay open).
  */
 export function keepLive(rebuilt: readonly ChatItem[], current: readonly ChatItem[], streaming: boolean): ChatItem[] {
+  // What the user just sent stays until the transcript has it, streaming or not.
+  const sent = current.filter((item) => unechoed(item, rebuilt));
+  return [...keepRunning(rebuilt, current, streaming), ...sent];
+}
+
+function keepRunning(rebuilt: readonly ChatItem[], current: readonly ChatItem[], streaming: boolean): ChatItem[] {
   if (!streaming) return [...rebuilt];
   const live = new Map(current.filter(isLive).map((item) => [item.id, item]));
   if (live.size === 0) return [...rebuilt];
