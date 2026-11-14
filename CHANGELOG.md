@@ -10,11 +10,13 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - The Sessions tab opens on the computer instead of a large "Sessions" title: its name, whether it is online, and the switcher behind it; the settings gear at the top is gone (Settings is a tab). Computers and Settings use the same smaller title.
 - Settings → Appearance: Same as phone, Dark or Light. The app followed only the phone's setting until now, so with the phone in light mode there was no way to get the dark look.
 - Search finds sessions by what was said in them, not only by title: the search field on the Sessions tab asks the computer, which looks through every OMP session file on it (titles and messages; thinking and tool output are not searched), and each result shows the message that matched. Tapping it opens the session at that message. Needs this daemon version; with an older one the field searches titles, folders and models as before.
+- Session rows lose their coloured letter tiles: title, folder and age, with a badge when a session waits for you.
 - Fork a session: long-press it on the Sessions tab to fork the whole session, or long-press one of your messages in a chat (or tap the fork button under a reply) to fork from there. The fork is a new session that opens right away; the original file is only read, so a session a terminal omp holds can be forked without taking it over.
 
 ### 中文
 
 - 按会话里说过的内容搜索，而不只是标题：会话页的搜索框会让电脑在它上面所有的 OMP 会话文件里查找（标题和消息；不搜思考过程和工具输出），每条结果显示匹配到的那句消息，点开直接跳到那里。需要本版本的守护进程；旧版本下仍只按标题、目录和模型搜索。
+- 会话列表去掉了彩色首字母图标：只显示标题、目录和时间，等你处理时显示角标。
 - 分叉会话：在会话页长按会话可分叉整个会话；在聊天里长按你发的一条消息（或点回复下方的分叉按钮）可从那里分叉。分叉出的新会话会立即打开；原会话文件只读不写，所以终端里 omp 正占用的会话也能分叉，无需接管。
 - 会话页顶部不再是大号"会话"标题，改为显示当前电脑：名称、是否在线，点它切换电脑；去掉了右上角的齿轮（设置已是标签页）。电脑和设置页使用同样较小的标题。
 - 设置 → 外观：跟随系统、深色或浅色。之前 App 只跟随手机设置，手机是浅色模式时就没法用深色外观。
