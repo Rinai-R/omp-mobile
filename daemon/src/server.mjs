@@ -21,6 +21,8 @@ import { AttentionTracker, serveEvents } from "./attention.mjs";
 import { listOmpSessions, oneLine, promptTitle, sessionOwners } from "./omp-sessions.mjs";
 import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
 import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
+import { SessionSearchIndex, matchOf, rankRecords, searchTokens, sessionFilesUnder } from "./session-search.mjs";
+import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
 import { DEFAULT_RELAY, runRelayCli } from "./relay-control.mjs";
 
@@ -108,9 +110,13 @@ export function promptImages(value) {
  * `heartbeat`: session sockets get a `ping` frame every 20 s, so the app can
  * treat a silent link as gone; `transcript-sync`: a session socket's `since`/`last`
  * ask for a delta snapshot (`from`, `total`), and `GET /sessions/:id/transcript`
- * answers the same without starting an omp.
+ * answers the same without starting an omp; `session-search`: `GET /sessions/search?q=`
+ * finds sessions by title and message text; `fork`: `POST /sessions/:id/fork`
+ * starts a new session from a whole session or from one of its messages.
  */
-const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync"];
+const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork"];
+/** Search results a phone is sent at most. */
+const SEARCH_LIMIT = 50;
 /** Who a phone continues a session on, as the terminal it leaves is told. */
 const DEFAULT_DEVICE = "OMP Mobile";
 /** Close code after an `open_failed` frame: the session socket opened only to say why the session could not. */
@@ -753,6 +759,13 @@ class Daemon {
     this.ompSessions = new Map();
     /** The last full scan of OMP's session directory, reused within `SESSION_SCAN_TTL_MS`. */
     this.sessionScan = { at: 0, list: /** @type {import("./omp-sessions.mjs").OmpSession[]} */ ([]), pending: undefined };
+    /** What each session file holds for a search, kept while the file is unchanged. */
+    this.searchIndex = new SessionSearchIndex();
+    /**
+     * Sessions a search found past the newest `OMP_SESSION_LIMIT` the list
+     * shows, so the phone can open or fork a result. @type {Map<string, import("./omp-sessions.mjs").OmpSession>}
+     */
+    this.searchFound = new Map();
     /** The last `lsof` of the owner locks, pending or settled, reused within `OWNERS_TTL_MS`. */
     this.ownerLookup = { at: 0, owners: /** @type {Promise<Map<string, number> | undefined> | undefined} */ (undefined) };
     /** @type {ReturnType<typeof setInterval> | undefined} */
@@ -894,6 +907,23 @@ class Daemon {
     try {
       if (url.pathname === "/sessions" && req.method === "GET") {
         sendJson(res, 200, { sessions: await this.listSessions() });
+        return;
+      }
+      // Before `/sessions/:id`: "search" is not a session id.
+      if (url.pathname === "/sessions/search" && req.method === "GET") {
+        const limit = Math.min(SEARCH_LIMIT, Math.max(1, Number(url.searchParams.get("limit")) || SEARCH_LIMIT));
+        sendJson(res, 200, { results: await this.searchSessions(url.searchParams.get("q") ?? "", limit) });
+        return;
+      }
+      const fork = /^\/sessions\/([^/]+)\/fork$/.exec(url.pathname);
+      if (fork !== null && req.method === "POST") {
+        const body = await readBody(req);
+        if (body.at !== undefined && !isForkPoint(body.at)) {
+          sendJson(res, 400, { error: "at must be {role: user|assistant, timestamp}" });
+          return;
+        }
+        const entry = await this.forkSession(decodeURIComponent(fork[1]), body.at);
+        sendJson(res, 201, { session: entry.summary() });
         return;
       }
       if (url.pathname === "/sessions" && req.method === "POST") {
@@ -1043,7 +1073,7 @@ class Daemon {
   transcript(id, held) {
     const live = this.sessions.get(id);
     if (live !== undefined && !live.closed) return live.snapshot(held);
-    const known = this.registry.get(id)?.sessionFile ?? this.ompSessions.get(id)?.sessionFile;
+    const known = this.known(id)?.sessionFile;
     const saved = this.transcripts.read(id, typeof known === "string" ? known : undefined);
     if (saved === undefined) throw httpError(404, "not cached");
     return deltaBody(saved, held);
@@ -1091,7 +1121,7 @@ class Daemon {
   }
 
   async resume(id) {
-    const stored = this.registry.get(id) ?? this.ompSessions.get(id);
+    const stored = this.known(id);
     if (stored === undefined || typeof stored.sessionFile !== "string") throw httpError(404, "unknown session");
     if (!existsSync(stored.sessionFile)) throw httpError(410, "session file is gone");
     // A second omp on the same file would fork it into a new one; the session
@@ -1159,8 +1189,8 @@ class Daemon {
     const live = this.sessions.get(id);
     if (live !== undefined && !live.closed) return { ...live.snapshot(), takeover: { pid: null, via: "live", waitedMs: 0, busy: false, forks: [] } };
     // The phone may take over a session listed before this daemon started.
-    if (!this.registry.has(id) && !this.ompSessions.has(id)) await this.listSessions();
-    const stored = this.registry.get(id) ?? this.ompSessions.get(id);
+    if (this.known(id) === undefined) await this.listSessions();
+    const stored = this.known(id);
     if (stored === undefined || typeof stored.sessionFile !== "string") throw httpError(404, "unknown session");
     if (!existsSync(stored.sessionFile)) throw httpError(410, "session file is gone");
     const owners = await this.owners();
@@ -1190,11 +1220,93 @@ class Daemon {
     return { ...entry.snapshot(), takeover: outcome };
   }
 
-  async createSession(cwd) {
+  /** What this daemon knows of a session it does not run: its own, OMP's listed ones, then search results. */
+  known(id) {
+    return this.registry.get(id) ?? this.ompSessions.get(id) ?? this.searchFound.get(id);
+  }
+
+  /**
+   * Sessions whose title or message text holds every word of `query` (see
+   * `session-search.mjs`), each with why it matched. Covers every session
+   * file under OMP's session root, not only the newest the list shows, and
+   * the files of this daemon's own sessions wherever they are kept.
+   * @param {string} query
+   * @param {number} limit
+   */
+  async searchSessions(query, limit) {
+    const tokens = searchTokens(query);
+    if (tokens.length === 0) return [];
+    const [listed, files] = await Promise.all([this.listSessions(), sessionFilesUnder(join(this.options.ompHome, "agent", "sessions"))]);
+    for (const session of listed) if (typeof session.sessionFile === "string") files.push(session.sessionFile);
+    const ranked = rankRecords(await this.searchIndex.records(files), query).slice(0, limit);
+    const byId = new Map(listed.map((session) => [session.id, session]));
+    const owners = ranked.some((record) => !byId.has(record.id)) ? await this.owners() : undefined;
+    return Promise.all(
+      ranked.map(async (record) => {
+        let session = byId.get(record.id);
+        if (session === undefined) {
+          const found = { id: record.id, title: record.title, cwd: record.cwd, createdAt: record.createdAt, updatedAt: record.updatedAt, size: 0, sessionFile: record.sessionFile };
+          this.searchFound.set(record.id, found);
+          session = { ...found, status: "idle", origin: "omp" };
+          const pid = owners?.get(record.id);
+          if (pid !== undefined) session = { ...session, openElsewhere: true, owner: await this.ownerOf(pid, record.sessionFile) };
+        }
+        return { session, match: matchOf(record, tokens) };
+      }),
+    );
+  }
+
+  /**
+   * Start a new session from `id`: all of it, or up to the message `at` (see
+   * `fork.mjs`). OMP's `--fork` only reads the source, so a session another
+   * omp holds (a terminal) or that this daemon runs is forked as it is, with
+   * no takeover and nothing written to it. The fork lands beside its source.
+   * @param {string} id
+   * @param {import("./fork.mjs").ForkPoint} [at]
+   */
+  async forkSession(id, at) {
+    const live = this.sessions.get(id);
+    let source = live !== undefined && typeof live.state?.sessionFile === "string" ? { sessionFile: live.state.sessionFile, cwd: live.cwd } : undefined;
+    if (source === undefined) {
+      if (this.known(id) === undefined) await this.listSessions();
+      const stored = this.known(id);
+      if (stored !== undefined && typeof stored.sessionFile === "string") source = { sessionFile: stored.sessionFile, cwd: stored.cwd };
+    }
+    if (source === undefined) throw httpError(404, "unknown session");
+    if (!existsSync(source.sessionFile)) throw httpError(410, "session file is gone");
+    const cut = at === undefined ? undefined : await writeCut(source.sessionFile, at);
+    if (at !== undefined && cut === undefined) throw httpError(404, "That message is not in the session file yet.");
+    try {
+      const cwd = ensureWorkingDirectory(source.cwd);
+      const entry = await this.startSession(cwd, { fork: cut?.file ?? source.sessionFile, sessionDir: dirname(source.sessionFile) }, async (started) => {
+        const file = started.state?.sessionFile;
+        if (started.id === id || typeof file !== "string" || file === source.sessionFile) throw new Error("omp did not fork the session");
+        if (cut !== undefined) await copyArtifacts(source.sessionFile, file);
+        // Its messages are the source's, but the fork is new: it lists as just used, not as old as its last message.
+        started.updatedAt = Date.now();
+      });
+      return entry;
+    } finally {
+      await cut?.remove();
+    }
+  }
+
+  createSession(cwd) {
+    return this.startSession(cwd, { sessionDir: this.options.sessionDir || undefined });
+  }
+
+  /**
+   * Start an omp for a new session (fresh or forked) and register it.
+   * `ready` runs before the session is registered; a failure there closes the omp.
+   * @param {string} cwd
+   * @param {{sessionDir?: string, fork?: string}} spawn
+   * @param {(entry: SessionEntry) => Promise<void>} [ready]
+   */
+  async startSession(cwd, spawn, ready) {
     const rpc = new RpcSession({
       cwd,
       ompBin: this.options.omp,
-      sessionDir: this.options.sessionDir || undefined,
+      ...spawn,
       autoApprove: this.options.autoApprove,
       extraArgs: this.options.approvalMode ? ["--approval-mode", this.options.approvalMode] : [],
     });
@@ -1204,6 +1316,7 @@ class Daemon {
       entry.blobDir = this.blobDir;
       await entry.hydrate();
       if (entry.id === "") throw new Error("omp returned no session id");
+      await ready?.(entry);
       entry.idleSince = Date.now();
       entry.onChange = (changed) => this.remember(changed);
       entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);

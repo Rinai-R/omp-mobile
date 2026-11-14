@@ -53,6 +53,7 @@ import {
   CloseGlyph,
   CopyGlyph,
   FileGlyph,
+  ForkGlyph,
   GlobeGlyph,
   ListGlyph,
   PencilGlyph,
@@ -105,12 +106,29 @@ const ShiftContext = createContext<(delta: number) => void>(() => undefined);
 /** Marks the row around a control: its next change of height came from a tap. */
 const ArmContext = createContext<() => void>(() => undefined);
 
+/**
+ * What a long press on a message opens (fork from it, copy it); undefined
+ * where the daemon cannot fork, and the user's bubble stays selectable text.
+ */
+const MessageActionContext = createContext<((item: MessageItem) => void) | undefined>(undefined);
+
 function useArm(): () => void {
   return useContext(ArmContext);
 }
 
-/** Holds which turns are folded, for the rows under it; `onShift` keeps a tapped row in place. */
-export function TranscriptFolds({ children, onShift }: { children: ReactNode; onShift?: (delta: number) => void }): ReactNode {
+/**
+ * Holds which turns are folded, for the rows under it; `onShift` keeps a
+ * tapped row in place; `onMessageAction` opens a message's actions.
+ */
+export function TranscriptFolds({
+  children,
+  onShift,
+  onMessageAction,
+}: {
+  children: ReactNode;
+  onShift?: (delta: number) => void;
+  onMessageAction?: (item: MessageItem) => void;
+}): ReactNode {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((turn: string) => {
     setFolded((current) => {
@@ -124,7 +142,9 @@ export function TranscriptFolds({ children, onShift }: { children: ReactNode; on
   const shift = useCallback((delta: number) => onShift?.(delta), [onShift]);
   return (
     <ShiftContext.Provider value={shift}>
-      <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+      <MessageActionContext.Provider value={onMessageAction}>
+        <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+      </MessageActionContext.Provider>
     </ShiftContext.Provider>
   );
 }
@@ -162,7 +182,7 @@ function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps)
       body = <ErrorLine item={row.item} />;
       break;
     case "tail":
-      body = <TurnTail text={row.text} at={row.at} />;
+      body = <TurnTail text={row.text} at={row.at} last={row.last} />;
       break;
     case "notice":
       body = <NoticeLine item={row.item} />;
@@ -212,7 +232,7 @@ function sameRow(a: Row, b: Row): boolean {
     }
     case "tail": {
       const other = b as typeof a;
-      return a.text === other.text && a.at === other.at;
+      return a.text === other.text && a.at === other.at && a.last === other.last;
     }
     default:
       return a.item === (b as typeof a).item;
@@ -394,19 +414,27 @@ export function Thumbs({
   );
 }
 
-/** The user's message: images above, then a tinted bubble, both on the right. */
+/** The user's message: images above, then a tinted bubble, both on the right. A long press opens its actions. */
 function UserMessage({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
   const styles = useStyles(createStyles);
+  const action = useContext(MessageActionContext);
   const hasText = item.text.trim() !== "";
+  // The actions offer Copy, so the bubble gives up text selection, which would take the long press.
+  const actionable = action !== undefined && item.createdAt !== undefined;
   return (
     <View style={styles.userRow}>
       <Thumbs parts={item.images} machine={machine} size={hasText ? 96 : 140} end />
       {hasText ? (
-        <View style={styles.bubble}>
-          <Text style={styles.bubbleText} selectable maxFontSizeMultiplier={SCALE.body}>
+        <Pressable
+          onLongPress={actionable ? () => action(item) : undefined}
+          disabled={!actionable}
+          style={styles.bubble}
+          accessibilityHint={actionable ? t("fork.messageHint") : undefined}
+        >
+          <Text style={styles.bubbleText} selectable={!actionable} maxFontSizeMultiplier={SCALE.body}>
             {item.text.trim()}
           </Text>
-        </View>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -862,11 +890,12 @@ function ErrorLine({ item }: { item: MessageItem }): ReactNode {
   );
 }
 
-/** Under a finished turn: copy the reply, and the time it ended. */
-function TurnTail({ text, at }: { text: string; at: number | undefined }): ReactNode {
+/** Under a finished turn: copy the reply, fork from it (where the daemon can), and the time it ended. */
+function TurnTail({ text, at, last }: { text: string; at: number | undefined; last: MessageItem | undefined }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [copied, copy] = useCopy(text);
+  const action = useContext(MessageActionContext);
   return (
     <View style={styles.tail}>
       <Pressable
@@ -878,6 +907,17 @@ function TurnTail({ text, at }: { text: string; at: number | undefined }): React
       >
         {copied ? <CheckGlyph size={15} color={colors.ok} /> : <CopyGlyph size={15} color={colors.fgFaint} />}
       </Pressable>
+      {action !== undefined && last?.createdAt !== undefined ? (
+        <Pressable
+          onPress={() => action(last)}
+          hitSlop={8}
+          style={({ pressed }) => [styles.tailButton, pressed && styles.pressed]}
+          accessibilityRole="button"
+          accessibilityLabel={t("fork.here")}
+        >
+          <ForkGlyph size={15} color={colors.fgFaint} />
+        </Pressable>
+      ) : null}
       {at !== undefined ? (
         <Text style={styles.tailTime} maxFontSizeMultiplier={SCALE.ui}>
           {clockTime(at)}

@@ -18,6 +18,7 @@ import {
   toolTitle,
   turnDuration,
   turnLabel,
+  rowAt,
 } from "../src/rows.ts";
 
 const user = (id, text, extra = {}) => ({ kind: "message", id, role: "user", text, ...extra });
@@ -230,4 +231,27 @@ test("a thought's row names how long it ran, in either language", async () => {
   assert.equal(thoughtLabel(12_300), "思考了 12 秒");
   assert.equal(thoughtLabel(83_000), "思考了 1 分 23 秒");
   setLanguage("en");
+});
+
+test("a finished turn's tail carries its last answer, where a fork from the turn cuts", () => {
+  const rows = layoutRows([user("u1", "Hi", { createdAt: 1 }), reply("r1", "One.", { createdAt: 2 }), tool("t1", "read", { path: "/a" }), reply("r2", "Two.", { createdAt: 4 })]);
+  const tail = rows.find((row) => row.kind === "tail");
+  assert.equal(tail.last.id, "r2");
+});
+
+test("a search hit lands on its message's row, else the last row before it, in either order", () => {
+  const rows = layoutRows([
+    user("u1", "Fix it", { createdAt: 100 }),
+    reply("r1", "", { thinking: "look", createdAt: 110 }),
+    tool("t1", "read", { path: "/a.ts", startedAt: 120 }),
+    reply("r2", "Done.", { createdAt: 130 }),
+    user("u2", "Thanks", { createdAt: 200 }),
+  ]);
+  const id = (index) => rows[index].id;
+  assert.equal(id(rowAt(rows, 100)), "u1");
+  assert.equal(id(rowAt(rows, 130)), "r2");
+  assert.equal(id(rowAt(rows, 125)), "act:r1", "a match in a folded step: its activity row");
+  assert.equal(rowAt(rows, 50), -1);
+  const inverted = [...rows].reverse();
+  assert.equal(inverted[rowAt(inverted, 200)].id, "u2");
 });

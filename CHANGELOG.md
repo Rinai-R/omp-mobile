@@ -5,10 +5,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 ## Unreleased
 
 - A message sent while OMP is working is no longer refused ("Agent is already processing") and handed back to the composer: it is queued as a steer, as Enter does in the terminal, shows as a queue chip, and OMP takes it at its next step.
+- Search a computer's sessions by what was said in them, not only by title: the search button on the home screen (and the field in the session switcher) asks the daemon, which reads every session file under OMP's session root, including sessions older than the list shows, and keeps what each file holds until it changes. A hit shows the line that matched and opens the chat at that message. Needs the daemon's new `GET /sessions/search?q=`; an older daemon still filters the list by title.
+- Fork a session: long-press it on the home screen to fork the whole session, or long-press a message in a chat (or tap the fork button under a reply) to fork from there. The fork is a new session that opens on the phone; the original is only read, so a session a terminal holds forks without a takeover and its file is left unchanged. Needs the daemon's new `POST /sessions/:id/fork`.
 
 ### 中文
 
 - OMP 正在运行时发送的消息不再被拒绝（"Agent is already processing"）并退回输入框：它会像终端里按回车一样作为插话（steer）排队，显示为排队标签，OMP 在下一步时接收。
+- 按会话里说过的内容搜索，而不只是标题：主屏的搜索按钮（以及会话切换器里的搜索框）会让守护进程搜索 OMP 会话目录下的所有会话文件，包括列表里没显示的旧会话；每个文件的内容会缓存到它变化为止。结果显示匹配的那一行，点开后聊天定位到那条消息。需要守护进程的新接口 `GET /sessions/search?q=`；旧版守护进程仍按标题过滤列表。
+- 分叉会话：在主屏长按会话可分叉整个会话；在聊天里长按一条消息（或点回复下方的分叉按钮）可从那里分叉。分叉是一个新会话，会在手机上打开；原会话只被读取，所以终端正开着的会话无需接管即可分叉，其文件保持不变。需要守护进程的新接口 `POST /sessions/:id/fork`。
 
 ## v0.5.1
 

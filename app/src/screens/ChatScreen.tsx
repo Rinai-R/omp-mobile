@@ -1,3 +1,4 @@
+import * as Clipboard from "expo-clipboard";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AppState,
@@ -15,22 +16,22 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
-import { HttpError, SessionSocket, daemonFeatures, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
+import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { BrandMark, GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { Composer } from "../components/Composer";
-import { BackGlyph, ChevronDownGlyph, WarningGlyph } from "../components/icons";
+import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
-import { Banner, ConfirmSheet, IconButton } from "../components/ui";
+import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { applyEvent, snapshotItems } from "../messages";
 import { displayName } from "../machines";
-import { layoutRows, type Row, type Step } from "../rows";
+import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
@@ -42,6 +43,7 @@ import type {
   ApprovalRequest,
   ChatItem as Item,
   Machine,
+  MessageItem,
   ModelOption,
   ServerMessage,
   SessionState,
@@ -51,9 +53,13 @@ import type {
 interface Props {
   machine: Machine;
   session: SessionSummary;
+  /** The timestamp of a message to open on (a search hit); the list scrolls to it once it is shown. */
+  focus?: number;
   onBack: () => void;
   /** Open the session switcher (the title). */
   onSwitch: () => void;
+  /** Open another session: a fork made here. */
+  onOpenSession: (machine: Machine, session: SessionSummary) => void;
 }
 
 /** Connection attempts without an open after which the screen asks the daemon over HTTP why. */
@@ -77,7 +83,7 @@ function failureText(failure: OpenFailure): { title: string; body?: string } {
   }
 }
 
-export function ChatScreen({ machine, session: initialSession, onBack, onSwitch }: Props): ReactNode {
+export function ChatScreen({ machine, session: initialSession, focus, onBack, onSwitch, onOpenSession }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
@@ -112,6 +118,10 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
   const [unreachable, setUnreachable] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const [confirmTake, setConfirmTake] = useState(false);
+  /** The message whose long-press actions are open, and a fork of it in flight. */
+  const [messageAction, setMessageAction] = useState<MessageItem | null>(null);
+  const [forking, setForking] = useState(false);
+  const [forkError, setForkError] = useState<string | null>(null);
   /** The daemon's snapshot has replaced whatever the saved transcript showed. */
   const live = useRef(false);
   /**
@@ -596,6 +606,43 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
     setUnseen(0);
   }, []);
 
+  // A search hit opens the chat on its message, once the daemon's transcript is in (or it cannot come: a held session).
+  const focused = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (focus === undefined || focused.current === focus || rows.length === 0) return;
+    if (!live.current && failure === null) return;
+    focused.current = focus;
+    const index = rowAt(rows, focus);
+    if (index > 0) listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: true });
+  }, [failure, focus, rows]);
+  /** A row not laid out yet: get near it by the average height, then aim again once it is. */
+  const onScrollToIndexFailed = useCallback((info: { index: number; averageItemLength: number }) => {
+    listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+    setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, viewPosition: 0.5, animated: true }), 120);
+  }, []);
+
+  const canFork = features.includes(FORK_FEATURE);
+  const openMessageAction = useCallback((item: MessageItem) => {
+    setForkError(null);
+    setMessageAction(item);
+  }, []);
+  /** Fork from the message: a new session holding the transcript up to it opens; this one stays as it is. */
+  const forkFrom = useCallback(
+    (item: MessageItem) => {
+      if (item.createdAt === undefined || item.role === "system") return;
+      setForking(true);
+      setForkError(null);
+      void forkSession(machineRef.current, initialSession.id, { role: item.role, timestamp: item.createdAt })
+        .then((forked) => {
+          setMessageAction(null);
+          onOpenSession(machineRef.current, forked);
+        })
+        .catch((cause: unknown) => setForkError(cause instanceof Error ? cause.message : String(cause)))
+        .finally(() => setForking(false));
+    },
+    [initialSession.id, onOpenSession],
+  );
+
   const renderItem = useCallback<ListRenderItem<Row>>(
     ({ item }) => {
       const map = seen.current;
@@ -751,7 +798,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         ) : null}
 
         <View style={styles.listWrap}>
-          <TranscriptFolds onShift={shift}>
+          <TranscriptFolds onShift={shift} onMessageAction={canFork ? openMessageAction : undefined}>
           <FlatList
             ref={listRef}
             inverted
@@ -769,6 +816,7 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
             maintainVisibleContentPosition={away ? { minIndexForVisible: 0 } : undefined}
             initialNumToRender={14}
             windowSize={11}
+            onScrollToIndexFailed={onScrollToIndexFailed}
           />
           </TranscriptFolds>
           {rows.length === 0 && failure === null ? (
@@ -842,6 +890,34 @@ export function ChatScreen({ machine, session: initialSession, onBack, onSwitch 
         onConfirm={takeOver}
         onClose={() => setConfirmTake(false)}
       />
+      <Sheet visible={messageAction !== null} title={t("fork.messageTitle")} onClose={() => setMessageAction(null)}>
+        <Text style={styles.actionQuote} numberOfLines={4}>
+          {messageAction?.text.trim() ?? ""}
+        </Text>
+        <Text style={styles.actionBody}>{t("fork.messageBody")}</Text>
+        {forkError !== null ? (
+          <Text style={styles.takeError} selectable>
+            {t("fork.failed", { error: forkError })}
+          </Text>
+        ) : null}
+        <Button
+          label={t("fork.here")}
+          icon={<ForkGlyph size={16} color={colors.accentFg} />}
+          busy={forking}
+          onPress={() => {
+            if (messageAction !== null) forkFrom(messageAction);
+          }}
+        />
+        <Button
+          label={t("fork.copy")}
+          kind="plain"
+          icon={<CopyGlyph size={14} color={colors.fgMuted} />}
+          onPress={() => {
+            if (messageAction !== null) void Clipboard.setStringAsync(messageAction.text.trim());
+            setMessageAction(null);
+          }}
+        />
+      </Sheet>
       <ToolSheet step={openStep} machine={machine} cwd={session.cwd} onClose={() => setStep(null)} />
     </View>
   );
@@ -953,5 +1029,15 @@ function createStyles(c: Palette) {
     heldText: { flex: 1, color: c.fg },
     taking: { flexDirection: "row", gap: 10, alignItems: "center", marginTop: 4, minHeight: 38 },
     takeError: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.err },
+    actionQuote: {
+      fontFamily: SANS,
+      fontSize: 14,
+      lineHeight: 20,
+      color: c.fg,
+      paddingLeft: 10,
+      borderLeftWidth: 2,
+      borderLeftColor: c.border,
+    },
+    actionBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.fgMuted },
   } as const;
 }

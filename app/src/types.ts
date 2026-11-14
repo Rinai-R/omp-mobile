@@ -56,6 +56,20 @@ export interface SessionOwner {
   terminal: boolean;
 }
 
+/** A message of a session, as the daemon finds it in the session file: who said it and OMP's timestamp. */
+export interface MessagePoint {
+  role: "user" | "assistant";
+  timestamp: number;
+}
+
+/** Why a session matched a search (`session-search`): its title, or a message, with a snippet around the words. */
+export type SearchMatch = { kind: "title" } | { kind: "message"; role: "user" | "assistant"; timestamp?: number; snippet: string };
+
+export interface SearchResult {
+  session: SessionSummary;
+  match: SearchMatch;
+}
+
 export interface SessionState {
   model?: { provider?: string; id?: string; name?: string };
   thinkingLevel?: string;
