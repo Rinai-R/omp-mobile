@@ -3,7 +3,7 @@
     "name": "OMP",
     "slug": "omp-mobile",
     "scheme": "omp-mobile",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "platforms": [
@@ -12,7 +12,7 @@
     ],
     "android": {
       "package": "com.rinai.ompmobile",
-      "versionCode": 11,
+      "versionCode": 12,
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
