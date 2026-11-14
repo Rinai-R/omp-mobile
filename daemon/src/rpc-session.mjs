@@ -400,11 +400,14 @@ export class RpcSession extends EventEmitter {
   }
 
   /**
+   * Send a prompt. While a turn runs it is queued as a steer, as Enter in the
+   * terminal does: OMP delivers it at the next step boundary (the queue chips
+   * show it meanwhile). Idle, it starts a turn as before.
    * @param {string} text
    * @param {{type: "image", data: string, mimeType: string}[]} [images] OMP `ImageContent` parts sent with the text.
    */
   async prompt(text, images = []) {
-    return this.request("prompt", images.length > 0 ? { message: text, images } : { message: text });
+    return this.request("prompt", { message: text, ...(images.length > 0 ? { images } : {}), streamingBehavior: "steer" });
   }
 
   async abort() {

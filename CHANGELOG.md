@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- A message sent while OMP is working is no longer refused ("Agent is already processing") and handed back to the composer: it is queued as a steer, as Enter does in the terminal, shows as a queue chip, and OMP takes it at its next step.
+
+### 中文
+
+- OMP 正在运行时发送的消息不再被拒绝（"Agent is already processing"）并退回输入框：它会像终端里按回车一样作为插话（steer）排队，显示为排队标签，OMP 在下一步时接收。
+
 ## v0.5.1
 
 Reach your computer without Tailscale: the omp-mobile daemon pairs with your phone through the open-source ds-harness-remote relay, end-to-end encrypted.
