@@ -51,7 +51,8 @@ export function Composer({
   model: string;
   level: string | undefined;
   contextPercent: number | undefined;
-  queued: number;
+  /** Messages OMP holds for its next step (steers, then follow-ups), as sent. */
+  queued: readonly string[];
   onModel: () => void;
   bottomInset: number;
 }): ReactNode {
@@ -79,10 +80,24 @@ export function Composer({
   );
   return (
     <View style={[styles.root, { paddingBottom: 8 + bottomInset }]}>
-      {queued > 0 ? (
-        <Text style={styles.queued} maxFontSizeMultiplier={1.2}>
-          {t("composer.queued", { count: queued })}
-        </Text>
+      {queued.length > 0 ? (
+        <View style={styles.queue} accessibilityLabel={t("composer.queued", { count: queued.length })}>
+          {queued.slice(0, MAX_QUEUED).map((text, index) => (
+            <View key={index} style={styles.queueRow}>
+              <Text style={styles.queueLabel} maxFontSizeMultiplier={1.2}>
+                {t("composer.queuedLabel")}
+              </Text>
+              <Text style={styles.queueText} numberOfLines={1} maxFontSizeMultiplier={1.2}>
+                {text.replace(/\s+/g, " ").trim()}
+              </Text>
+            </View>
+          ))}
+          {queued.length > MAX_QUEUED ? (
+            <Text style={styles.queueLabel} maxFontSizeMultiplier={1.2}>
+              {t("composer.queuedMore", { count: queued.length - MAX_QUEUED })}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
       <View>
       {menu ? (
@@ -236,6 +251,9 @@ function Ring({ percent }: { percent: number }): ReactNode {
   );
 }
 
+/** Queued messages listed above the field; more are counted. */
+const MAX_QUEUED = 3;
+
 const ACTION = 32;
 /** Six lines of 21 px text plus padding. */
 const INPUT_MAX = 21 * 6 + 16;
@@ -264,7 +282,10 @@ function createStyles(c: Palette) {
   const chipText = { fontFamily: SANS, fontSize: 12, lineHeight: 15, color: c.fgFaint } as const;
   return {
     root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.chrome, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
-    queued: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.tint, paddingHorizontal: 6, paddingBottom: 8 },
+    queue: { gap: 4, paddingHorizontal: 6, paddingBottom: 8 },
+    queueRow: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
+    queueLabel: { fontFamily: SANS, fontSize: 12, lineHeight: 17, fontWeight: "600", color: c.tint },
+    queueText: { flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
     row: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
     box: {
       flex: 1,

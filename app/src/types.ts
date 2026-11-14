@@ -155,6 +155,10 @@ export interface MessageItem {
   stop?: "error" | "aborted";
   /** The error an assistant message ended on. */
   error?: string;
+  /** Shown by the phone the moment it was sent; OMP has not sent its own copy back yet. */
+  local?: boolean;
+  /** A local message OMP holds in its queue until its next step. */
+  queued?: boolean;
   /** What the deltas of an open message added up to so far, apart from what its events' message content said. */
   streamed?: { text: string; thinking: string };
 }

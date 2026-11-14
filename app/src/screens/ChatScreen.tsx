@@ -30,7 +30,7 @@ import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
-import { applyEvent, snapshotItems } from "../messages";
+import { applyEvent, dropEchoed, localUserMessage, snapshotItems } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -298,6 +298,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             if (refused !== null && (message.command === undefined || message.command === "prompt")) {
               // The daemon refused the prompt: give the text and photos back instead of losing them.
               pending.current = null;
+              setItems((current) => dropEchoed(current, refused.text));
               setDraft((current) => (current === "" ? refused.text : current));
               setAttachments((current) => (current.length === 0 ? refused.attachments : current));
               // Refused because it is busy: it still runs.
@@ -479,6 +480,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     }
     haptic.tap();
     pending.current = { text: draft, attachments };
+    // Shown at once: OMP's own copy, which replaces it, can take seconds over a relay.
+    setItems((current) => [...current, localUserMessage(text, attachments.map((item) => ({ data: item.data, mimeType: item.mimeType })))]);
     setDraft("");
     setAttachments([]);
     setState((current) => (current === null ? current : { ...current, isStreaming: true }));
@@ -567,7 +570,24 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   }, [initialSession.id]);
 
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
-  const rows = useMemo(() => layoutRows(items, streaming).reverse(), [items, streaming]);
+  const queued = useMemo(
+    () => [...(state?.queuedMessages?.steering ?? []), ...(state?.queuedMessages?.followUp ?? [])],
+    [state?.queuedMessages],
+  );
+  // A message sent from here that OMP holds for its next step reads "Queued" on its bubble; the
+  // composer lists only the queued ones not on screen (sent from the terminal or another phone).
+  const { shown, queuedElsewhere } = useMemo(() => {
+    const left = [...queued];
+    const marked = items.map((item) => {
+      if (item.kind !== "message" || item.local !== true) return item;
+      const at = left.findIndex((text) => text.trim() === item.text.trim());
+      if (at === -1) return item.queued === true ? { ...item, queued: false } : item;
+      left.splice(at, 1);
+      return { ...item, queued: true };
+    });
+    return { shown: marked, queuedElsewhere: left };
+  }, [items, queued]);
+  const rows = useMemo(() => layoutRows(shown, streaming).reverse(), [shown, streaming]);
   /** The open step as it is now: a running tool's output keeps arriving while its sheet is open. */
   const openStep = useMemo(() => {
     if (step === null || step.kind !== "tool") return step;
@@ -673,7 +693,6 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       : usage?.tokens !== undefined && usage.contextWindow !== undefined && usage.contextWindow > 0
         ? (usage.tokens / usage.contextWindow) * 100
         : undefined;
-  const queued = (state?.queuedMessages?.steering?.length ?? 0) + (state?.queuedMessages?.followUp?.length ?? 0);
   const todos = todoPhases(state?.todoPhases);
   const folder = session.cwd.split("/").filter(Boolean).at(-1) ?? session.cwd;
   // A session started here is named by the daemon after its first prompt; until the
@@ -869,7 +888,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           model={model}
           level={level}
           contextPercent={contextPercent}
-          queued={queued}
+          queued={queuedElsewhere}
           onModel={openPicker}
           bottomInset={keyboard ? 0 : insets.bottom}
         />

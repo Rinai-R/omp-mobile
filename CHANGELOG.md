@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Your message shows in the chat the moment you send it ("Sending…"), instead of only when OMP echoes it back, which over the relay could take seconds and arrive together with the answer. OMP's copy takes its place when it comes.
+- Queued messages show what they say: a message you send while OMP is busy reads "Queued" on its bubble until OMP takes it, and messages queued from elsewhere (the terminal, another phone) are listed above the field instead of an "n queued" count.
+
+### 中文
+
+- 发送后你的消息立即出现在聊天里（显示"发送中…"），不再等 OMP 回传；之前经中继时可能要等几秒，和回复一起出现。OMP 的回传到达后替换它。
+- 排队的消息能看到内容：OMP 忙时你发的消息气泡上显示"排队中"，直到 OMP 接收；从别处（终端、其他手机）排队的消息列在输入框上方，不再只显示"n 条排队中"。
+
 ## v0.7.0
 
 Search sessions by what was said in them, fork a session or a message, a real live activity in the status bar, Sessions / Computers / Settings as tabs, messages that reach OMP mid-run, and a dark mode switch.
