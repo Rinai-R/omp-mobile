@@ -15,7 +15,9 @@ import { hostname } from "node:os";
 /**
  * `running`: a turn started (key `run:<n>`, the key its `done`/`failed` frame
  * will carry), sent only to streams that ask for it (`?live=1`), for the phone's
- * Live Update; older apps would show it as a banner.
+ * Live Update; older apps would show it as a banner. While the turn runs it is
+ * sent again under the same key and start `time` when its step or plan changes:
+ * `text` the step (the tool call's intent, else its name), `plan` the todo list's progress.
  * @typedef {"approval" | "question" | "resolved" | "done" | "failed" | "running"} AttentionKind
  */
 
@@ -28,7 +30,30 @@ import { hostname } from "node:os";
  * @property {string} machine This computer's hostname.
  * @property {string} text Human text: the question, the final answer, or the failure.
  * @property {number} time Epoch ms.
+ * @property {Plan} [plan] `running` only: the session's todo list, when it has one.
  */
+
+/** @typedef {{done: number, total: number, phases: number[]}} Plan Tasks done (completed or dropped), all tasks, tasks per phase. */
+
+/**
+ * The progress of OMP's todo list (`get_state`'s `todoPhases`); undefined without tasks.
+ * @returns {Plan | undefined}
+ */
+export function planOf(todoPhases) {
+  if (!Array.isArray(todoPhases)) return undefined;
+  const phases = [];
+  let done = 0;
+  for (const phase of todoPhases) {
+    const tasks = Array.isArray(phase?.tasks) ? phase.tasks.filter((task) => task !== null && typeof task === "object") : [];
+    if (tasks.length === 0) continue;
+    phases.push(tasks.length);
+    done += tasks.filter((task) => task.status === "completed" || task.status === "abandoned").length;
+  }
+  const total = phases.reduce((sum, count) => sum + count, 0);
+  return total === 0 ? undefined : { done, total, phases };
+}
+
+const samePlan = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 /** @typedef {{id: string, title?: string}} SessionLike */
 
@@ -120,7 +145,7 @@ export class AttentionTracker {
   observe(session, payload) {
     const state = this.#state(session.id);
     const frames = [];
-    const emit = (kind, key, text) => {
+    const emit = (kind, key, text, extra = {}) => {
       const frame = {
         kind,
         key,
@@ -129,6 +154,7 @@ export class AttentionTracker {
         machine: this.machine,
         text: clip(text),
         time: this.now(),
+        ...extra,
       };
       frames.push(frame);
       return frame;
@@ -169,6 +195,13 @@ export class AttentionTracker {
         if (payload.level === "error") state.error = typeof payload.message === "string" ? payload.message : "error";
         break;
       }
+      case "state": {
+        const plan = planOf(payload.state?.todoPhases);
+        if (samePlan(plan, state.plan)) break;
+        state.plan = plan;
+        if (state.running !== undefined) state.running = this.#rerun(state, emit, state.running.text);
+        break;
+      }
       case "event":
         this.#event(state, payload.event ?? {}, emit);
         break;
@@ -183,8 +216,15 @@ export class AttentionTracker {
       case "agent_start":
         state.error = "";
         state.last = undefined;
-        state.running = emit("running", `run:${state.runs + 1}`, "");
+        state.running = emit("running", `run:${state.runs + 1}`, "", state.plan === undefined ? {} : { plan: state.plan });
         return;
+      case "tool_execution_start": {
+        if (state.running === undefined) return;
+        const intent = typeof event.intent === "string" ? event.intent.trim() : "";
+        const step = intent !== "" ? intent : typeof event.toolName === "string" ? event.toolName : "";
+        if (step !== "" && step !== state.running.text) state.running = this.#rerun(state, emit, step);
+        return;
+      }
       case "notice":
         if (event.level === "error") state.error = typeof event.message === "string" ? event.message : "error";
         return;
@@ -213,10 +253,18 @@ export class AttentionTracker {
     }
   }
 
+  /** The running turn again, with a new step and the current plan; its key and start stay. */
+  #rerun(state, emit, step) {
+    const running = state.running;
+    const frame = emit("running", running.key, step, state.plan === undefined ? {} : { plan: state.plan });
+    frame.time = running.time;
+    return frame;
+  }
+
   #state(sessionId) {
     let state = this.sessions.get(sessionId);
     if (state === undefined) {
-      state = { open: new Map(), runs: 0, error: "", last: undefined, running: undefined };
+      state = { open: new Map(), runs: 0, error: "", last: undefined, running: undefined, plan: undefined };
       this.sessions.set(sessionId, state);
     }
     return state;

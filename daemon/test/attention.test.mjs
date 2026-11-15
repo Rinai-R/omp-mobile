@@ -275,3 +275,20 @@ test("RpcSession reports an answered request and one OMP cancelled itself", asyn
   assert.deepEqual(resolved.at(-1), { id: "a1", reason: "answered" });
   rpc.close();
 });
+
+test("a running turn is re-announced with its step and todo progress, keeping its key and start", () => {
+  let now = 1_000;
+  const attention = new AttentionTracker({ machine: "box", now: () => now });
+  const todo = (statuses) => ({ type: "state", state: { todoPhases: [{ name: "a", tasks: statuses.slice(0, 2).map((status) => ({ content: "x", status })) }, { name: "b", tasks: statuses.slice(2).map((status) => ({ content: "y", status })) }] } });
+  attention.observe(session, todo(["completed", "in_progress", "pending"]));
+  const [start] = attention.observe(session, { type: "event", event: { type: "agent_start" } });
+  assert.deepEqual([start.kind, start.key, start.text, start.plan], ["running", "run:1", "", { done: 1, total: 3, phases: [2, 1] }]);
+  now = 5_000;
+  const [step] = attention.observe(session, { type: "event", event: { type: "tool_execution_start", toolName: "bash", intent: "Running tests" } });
+  assert.deepEqual([step.key, step.text, step.time], ["run:1", "Running tests", 1_000]);
+  assert.deepEqual(attention.observe(session, { type: "event", event: { type: "tool_execution_start", toolName: "bash", intent: "Running tests" } }), [], "the same step is not news");
+  const [progressed] = attention.observe(session, todo(["completed", "completed", "pending"]));
+  assert.deepEqual([progressed.text, progressed.plan.done], ["Running tests", 2]);
+  assert.deepEqual(attention.observe(session, todo(["completed", "completed", "pending"])), []);
+  assert.equal(attention.pending({ live: true }).at(-1).plan.done, 2, "a reconnecting phone gets the latest");
+});

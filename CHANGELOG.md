@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- OMP's replies no longer sit in a bubble: they read as page text, at the same width as before, in light and dark alike (in dark the bubble was nearly invisible anyway).
+- The live activity has its own look: while a session runs it shows what OMP is doing now (the tool call's intent, e.g. "Running tests"), and when the session has a todo plan the bar is that plan's progress, one segment per phase along OMP's magenta → violet → cyan gradient with the OMP mark as its tracker and "3/7" in the status-bar chip; without a plan the chip counts up over an indeterminate gradient bar. Waiting for an approval it turns magenta. The daemon sends the step and plan progress on its `running` frames.
+
+### 中文
+
+- OMP 的回复不再放在气泡里：作为页面正文显示，宽度和以前一样，深浅色一致（深色模式下原来的气泡本来就几乎看不见）。
+- 实时活动换成了自己的样式：会话运行时显示 OMP 正在做的事（工具调用的意图，例如"Running tests"）；会话有 todo 计划时，进度条就是计划的完成进度，每个阶段一段，沿 OMP 的品红 → 紫 → 青渐变着色，用 OMP 标志作进度指示，状态栏胶囊里显示"3/7"；没有计划时，胶囊计时，下面是不定进度的渐变条。等待审批时变为品红色。守护进程在 `running` 帧里附带当前步骤和计划进度。
+
 ## v0.7.2
 
 `omp-mobile restart` to put the running daemon on a new version safely, and no more xd:// mount notices in the chat.
