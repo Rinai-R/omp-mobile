@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- `omp-mobile restart` restarts the running daemon on the installed code with the arguments it was started with, once no session is running a turn (`--now` skips the wait). A detached process does the work, so it can be run from one of the daemon's own sessions, for example by an agent after `omp plugin upgrade omp-mobile`, without cutting that session off before the new daemon is up. `GET /status` reports `busySessions`.
+- The chat no longer shows OMP's "xd://: mounted mcp__…" notice each time a session opens: it tells the model which MCP tools it can use and is not meant for a reader.
+
+### 中文
+
+- 聊天里不再在每次打开会话时显示 OMP 的 "xd://: mounted mcp__…" 通知：那是告诉模型有哪些 MCP 工具可用的，不是给人看的。
+- 新增 `omp-mobile restart`：用当前安装的代码、按原来的启动参数重启正在运行的守护进程，等没有会话在运行时再重启（`--now` 不等待）。重启由一个独立的后台进程完成，所以可以在守护进程托管的会话里执行，例如 agent 在 `omp plugin upgrade omp-mobile` 之后执行，不会在新守护进程起来之前把这个会话切断。`GET /status` 新增 `busySessions`。
+
 ## v0.7.1
 
 Your message shows the moment you send it, queued messages show what they say, and a session's subagents can be opened from the chat.

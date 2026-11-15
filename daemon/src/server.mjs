@@ -26,6 +26,7 @@ import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
 import { DEFAULT_RELAY, runRelayCli } from "./relay-control.mjs";
 import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
+import { runRestartCli } from "./restart.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const PROTOCOL = 1;
@@ -301,6 +302,11 @@ user (403 otherwise), before the token is checked. Loopback hosts skip admission
   --relay [url]          Also serve paired phones through a ds-harness-remote relay (default ${DEFAULT_RELAY}),
                          end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay
   --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
+
+Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
+  omp-mobile restart          Restart the running daemon on the installed code, with its arguments, once no
+                              session is running a turn; it is done by a detached process, so this is safe to
+                              run from one of the daemon's own sessions. --now: do not wait.
 
 Relay commands (talk to the running daemon; same --state-file):
   omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
@@ -945,6 +951,8 @@ class Daemon {
         startedAt: this.startedAt,
         url: this.baseUrl(),
         liveSessions: this.sessions.size,
+        // Sessions running a turn: `omp-mobile restart` waits for none.
+        busySessions: [...this.sessions.values()].filter((entry) => entry.state?.isStreaming === true).length,
         eventStreams: this.streams.size,
         lastPhone: this.lastPhone,
         relay: this.relay === undefined ? null : await this.relay.status(),
@@ -1804,6 +1812,10 @@ async function main() {
     await runRelayCli(process.argv.slice(3));
     return;
   }
+  if (process.argv[2] === "restart") {
+    await runRestartCli(process.argv.slice(3));
+    return;
+  }
   const options = parseArgs(process.argv.slice(2));
   if (options.host === "tailscale") options.host = await tailscaleHost(options);
   const token = loadToken(options);
@@ -1812,7 +1824,8 @@ async function main() {
   await daemon.listen();
   const url = daemon.baseUrl();
   const pair = `omp-mobile://pair?url=${encodeURIComponent(url)}&token=${encodeURIComponent(token)}`;
-  writeState(options.stateFile, { pid: process.pid, version: VERSION, url, pair, relay: options.relay || null, startedAt: daemon.startedAt });
+  // `argv` and `cwd`: how to start it again (`omp-mobile restart`).
+  writeState(options.stateFile, { pid: process.pid, version: VERSION, url, pair, relay: options.relay || null, startedAt: daemon.startedAt, argv: process.argv.slice(2), cwd: process.cwd() });
   console.log(`omp-mobile daemon ${VERSION}`);
   console.log(`  listening  ${url}`);
   console.log(`  cwd        ${options.cwd}`);

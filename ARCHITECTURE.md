@@ -73,7 +73,7 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 | `DELETE /sessions/:id` | Stops its OMP process and forgets it, and its saved transcript; the OMP session file stays. |
 | `GET /events?live=` | The attention stream (Server-Sent Events), see below. With `live=1` it also carries `running` frames (key `run:<n>`, the key the turn's `done`/`failed` frame will carry), replays the turns still running, and a `resolved` frame for a running turn whose session closed; the phone's live activity is built from them. Streams without it never see those frames. |
 | `GET /blobs/<sha256>` | One image from OMP's content-addressed store (`<omp home>/agent/blobs`), typed from its bytes. |
-| `GET /status` | `{pid, version, startedAt, url, liveSessions, eventStreams, lastPhone}`; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
+| `GET /status` | `{pid, version, startedAt, url, liveSessions, busySessions, eventStreams, lastPhone}`; `busySessions`: live sessions running a turn, which `omp-mobile restart` waits for; `lastPhone` is `{address, at}` of the last authenticated request without `x-omp-mobile-probe`, or `null`. |
 | `GET /sessions/:id/ws` | WebSocket upgrade, see below. |
 
 ### Session socket
