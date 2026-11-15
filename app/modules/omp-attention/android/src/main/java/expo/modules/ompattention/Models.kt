@@ -14,6 +14,8 @@ data class AttentionFrame(
   val machine: String,
   val text: String,
   val time: Long,
+  /** `running` only: the session's todo list progress, when it has one. */
+  val plan: Plan? = null,
 ) {
   companion object {
     /** @return the frame, or null for malformed data (never thrown into the stream loop). */
@@ -27,6 +29,7 @@ data class AttentionFrame(
         machine = json.optString("machine"),
         text = json.optString("text"),
         time = json.optLong("time"),
+        plan = json.optJSONObject("plan")?.let(Plan::parse),
       )
     } catch (_: Exception) {
       null
@@ -56,5 +59,18 @@ data class Machine(
       token = json.getString("token"),
       relay = json.optBoolean("relay", false),
     )
+  }
+}
+
+/** OMP's todo list progress (daemon `planOf`): tasks done, all tasks, tasks per phase. */
+data class Plan(val done: Int, val total: Int, val phases: List<Int>) {
+  companion object {
+    fun parse(json: JSONObject): Plan? {
+      val phases = json.optJSONArray("phases") ?: return null
+      val counts = List(phases.length()) { phases.optInt(it) }.filter { it > 0 }
+      val total = json.optInt("total")
+      if (total <= 0 || counts.isEmpty()) return null
+      return Plan(json.optInt("done").coerceIn(0, total), total, counts)
+    }
   }
 }

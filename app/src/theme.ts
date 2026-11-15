@@ -12,8 +12,8 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  *
  * The iOS-flavoured layer on top: `group` rows on `bg` with `separator`
  * hairlines, `tint` for links and the back button, `search`/`segment` fills,
- * the user's bubble gradient (`userA` → `userB`), the reply's translucent
- * `bubble`, tool `card`s with violet `tile`s, the approval widget gradient
+ * the user's bubble gradient (`userA` → `userB`), the hairline of tool
+ * `card`s (`bubbleBorder`) with violet `tile`s, the approval widget gradient
  * (`widgetA` → `widgetB` → `widgetC`), the New button (`fab`), and the system
  * colours (`sysRed`, `sysGreen`, `sysBlue`, `sysOrange`, `sysYellow`).
  */
@@ -67,7 +67,6 @@ export function palette(scheme: ColorSchemeName) {
         userA: "#f8e1f3",
         userB: "#e0e6fb",
         userBorder: "#0000000a",
-        bubble: "#ffffff",
         bubbleBorder: "#0000000d",
         card: "#ffffff",
         tile: "#7a45e01a",
@@ -136,7 +135,6 @@ export function palette(scheme: ColorSchemeName) {
         userA: "#3a1d4a",
         userB: "#1a2448",
         userBorder: "#ffffff1f",
-        bubble: "#ffffff0b",
         bubbleBorder: "#ffffff12",
         card: "#ffffff08",
         tile: "#8b5cf622",

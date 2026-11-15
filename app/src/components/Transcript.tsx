@@ -1017,9 +1017,9 @@ function createStyles(c: Palette) {
       borderTopRightRadius: 24,
       borderBottomRightRadius: 24,
       borderBottomLeftRadius: 8,
+      // No bubble: the reply reads as page text. The padding (border included) stays, so its width does not change.
       borderWidth: 1,
-      borderColor: c.bubbleBorder,
-      backgroundColor: c.bubble,
+      borderColor: "transparent",
     },
     caret: { fontFamily: SANS, color: c.accentV },
 
