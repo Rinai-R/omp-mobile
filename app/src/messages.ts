@@ -440,6 +440,8 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     return [...items, { kind: "notice", id: nextId("notice"), level: failed ? "warning" : "info", text }];
   }
   if (type === "notice") {
+    // OMP announces the tools it mounts under xd:// (MCP servers) each time a session starts: for the model, not a reader.
+    if (event.source === "xdev" && event.level !== "warning" && event.level !== "error") return items;
     const level = event.level === "warning" || event.level === "error" ? event.level : "info";
     const notice: NoticeItem = {
       kind: "notice",

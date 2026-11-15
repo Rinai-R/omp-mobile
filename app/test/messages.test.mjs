@@ -351,3 +351,10 @@ test("a message shown on send is replaced in place by OMP's copy; a refused one 
   // The daemon refused it: the copy goes, the composer gets the text back.
   assert.equal(dropEchoed(items, "Something else").some((item) => item.id === other.id), false);
 });
+
+test("OMP's xd:// mount announcements stay out of the chat; other notices show", () => {
+  const mounted = applyEvent([], { type: "notice", level: "info", source: "xdev", message: "xd://: mounted mcp__rea_xrefs" });
+  assert.deepEqual(mounted, []);
+  const shown = applyEvent([], { type: "notice", level: "warning", message: "Context is nearly full" });
+  assert.deepEqual(shown.map((item) => [item.kind, item.level, item.text]), [["notice", "warning", "Context is nearly full"]]);
+});

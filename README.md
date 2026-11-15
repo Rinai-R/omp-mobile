@@ -42,7 +42,7 @@ Install the plugin into OMP on every computer:
 omp plugin install omp-mobile
 ```
 
-Then in OMP, run `/mobile`. It starts the daemon in the background, bound to the computer's Tailscale address, and shows a pairing code above the composer until the phone connects. The daemon runs on the Bun inside OMP and outlives the terminal and OMP; `/mobile status` shows it and `/mobile stop` ends it. Phone sessions start in the directory where you ran `/mobile` the first time.
+Then in OMP, run `/mobile`. It starts the daemon in the background, bound to the computer's Tailscale address, and shows a pairing code above the composer until the phone connects. The daemon runs on the Bun inside OMP and outlives the terminal and OMP; `/mobile status` shows it and `/mobile stop` ends it. After `omp plugin upgrade omp-mobile`, `omp-mobile restart` puts the running daemon on the new version with the same settings, once no session is mid-turn (safe to run from a phone session). Phone sessions start in the directory where you ran `/mobile` the first time.
 
 Without the plugin, the same daemon runs from npm (Node.js 22.19 or newer) in the foreground: `npm install -g omp-mobile`, then `omp-mobile --host tailscale --cwd ~/project`. It prints the same code.
 
