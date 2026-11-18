@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary } from "../src/messages.ts";
+import { applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary, withStreaming } from "../src/messages.ts";
 
 const user = { role: "user", content: [{ type: "text", text: "List the files" }] };
 const toolTurn = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }] };
@@ -357,4 +357,13 @@ test("OMP's xd:// mount announcements stay out of the chat; other notices show",
   assert.deepEqual(mounted, []);
   const shown = applyEvent([], { type: "notice", level: "warning", message: "Context is nearly full" });
   assert.deepEqual(shown.map((item) => [item.kind, item.level, item.text]), [["notice", "warning", "Context is nearly full"]]);
+});
+
+test("a reply joined mid-stream continues from the snapshot's part with the deltas that follow", () => {
+  const stale = { kind: "message", id: "old", role: "assistant", text: "Hel", open: true, streaming: true };
+  let items = withStreaming([stale], { role: "assistant", content: [{ type: "text", text: "Hello wor" }] });
+  assert.equal(items.filter((item) => item.open === true).length, 1, "the phone's own partial copy is replaced");
+  const delta = (text) => ({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: text } });
+  items = applyEvent(applyEvent(items, delta("ld")), delta("!"));
+  assert.equal(items.at(-1).text, "Hello world!");
 });

@@ -30,7 +30,7 @@ import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems } from "../messages";
+import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -281,6 +281,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             setSession(message.session);
             setState(message.state);
             show(merged, message.state?.isStreaming === true);
+            const writing = message.streaming;
+            if (writing !== undefined) setItems((current) => withStreaming(current, writing));
             const state = JSON.stringify(message.state ?? null);
             const changed = (message.from ?? 0) === 0 || message.messages.length > 0 || state !== savedStateRef.current;
             if (changed) {

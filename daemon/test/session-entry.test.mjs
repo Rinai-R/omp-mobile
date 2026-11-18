@@ -93,3 +93,25 @@ test("live session titles drop the Nerd Font icon OMP puts in names", async () =
   assert.equal(titleOf([], { sessionName: "\u{F0A7A}  Fix   the build" }, "/w/proj"), "Fix the build");
   assert.equal(titleOf([{ role: "user", content: "hello there" }], { sessionName: "\uE62B" }, "/w/proj"), "hello there");
 });
+
+test("a stream reaches phones as deltas, and a phone opening mid-reply gets what was written so far", async () => {
+  const rpc = Object.assign(new EventEmitter(), {
+    getState: async () => ({ sessionId: "s1", isStreaming: true }),
+    getMessages: async () => ({ messages: [] }),
+  });
+  const entry = new SessionEntry("/tmp/work", rpc);
+  await entry.hydrate();
+  const frames = [];
+  entry.clients.add({ readyState: 1, send: (text) => frames.push(JSON.parse(text)) });
+  entry.bind();
+  const whole = (text) => ({ role: "assistant", content: [{ type: "text", text }], timestamp: 7 });
+  rpc.emit("event", { type: "message_start", message: whole("") });
+  for (const [delta, text] of [["Hel", "Hel"], ["lo ", "Hello "], ["wor", "Hello wor"]]) {
+    rpc.emit("event", { type: "message_update", message: whole(text), assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta, partial: whole(text) } });
+  }
+  const update = frames.at(-1).event;
+  assert.deepEqual(update, { type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "wor" } }, "no copies of the whole message");
+  assert.deepEqual(entry.snapshot().streaming, { role: "assistant", content: [{ type: "text", text: "Hello wor" }], timestamp: 7 });
+  rpc.emit("event", { type: "message_end", message: whole("Hello world") });
+  assert.equal(entry.snapshot().streaming, undefined);
+});

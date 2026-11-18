@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Long replies no longer stutter or drop the relay connection ("Relay consumer is too slow", #73). OMP sends the whole message so far twice with every token, so a 600-word reply cost the phone about 4 MB; the daemon now forwards only what each token adds (about 80 KB for the same reply), and the chat applies the events that arrive within one frame in a single render (#74, thanks @tingQian).
+- Opening a chat while OMP is writing shows the reply written so far, then continues it; before, it appeared only once finished.
+
+### 中文
+
+- 长回复不再卡顿，也不再导致中继连接断开（"Relay consumer is too slow"，#73）。OMP 每输出一个 token 都会附带两份到目前为止的完整消息，一篇 600 词的回复要传约 4 MB 给手机；现在守护进程只转发每次新增的内容（同样的回复约 80 KB），聊天页把同一帧内到达的事件合并成一次渲染（#74，感谢 @tingQian）。
+- OMP 正在输出时打开聊天，会立即显示已写出的部分并继续输出；之前要等整条说完才出现。
+
 ## v0.7.3
 
 Replies without a bubble, and a live activity in OMP's own style that shows the current step and the plan's progress.
