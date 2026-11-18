@@ -130,6 +130,25 @@ const OPEN_FAILED_CLOSE_CODE = 4000;
 /** OMP's content-addressed image store under `<omp home>/agent/blobs`. */
 const BLOB_NAME = /^[0-9a-f]{64}$/;
 
+/**
+ * A `message_update` as phones get it: OMP sends the whole message so far
+ * twice on every token (`message` and `assistantMessageEvent.partial`), which
+ * grows the stream with the square of the reply's length (a 600-word reply:
+ * ~4 MB) and swamps the relay and the phone (issue #73). The phone builds the
+ * reply from the deltas; `message_end` carries it whole, and a snapshot the
+ * part written so far (`streaming`).
+ */
+export function slimUpdate(event) {
+  const inner = event.assistantMessageEvent;
+  const { partial: _partial, ...delta } = inner !== null && typeof inner === "object" ? inner : {};
+  return {
+    type: event.type,
+    ...(event.messageId === undefined ? {} : { messageId: event.messageId }),
+    message: { role: event.message?.role ?? "assistant" },
+    assistantMessageEvent: delta,
+  };
+}
+
 /** @typedef {{pid: number, busy: boolean, terminal: boolean}} SessionOwner */
 /** @typedef {{id: string, method: string, title: string, message?: string, options?: string[]}} PendingRequest */
 /** @typedef {{id: string, title: string, cwd: string, status: string, model?: string, createdAt: number, updatedAt: number, sessionFile?: string, origin: "daemon" | "omp", openElsewhere?: boolean, owner?: SessionOwner, waiting?: number, request?: PendingRequest}} SessionSummary */
@@ -683,7 +702,15 @@ class SessionEntry {
    * @param {{since: number, last: string}} [held]
    */
   snapshot(held) {
-    return deltaBody({ session: this.summary(), state: this.state, messages: this.messages, base: this.base }, held);
+    const body = deltaBody({ session: this.summary(), state: this.state, messages: this.messages, base: this.base }, held);
+    // The reply OMP is writing now: the updates that follow carry only what they add to it.
+    const writing = this.streaming;
+    if (writing === undefined) return body;
+    const content = [
+      ...(writing.thinking === "" ? [] : [{ type: "thinking", thinking: writing.thinking }]),
+      ...(writing.text === "" ? [] : [{ type: "text", text: writing.text }]),
+    ];
+    return { ...body, streaming: { role: "assistant", content, ...(typeof writing.timestamp === "number" ? { timestamp: writing.timestamp } : {}) } };
   }
 
   broadcast(payload) {
@@ -753,7 +780,19 @@ class SessionEntry {
       // A run starting is what makes a session "running" in the list; OMP's state read would lag behind.
       if (event.type === "agent_start" && this.state !== null && typeof this.state === "object") this.state = { ...this.state, isStreaming: true };
       if (event.type === "turn_end" || event.type === "agent_end") void this.refreshState();
-      this.broadcast({ type: "event", event });
+      // The reply being written, for a phone that opens the chat mid-stream (see `snapshot`).
+      // The reply being written, as the deltas phones got so far add up (see `snapshot`). The deltas, not the
+      // event's message: OMP writes that out early or late, and a phone continues from exactly what it is sent.
+      if (event.type === "message_start" && event.message?.role === "assistant") {
+        this.streaming = { timestamp: event.message.timestamp, text: "", thinking: "" };
+      }
+      if (event.type === "message_update" && this.streaming !== undefined) {
+        const inner = event.assistantMessageEvent;
+        if (inner?.type === "text_delta" && typeof inner.delta === "string") this.streaming.text += inner.delta;
+        if (inner?.type === "thinking_delta" && typeof inner.delta === "string") this.streaming.thinking += inner.delta;
+      }
+      if (event.type === "message_end" || event.type === "agent_end") this.streaming = undefined;
+      this.broadcast({ type: "event", event: event.type === "message_update" ? slimUpdate(event) : event });
     });
     this.rpc.on("approval", (request) => {
       this.broadcast({ type: "approval", request });

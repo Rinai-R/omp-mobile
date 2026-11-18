@@ -30,7 +30,7 @@ import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems } from "../messages";
+import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -149,6 +149,44 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const savedStateRef = useRef<string | undefined>(undefined);
   /** A save waiting for the screen to settle; run at once when the chat is left. */
   const saveRef = useRef<(() => void) | null>(null);
+  /**
+   * Streaming events arrive once per token/chunk. Applying each one to React state
+   * re-renders the whole transcript per chunk, which stalls the JS thread on slower
+   * Android runtimes and lets the relay's send queue back up. Coalesce events that
+   * land in the same animation frame into one `setItems`, following the upstream
+   * DeepSeek Harness fix (anywhere-labs/dsh-desktop#747).
+   */
+  const eventQueueRef = useRef<Record<string, unknown>[]>([]);
+  const eventFrameRef = useRef<number | null>(null);
+  const eventTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushEvents = useCallback(() => {
+    eventFrameRef.current = null;
+    eventTimerRef.current = null;
+    const queued = eventQueueRef.current;
+    eventQueueRef.current = [];
+    if (queued.length === 0) return;
+    setItems((current) => queued.reduce(applyEvent, current));
+  }, []);
+  const queueEvent = useCallback((event: Record<string, unknown>) => {
+    eventQueueRef.current.push(event);
+    if (eventFrameRef.current !== null || eventTimerRef.current !== null) return;
+    if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
+      eventFrameRef.current = requestAnimationFrame(() => flushEvents());
+    } else {
+      eventTimerRef.current = setTimeout(flushEvents, 16);
+    }
+  }, [flushEvents]);
+  const cancelPendingEvents = useCallback(() => {
+    if (eventFrameRef.current !== null) {
+      cancelAnimationFrame(eventFrameRef.current);
+      eventFrameRef.current = null;
+    }
+    if (eventTimerRef.current !== null) {
+      clearTimeout(eventTimerRef.current);
+      eventTimerRef.current = null;
+    }
+    eventQueueRef.current = [];
+  }, []);
   /** A prompt the daemon has not accepted yet, restored to the box if it refuses it. */
   const pending = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   /** Effects follow the computer by how it is reached, not by object: a rename must not reconnect. */
@@ -220,6 +258,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       (message: ServerMessage) => {
         switch (message.type) {
           case "snapshot": {
+            // A snapshot replaces the transcript wholesale; drop events still waiting
+            // for their frame so they cannot be replayed on top of the newer copy.
+            cancelPendingEvents();
             const sent = sentRef.current;
             let merged = mergeWindow(sent.window, sent.held, message);
             // A whole answer that starts past 0: the daemon holds only the session's end (its message cap).
@@ -240,6 +281,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             setSession(message.session);
             setState(message.state);
             show(merged, message.state?.isStreaming === true);
+            const writing = message.streaming;
+            if (writing !== undefined) setItems((current) => withStreaming(current, writing));
             const state = JSON.stringify(message.state ?? null);
             const changed = (message.from ?? 0) === 0 || message.messages.length > 0 || state !== savedStateRef.current;
             if (changed) {
@@ -250,7 +293,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             break;
           }
           case "event": {
-            setItems((current) => applyEvent(current, message.event));
+            queueEvent(message.event);
             // A run is many turns (each tool call ends one): it starts at agent_start, from any client, and ends at agent_end.
             const running = message.event.type === "agent_start" ? true : message.event.type === "agent_end" ? false : undefined;
             if (running !== undefined) {
@@ -429,6 +472,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       if (next === "active" && !failedRef.current) socket.reconnect();
     });
     return () => {
+      cancelPendingEvents();
       disposed = true;
       subscription.remove();
       socket.close();

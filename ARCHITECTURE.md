@@ -82,11 +82,11 @@ Every route except `/hello` needs the token, as `Authorization: Bearer <token>` 
 
 **Saved transcripts.** When a session's omp exits (the idle reaper, the daemon stopping, omp leaving on its own), its slim messages, state and summary are written to `transcripts/<id>.json` next to the registry (`~/.omp-mobile/transcripts/`), with the session file's modification time and size. `/transcript` serves one only while the file still has them; anything that writes the session since (a terminal omp) makes it stale. Records whose session was quiet for 24 hours, or that went stale, are deleted when the daemon starts; nothing is evicted by count.
 
-On connect the daemon sends `{type: "snapshot", session, state, from, total, messages}`, then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error, owner?}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
+On connect the daemon sends `{type: "snapshot", session, state, from, total, messages, streaming?}` (`streaming`: the assistant message being written, as its deltas so far add up; the next `message_update` deltas continue it), then every OMP question still open as `{type: "approval", request}`. A session that cannot be opened (unknown, its file gone, held by another omp process, or OMP failing to start or load it) still completes the upgrade: the daemon sends `{type: "open_failed", status, error, owner?}` with the HTTP status the same request would get, and closes with code `4000`. After a successful open:
 
 | From the daemon | Meaning |
 | --- | --- |
-| `event` | One OMP session event, unchanged. |
+| `event` | One OMP session event, unchanged, except `message_update`: it carries only `message.role` and `assistantMessageEvent` without `partial` (the delta), not OMP's two copies of the whole message so far. |
 | `state` | OMP's session state after a turn, and after model, thinking-level, todo or queue changes. |
 | `approval` | An OMP UI request (`select`, `confirm`, `input`, `editor`) waiting for an answer. |
 | `approval_resolved` | `{id, reason}`: that request was answered by any client, cancelled by OMP, or closed with the process. |

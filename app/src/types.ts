@@ -215,6 +215,8 @@ export interface Transcript {
 
 export interface Snapshot extends Transcript {
   type: "snapshot";
+  /** The reply OMP is writing now (daemons from 0.7.4): the updates that follow carry only what they add to it. */
+  streaming?: AgentMessage;
 }
 
 /** A subagent a session delegated to, as `GET /sessions/:id/subagents` lists it (`subagents` feature). */

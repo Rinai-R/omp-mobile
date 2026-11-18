@@ -275,6 +275,20 @@ export function dropEchoed(items: ChatItem[], text: string): ChatItem[] {
 }
 
 /**
+ * Put the reply OMP is writing now (a snapshot's `streaming`: the deltas so far,
+ * added up by the daemon) in place of any open one the phone was building: it
+ * may have missed deltas, the daemon has not. The updates that follow add to it.
+ */
+export function withStreaming(items: ChatItem[], message: AgentMessage): ChatItem[] {
+  const rest = items.filter((item) => !(item.kind === "message" && item.role === "assistant" && item.open === true));
+  const started = applyEvent(rest, { type: "message_start", message: { ...message, role: "assistant" } });
+  // It is what the deltas so far add up to: the next ones continue it.
+  return started.map((item, index) =>
+    index === started.length - 1 && item.kind === "message" ? { ...item, streamed: { text: item.text, thinking: item.thinking ?? "" } } : item,
+  );
+}
+
+/**
  * Fold one OMP session event into the transcript.
  * Events are the same union `omp --mode rpc` emits; only the parts the native
  * UI renders are interpreted.
