@@ -4,6 +4,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.1
+
 - Header, composer and tab bar are solid again, in the page's own colour. The blurred bars of v0.8.0 came out grey and white, with bright bands at the screen edges, on some phones.
 
 ### 中文
