@@ -1,5 +1,5 @@
-import { useCallback, useRef, type ReactNode, type RefObject } from "react";
-import { Text, View, type LayoutChangeEvent, type View as ViewType } from "react-native";
+import { useCallback, useRef, type ReactNode } from "react";
+import { Text, View, type LayoutChangeEvent } from "react-native";
 import Animated, {
   Extrapolation,
   interpolate,
@@ -72,17 +72,15 @@ export function usePageTop(): number {
 
 /**
  * The glass bar over a large-title page: at the top of the page it is not
- * there at all (no blur, no tint); over the first 40 px of scroll the material
+ * there at all (no tint); over the first 40 px of scroll the material
  * arrives, and the inline title fades in as the large one finishes passing under.
  */
 export function PageBar({
-  target,
   y,
   title,
   left,
   right,
 }: {
-  target: RefObject<ViewType | null>;
   y: SharedValue<number>;
   title: string;
   left?: ReactNode;
@@ -93,7 +91,7 @@ export function PageBar({
   const material = useDerivedValue(() => interpolate(y.get(), [0, MATERIAL_AFTER], [0, 1], Extrapolation.CLAMP));
   const inline = useAnimatedStyle(() => ({ opacity: interpolate(y.get(), INLINE_FADE, [0, 1], Extrapolation.CLAMP) }));
   return (
-    <Glass target={target} edge="bottom" material={material} style={[styles.bar, { height: insets.top + BAR_HEIGHT, paddingTop: insets.top }]}>
+    <Glass edge="bottom" material={material} style={[styles.bar, { height: insets.top + BAR_HEIGHT, paddingTop: insets.top }]}>
       <View style={styles.side}>{left}</View>
       {/* The large title is the heading; this copy is only its collapsed form. */}
       <Animated.Text

@@ -16,19 +16,16 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  * `card`s (`bubbleBorder`) with violet `tile`s, the approval widget gradient
  * (`widgetA` → `widgetB` → `widgetC`), the New button (`fab`), and the system
  * colours (`sysRed`, `sysGreen`, `sysBlue`, `sysOrange`, `sysYellow`).
- * Chrome over scrolling content is glass: over a real blur a thin
- * `glassThin` tint, where blur is unavailable the thicker `glass` tint that
- * keeps text legible on its own, and a `glassEdge` hairline where the bar
- * meets content.
+ * Chrome over scrolling content (`glass`) is opaque and the page's own colour:
+ * the bar is the page, and only a `glassEdge` hairline marks where content
+ * runs on under it. Anything translucent there shows text through as noise.
  */
 export function palette(scheme: ColorSchemeName) {
   return scheme === "light"
     ? {
         dark: false,
         bg: "#f2f2f7",
-        glass: "#f9f9fbb8",
-        // Light glass stays frosted over a blur too: thin, the blur's own darkening shows as gray.
-        glassThin: "#f9f9fbc7",
+        glass: "#f2f2f7",
         glassEdge: "#00000026",
         panel: "#ffffff",
         raised: "#ffffff",
@@ -97,8 +94,7 @@ export function palette(scheme: ColorSchemeName) {
     : {
         dark: true,
         bg: "#000000",
-        glass: "#0b0b0eb3",
-        glassThin: "#0b0b0e40",
+        glass: "#000000",
         glassEdge: "#ffffff1f",
         panel: "#0a0a0c",
         raised: "#121215",

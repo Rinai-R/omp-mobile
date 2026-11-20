@@ -25,7 +25,7 @@ import { ApprovalSheet } from "../components/ApprovalSheet";
 import { GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { EmptyHero } from "../components/EmptyHero";
 import { Composer } from "../components/Composer";
-import { Glass, GlassTarget, useBlurTarget } from "../components/Glass";
+import { Glass } from "../components/Glass";
 import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
@@ -684,7 +684,6 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const contentH = useRef(0);
   const viewH = useRef(0);
   /** The list runs the full height under both glass bars; their measured heights are its insets. */
-  const glassTarget = useBlurTarget();
   const [topH, setTopH] = useState(() => insets.top + 54);
   const [bottomH, setBottomH] = useState(() => insets.bottom + 64);
   /** The list grew or the screen resized without a scroll: the oldest end moved relative to the view. */
@@ -823,7 +822,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         keyboardVerticalOffset={-insets.bottom}
       >
         <View style={styles.stage}>
-        <GlassTarget target={glassTarget} style={StyleSheet.absoluteFill}>
+        <View style={StyleSheet.absoluteFill}>
           <TranscriptFolds onShift={shift} onMessageAction={canFork ? openMessageAction : undefined} flight={flight} live={live.current}>
           <Reanimated.FlatList
             ref={listRef}
@@ -876,9 +875,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
               ) : null}
             </AnimatedPressable>
           ) : null}
-        </GlassTarget>
+        </View>
         <Glass
-          target={glassTarget}
           edge="bottom"
           under={oldestEdge}
           style={{ paddingTop: insets.top }}
@@ -978,7 +976,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         ) : null}
         </Glass>
 
-        <Glass target={glassTarget} edge="top" under={newestEdge} onLayout={(event) => setBottomH(event.nativeEvent.layout.height)}>
+        <Glass edge="top" under={newestEdge} onLayout={(event) => setBottomH(event.nativeEvent.layout.height)}>
         {todoProgress(todos).total > 0 ? (
           <View style={styles.todos}>
             <TodoPanel phases={todos} />

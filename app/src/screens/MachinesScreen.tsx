@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { RefreshControl, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { pairMachine } from "../api";
 import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
-import { GlassTarget, useBlurTarget } from "../components/Glass";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -55,8 +54,7 @@ interface Props {
   onRefresh: () => void;
   /** Shown as a tab under the tab bar; false while no computer is paired (this is the first screen then, settings behind a button). */
   tabbed: boolean;
-  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar; only as a tab. */
-  blurTarget?: RefObject<View | null>;
+  /** Where this page reports how much of it runs on under the tab bar; only as a tab. */
   under?: SharedValue<number>;
 }
 
@@ -74,14 +72,11 @@ export function MachinesScreen({
   refreshing,
   onRefresh,
   tabbed,
-  blurTarget,
   under,
 }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
-  const ownTarget = useBlurTarget();
-  const target = blurTarget ?? ownTarget;
   const page = usePageScroll(under);
   const top = usePageTop();
   const [adding, setAdding] = useState(false);
@@ -208,7 +203,6 @@ export function MachinesScreen({
 
   return (
     <View style={styles.root}>
-      <GlassTarget target={target}>
       <Reanimated.ScrollView
         {...page.props}
         contentContainerStyle={[
@@ -278,9 +272,7 @@ export function MachinesScreen({
           </>
         )}
       </Reanimated.ScrollView>
-      </GlassTarget>
       <PageBar
-        target={target}
         y={page.y}
         title={t("machines.title")}
         right={

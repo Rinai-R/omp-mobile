@@ -1,9 +1,8 @@
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Switch, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { BackGlyph, CheckGlyph } from "../components/icons";
-import { GlassTarget, useBlurTarget } from "../components/Glass";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { Button, Group, IconButton, Row, SectionHeader } from "../components/ui";
@@ -36,8 +35,7 @@ interface Props {
   /** Back to the computers screen: only before any computer is paired, when there is no tab bar. */
   onBack?: () => void;
   version: string;
-  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar; only as a tab. */
-  blurTarget?: RefObject<View | null>;
+  /** Where this page reports how much of it runs on under the tab bar; only as a tab. */
   under?: SharedValue<number>;
 }
 
@@ -60,20 +58,16 @@ export function SettingsScreen({
   onAllowLive,
   onBack,
   version,
-  blurTarget,
   under,
 }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const ownTarget = useBlurTarget();
-  const target = blurTarget ?? ownTarget;
   const page = usePageScroll(under);
   const top = usePageTop();
   const showBattery = notifications === "on" && batteryRestricted;
   return (
     <View style={styles.root}>
-      <GlassTarget target={target}>
       <Reanimated.ScrollView
         {...page.props}
         contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: (onBack === undefined ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}
@@ -167,9 +161,7 @@ export function SettingsScreen({
           <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last />
         </Group>
       </Reanimated.ScrollView>
-      </GlassTarget>
       <PageBar
-        target={target}
         y={page.y}
         title={t("settings.title")}
         left={
