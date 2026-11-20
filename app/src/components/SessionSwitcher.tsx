@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,7 +19,7 @@ import { t } from "../i18n/index.ts";
 import { LiveDot } from "./brand";
 import { CloseGlyph, PlusGlyph, SearchGlyph } from "./icons";
 import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch } from "./SessionList";
-import { sheetTransforms, useSheetMotion } from "./ui";
+import { SheetGrab, SheetHost, SheetScrollView, SheetSurface, useSheet } from "./ui";
 
 
 interface Props {
@@ -50,8 +48,7 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { mounted, progress } = useSheetMotion(visible);
-  const motion = sheetTransforms(progress, height);
+  const sheet = useSheet(visible, onClose);
   const [tab, setTab] = useState<string | undefined>(machine?.id);
   const [query, setQuery] = useState("");
   // Each opening starts on the machine on screen, with an empty search.
@@ -68,12 +65,9 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
   const { remote, results, error: searchError } = useSessionSearch(selected, query, visible);
 
   return (
-    <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <View style={styles.root}>
-        <Animated.View style={[styles.scrim, motion.backdrop]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("common.close")} />
-        </Animated.View>
-        <Animated.View style={[styles.sheet, { height: Math.min(height * 0.88, height - insets.top - 24), paddingBottom: insets.bottom }, motion.sheet]}>
+    <SheetHost sheet={sheet} backdropLabel={t("common.close")}>
+      <SheetSurface style={[styles.sheet, { height: Math.min(height * 0.88, height - insets.top - 24), paddingBottom: insets.bottom }]} skirt={colors.overlay}>
+        <SheetGrab>
           <View style={styles.grab} />
           <View style={styles.head}>
             <Text style={styles.title} accessibilityRole="header">
@@ -91,97 +85,97 @@ export function SessionSwitcher({ visible, machines, probes, machine, currentSes
               </Pressable>
             ) : null}
           </View>
-          <View style={styles.search}>
-            <SearchGlyph size={15} color={colors.fgGhost} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder={t("sessions.search")}
-              placeholderTextColor={colors.fgGhost}
-              selectionColor={colors.ring}
-              cursorColor={colors.accent}
-              style={styles.searchInput}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-              autoFocus={search}
-            />
-            {query !== "" ? (
-              <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("sessions.clearSearch")}>
-                <CloseGlyph size={13} color={colors.fgFaint} />
-              </Pressable>
-            ) : null}
-          </View>
-          {machines.length > 1 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} style={styles.tabsScroll}>
-              {machines.map((item) => {
-                const on = item.id === selected?.id;
-                const dot = summaryOf(probes.get(item.id), item.lastSeen, Date.now()).dot;
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => setTab(item.id)}
-                    style={({ pressed }) => [on ? styles.tabOn : styles.tab, pressed && styles.pressed]}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: on }}
-                    accessibilityLabel={item.name}
-                  >
-                    <LiveDot color={dot === "online" ? colors.ok : dot === "down" ? colors.fgGhost : colors.warn} size={7} />
-                    <Text style={on ? styles.tabTextOn : styles.tabText} numberOfLines={1}>
-                      {machineLabel(item, machines)}
-                    </Text>
-                    {on && counts.waiting > 0 ? (
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{counts.waiting}</Text>
-                      </View>
-                    ) : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+        </SheetGrab>
+        <View style={styles.search}>
+          <SearchGlyph size={15} color={colors.fgGhost} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t("sessions.search")}
+            placeholderTextColor={colors.fgGhost}
+            selectionColor={colors.ring}
+            cursorColor={colors.accent}
+            style={styles.searchInput}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            autoFocus={search}
+          />
+          {query !== "" ? (
+            <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel={t("sessions.clearSearch")}>
+              <CloseGlyph size={13} color={colors.fgFaint} />
+            </Pressable>
           ) : null}
-          <ScrollView style={styles.list} contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-            {remote ? (
-              results === null ? (
-                <View style={styles.center}>
-                  {searchError !== null ? <Text style={styles.error}>{searchError}</Text> : <ActivityIndicator color={colors.fgFaint} />}
-                </View>
-              ) : results.length === 0 ? (
-                <View style={styles.center}>
-                  <Text style={styles.emptyText}>{t("sessions.noMatch")}</Text>
-                </View>
-              ) : (
-                <SearchResults
-                  results={results}
-                  currentId={selected?.id === machine?.id ? currentSessionId : undefined}
-                  onPress={(session, at) => {
-                    if (selected !== undefined) onPick(selected, session, at);
-                  }}
-                />
-              )
-            ) : sessions === undefined ? (
+        </View>
+        {machines.length > 1 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs} style={styles.tabsScroll}>
+            {machines.map((item) => {
+              const on = item.id === selected?.id;
+              const dot = summaryOf(probes.get(item.id), item.lastSeen, Date.now()).dot;
+              return (
+                <Pressable
+                  key={item.id}
+                  onPress={() => setTab(item.id)}
+                  style={({ pressed }) => [on ? styles.tabOn : styles.tab, pressed && styles.pressed]}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: on }}
+                  accessibilityLabel={item.name}
+                >
+                  <LiveDot color={dot === "online" ? colors.ok : dot === "down" ? colors.fgGhost : colors.warn} size={7} />
+                  <Text style={on ? styles.tabTextOn : styles.tabText} numberOfLines={1}>
+                    {machineLabel(item, machines)}
+                  </Text>
+                  {on && counts.waiting > 0 ? (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{counts.waiting}</Text>
+                    </View>
+                  ) : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+        <SheetScrollView style={styles.list} contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          {remote ? (
+            results === null ? (
               <View style={styles.center}>
-                {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.fgFaint} />}
+                {searchError !== null ? <Text style={styles.error}>{searchError}</Text> : <ActivityIndicator color={colors.fgFaint} />}
               </View>
-            ) : groups.length === 0 ? (
+            ) : results.length === 0 ? (
               <View style={styles.center}>
-                <Text style={styles.emptyText}>{query !== "" ? t("sessions.noMatch") : t("sessions.none")}</Text>
+                <Text style={styles.emptyText}>{t("sessions.noMatch")}</Text>
               </View>
             ) : (
-              <SessionGroups
-                groups={groups}
-                flat
+              <SearchResults
+                results={results}
                 currentId={selected?.id === machine?.id ? currentSessionId : undefined}
-                onPress={(session) => {
-                  if (selected !== undefined) onPick(selected, session);
+                onPress={(session, at) => {
+                  if (selected !== undefined) onPick(selected, session, at);
                 }}
               />
-            )}
-            {loading && sessions !== undefined ? <ActivityIndicator style={styles.refreshing} size="small" color={colors.fgGhost} /> : null}
-          </ScrollView>
-        </Animated.View>
-      </View>
-    </Modal>
+            )
+          ) : sessions === undefined ? (
+            <View style={styles.center}>
+              {error !== null ? <Text style={styles.error}>{error}</Text> : <ActivityIndicator color={colors.fgFaint} />}
+            </View>
+          ) : groups.length === 0 ? (
+            <View style={styles.center}>
+              <Text style={styles.emptyText}>{query !== "" ? t("sessions.noMatch") : t("sessions.none")}</Text>
+            </View>
+          ) : (
+            <SessionGroups
+              groups={groups}
+              flat
+              currentId={selected?.id === machine?.id ? currentSessionId : undefined}
+              onPress={(session) => {
+                if (selected !== undefined) onPick(selected, session);
+              }}
+            />
+          )}
+          {loading && sessions !== undefined ? <ActivityIndicator style={styles.refreshing} size="small" color={colors.fgGhost} /> : null}
+        </SheetScrollView>
+      </SheetSurface>
+    </SheetHost>
   );
 }
 
@@ -200,8 +194,6 @@ function createStyles(c: Palette) {
   } as const;
   const tabText = { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgMuted, maxWidth: 260 } as const;
   return {
-    root: { flex: 1, justifyContent: "flex-end" },
-    scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
     sheet: {
       width: "100%",
       maxWidth: 640,
@@ -212,7 +204,6 @@ function createStyles(c: Palette) {
       borderBottomWidth: 0,
       borderColor: c.borderStrong,
       backgroundColor: c.overlay,
-      overflow: "hidden",
     },
     grab: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, backgroundColor: c.borderStrong, marginTop: 8, marginBottom: 4 },
     head: { flexDirection: "row", alignItems: "center", paddingHorizontal: 18, paddingTop: 6, paddingBottom: 12 },

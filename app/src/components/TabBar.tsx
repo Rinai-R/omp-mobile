@@ -1,10 +1,12 @@
-import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { ReactNode, RefObject } from "react";
+import { Text, View } from "react-native";
+import type { SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { haptic } from "../haptics";
 import { t } from "../i18n/index.ts";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
+import { Glass } from "./Glass";
 import { ChatGlyph, ComputerGlyph, SettingsGlyph } from "./icons";
+import { PressableScale } from "./ui";
 
 /** The app's three root tabs: one bar under all of them, so moving between them never leaves the shell. */
 export type Tab = "sessions" | "computers" | "settings";
@@ -18,56 +20,59 @@ const TABS: readonly { tab: Tab; label: () => string; icon: (color: string) => R
   { tab: "settings", label: () => t("common.settings"), icon: (color) => <SettingsGlyph size={24} color={color} /> },
 ];
 
-/** The translucent bottom tab bar; `badge` counts sessions waiting for an answer, on the Sessions tab. */
-export function TabBar({ current, badge, onSelect }: { current: Tab; badge: number; onSelect: (tab: Tab) => void }): ReactNode {
+/**
+ * The bottom tab bar, glass over the current tab's page; `badge` counts sessions waiting for an answer, on the Sessions tab.
+ * @param target - the current tab's `GlassTarget`; `under` - how much of its content runs on under the bar.
+ */
+export function TabBar({
+  current,
+  badge,
+  onSelect,
+  target,
+  under,
+}: {
+  current: Tab;
+  badge: number;
+  onSelect: (tab: Tab) => void;
+  target: RefObject<View | null>;
+  under: SharedValue<number>;
+}): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.bar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
+    <Glass target={target} edge="top" under={under} style={[styles.bar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
       {TABS.map(({ tab, label, icon }) => {
         const on = tab === current;
         return (
-          <Pressable
+          // Press feedback only: switching tabs itself never animates (peers, not depth).
+          <PressableScale
             key={tab}
-            onPress={() => {
-              if (!on) haptic.select();
-              onSelect(tab);
-            }}
+            onPress={() => onSelect(tab)}
+            // A small icon and label: a deeper sink than a row so it reads at this size.
+            scale={0.92}
             style={styles.tab}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
             accessibilityLabel={label()}
           >
-            {icon(on ? colors.tint : colors.fgFaint)}
+            {/* Over glass the resting tabs take the muted ink, not the faint one: they stay legible over any row. */}
+            {icon(on ? colors.tint : colors.fgMuted)}
             <Text style={on ? styles.textOn : styles.text}>{label()}</Text>
             {tab === "sessions" && badge > 0 ? (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{badge}</Text>
               </View>
             ) : null}
-          </Pressable>
+          </PressableScale>
         );
       })}
-    </View>
-  );
-}
-
-/** A root tab's large title, with actions at its right, as the Sessions tab sets it. */
-export function LargeTitle({ title, right }: { title: string; right?: ReactNode }): ReactNode {
-  const styles = useStyles(createStyles);
-  return (
-    <View style={styles.titleRow}>
-      <Text style={styles.title} accessibilityRole="header" numberOfLines={1}>
-        {title}
-      </Text>
-      {right !== undefined ? <View style={styles.titleRight}>{right}</View> : null}
-    </View>
+    </Glass>
   );
 }
 
 function createStyles(c: Palette) {
-  const text = { fontFamily: SANS, fontSize: 10.5, lineHeight: 13, fontWeight: "500", color: c.fgFaint } as const;
+  const text = { fontFamily: SANS, fontSize: 10.5, lineHeight: 13, fontWeight: "500", color: c.fgMuted } as const;
   return {
     bar: {
       position: "absolute",
@@ -77,17 +82,11 @@ function createStyles(c: Palette) {
       flexDirection: "row",
       justifyContent: "space-around",
       paddingTop: 8,
-      backgroundColor: c.chrome,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: c.separator,
     },
     tab: { minWidth: 72, alignItems: "center", gap: 3 },
     text,
     textOn: { ...text, color: c.tint },
     badge: { position: "absolute", top: -4, left: 42, minWidth: 18, height: 18, paddingHorizontal: 5, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.badge },
     badgeText: { fontFamily: SANS, fontSize: 11, lineHeight: 14, fontWeight: "600", color: "#ffffff" },
-    titleRow: { flexDirection: "row", alignItems: "center", minHeight: 44, paddingHorizontal: 20, paddingTop: 14, marginBottom: 14 },
-    title: { flex: 1, fontFamily: SANS, fontSize: 28, lineHeight: 34, fontWeight: "600", letterSpacing: -0.7, color: c.fg },
-    titleRight: { flexDirection: "row", alignItems: "center", gap: 4 },
   } as const;
 }

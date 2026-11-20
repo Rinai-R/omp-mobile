@@ -1,10 +1,12 @@
 import * as Clipboard from "expo-clipboard";
 import {
   createContext,
+  Fragment,
   memo,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,7 +23,22 @@ import {
   View,
   type FontVariant,
   type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
+  useWindowDimensions,
 } from "react-native";
+import Reanimated, {
+  ReduceMotion,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+  type WithTimingConfig,
+} from "react-native-reanimated";
+import { EASE_OUT, QUICK } from "../motion";
+import { haptic } from "../haptics";
+import type { Frame, SendFlight, Shown } from "../sendFlight";
 import { editDiff } from "../diff";
 import { imageUri, relayImageUri } from "../media";
 import { resultText } from "../messages";
@@ -42,14 +59,13 @@ import {
   type Step,
   type ToolKind,
 } from "../rows";
-import { MONO, SANS, SCALE, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, SANS, SCALE, radius, type, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem, ToolItem } from "../types";
 import { BrandMark, GradientFill, Orb, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
 import {
   AgentsGlyph,
   CheckGlyph,
   ChevronDownGlyph,
-  ChevronUpGlyph,
   CloseGlyph,
   CopyGlyph,
   FileGlyph,
@@ -112,6 +128,17 @@ const ArmContext = createContext<() => void>(() => undefined);
  */
 const MessageActionContext = createContext<((item: MessageItem) => void) | undefined>(undefined);
 
+/** The flight of a message just sent, which the newest user row may be the landing of. */
+const FlightContext = createContext<SendFlight | undefined>(undefined);
+
+/**
+ * The daemon's transcript is in (`live`): a turn seen running from here on is live, not
+ * replayed history. `turns` remembers, per turn id, that it was seen running and whether its
+ * finish has played, outside the divider: the divider remounts as the turn's rows regroup
+ * on finishing, which would forget it was ever watched.
+ */
+const LiveContext = createContext<{ live: boolean; turns: Map<string, "watched" | "played"> }>({ live: false, turns: new Map() });
+
 function useArm(): () => void {
   return useContext(ArmContext);
 }
@@ -124,12 +151,18 @@ export function TranscriptFolds({
   children,
   onShift,
   onMessageAction,
+  flight,
+  live = false,
 }: {
   children: ReactNode;
   onShift?: (delta: number) => void;
   onMessageAction?: (item: MessageItem) => void;
+  flight?: SendFlight;
+  live?: boolean;
 }): ReactNode {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const [turns] = useState(() => new Map<string, "watched" | "played">());
+  const liveValue = useMemo(() => ({ live, turns }), [live, turns]);
   const toggle = useCallback((turn: string) => {
     setFolded((current) => {
       const next = new Set(current);
@@ -143,7 +176,11 @@ export function TranscriptFolds({
   return (
     <ShiftContext.Provider value={shift}>
       <MessageActionContext.Provider value={onMessageAction}>
-        <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+        <FlightContext.Provider value={flight}>
+          <LiveContext.Provider value={liveValue}>
+            <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+          </LiveContext.Provider>
+        </FlightContext.Provider>
       </MessageActionContext.Provider>
     </ShiftContext.Provider>
   );
@@ -160,11 +197,14 @@ interface RowProps {
 
 function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps): ReactNode {
   const { folded } = useContext(FoldContext);
+  const flight = useContext(FlightContext);
+  // Decided once, as the row mounts: the message just sent (the optimistic copy) lands here instead of playing the entrance.
+  const [flying] = useState(() => row.kind === "user" && row.item.local === true && flight !== undefined && flight.wants(row.item.text.trim()));
   const hidden = (row.kind === "thinking" || row.kind === "activity") && folded.has(row.turn);
   let body: ReactNode;
   switch (row.kind) {
     case "user":
-      body = <UserMessage item={row.item} machine={machine} />;
+      body = <UserMessage item={row.item} machine={machine} flight={flying ? flight : undefined} />;
       break;
     case "turn":
       body = <TurnDivider row={row} />;
@@ -192,7 +232,7 @@ function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps)
   }
   // Always the same wrapper: switching it off after the first frame would remount the row.
   return (
-    <Enter animate={animate} gap={hidden ? 0 : row.gap}>
+    <Enter animate={animate && !flying} gap={hidden ? 0 : row.gap}>
       {hidden ? null : body}
     </Enter>
   );
@@ -249,8 +289,12 @@ export const TranscriptRow = memo(
     sameRow(prev.row, next.row),
 );
 
+/** A live row's entrance: a short fade and an 8 dp rise (just the fade under reduced motion). */
+const RISE = 8;
+
 function Enter({ animate, gap, children }: { animate: boolean; gap: number; children: ReactNode }): ReactNode {
-  const value = useEnter(300, !animate);
+  const value = useEnter(220, !animate);
+  const reduced = useReducedMotion();
   const shift = useContext(ShiftContext);
   const height = useRef<number | undefined>(undefined);
   const armed = useRef(false);
@@ -269,20 +313,59 @@ function Enter({ animate, gap, children }: { animate: boolean; gap: number; chil
     },
     [shift],
   );
+  const entrance = useAnimatedStyle(() => {
+    const v = value.get();
+    return { opacity: v, transform: [{ translateY: reduced ? 0 : (1 - v) * RISE }] };
+  }, [reduced]);
   return (
     <ArmContext.Provider value={arm}>
-    <Animated.View
-      onLayout={onLayout}
-      style={{
-        marginTop: gap,
-        paddingHorizontal: GUTTER,
-        opacity: value,
-        transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
-      }}
-    >
+    <Reanimated.View onLayout={onLayout} style={[{ marginTop: gap, paddingHorizontal: GUTTER }, entrance]}>
       {children}
-    </Animated.View>
+    </Reanimated.View>
     </ArmContext.Provider>
+  );
+}
+
+/** Follows `open` 0 → 1 on the UI thread, starting where it is so a quick second tap reverses it. */
+function useOpenProgress(open: boolean): SharedValue<number> {
+  const value = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    value.set(withTiming(open ? 1 : 0, QUICK));
+  }, [open, value]);
+  return value;
+}
+
+/** False only during the first render: what is open as a row mounts shows at once, what opens on a tap fades in. */
+function useMounted(): boolean {
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+  }, []);
+  return mounted.current;
+}
+
+/**
+ * What a row opens onto. It fades in when opened by a tap; its height is not
+ * animated (that would lay the list out every frame), the fade carries the change.
+ */
+function Reveal({ play, style, children }: { play: boolean; style: StyleProp<ViewStyle>; children: ReactNode }): ReactNode {
+  const value = useEnter(180, !play);
+  const fade = useAnimatedStyle(() => ({ opacity: value.get() }));
+  return <Reanimated.View style={[style, fade]}>{children}</Reanimated.View>;
+}
+
+/** A chevron that points down while closed and turns to point up as its row opens; `fade` also hides it while closed. */
+function Turn({ open, fade = false }: { open: boolean; fade?: boolean }): ReactNode {
+  const colors = useColors();
+  const progress = useOpenProgress(open);
+  const style = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: fade ? p : 1, transform: [{ rotate: `${p * 180}deg` }] };
+  }, [fade]);
+  return (
+    <Reanimated.View style={style}>
+      <ChevronDownGlyph size={14} color={colors.fgFaint} />
+    </Reanimated.View>
   );
 }
 
@@ -316,6 +399,7 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
     arm();
     toggle(row.id);
   }, [arm, row.id, toggle]);
+  const beat = useFinishBeat(row);
   const foldable = row.members > 0;
   const label = row.running ? liveLabel(row.live) : turnLabel(row);
   const elapsed = row.running && row.startedAt !== undefined ? turnDuration(Math.max(0, now - row.startedAt)) : undefined;
@@ -330,7 +414,11 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
       accessibilityHint={foldable ? (open ? t("turn.foldA11y") : t("turn.unfoldA11y")) : undefined}
     >
       <Animated.View style={[styles.dividerMark, row.running ? { opacity: markOpacity } : null]}>
-        <BrandMark size={13} color={row.running ? undefined : row.end === "failed" ? colors.err : colors.fgGhost} />
+        {beat !== undefined ? (
+          <FinishMark progress={beat} />
+        ) : (
+          <BrandMark size={13} color={row.running ? undefined : row.end === "failed" ? colors.err : colors.fgGhost} />
+        )}
       </Animated.View>
       {row.running ? (
         <>
@@ -342,18 +430,79 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
           ) : null}
         </>
       ) : (
-        <Text style={row.end === "failed" ? styles.dividerFailed : styles.dividerText} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
-          {label}
-        </Text>
+        <FadeIn progress={beat}>
+          <Text style={row.end === "failed" ? styles.dividerFailed : styles.dividerText} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+            {label}
+          </Text>
+        </FadeIn>
       )}
       {foldable ? (
         <View style={styles.dividerChevron}>
-          {open ? <ChevronUpGlyph size={14} color={colors.fgFaint} /> : <ChevronDownGlyph size={14} color={colors.fgFaint} />}
+          <Turn open={open} />
         </View>
       ) : null}
     </Pressable>
   );
 }
+
+const BEAT: WithTimingConfig = { duration: 220, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
+
+/**
+ * The moment a turn seen running live finishes "Done": its progress 0 → 1 (220 ms),
+ * with one success tap. Undefined for turns loaded finished, replayed, failed or stopped,
+ * and for a finish that already played (a remount shows the plain mark).
+ */
+function useFinishBeat(row: Extract<Row, { kind: "turn" }>): SharedValue<number> | undefined {
+  const { live, turns } = useContext(LiveContext);
+  const progress = useSharedValue(0);
+  const [beat, setBeat] = useState(false);
+  // Idempotent, so safe while rendering: the mark outlives this divider.
+  if (row.running && live && !turns.has(row.id)) turns.set(row.id, "watched");
+  const due = !row.running && turns.get(row.id) === "watched";
+  // Before paint: the frame the turn ends already draws the beat's first state, not the plain text.
+  useLayoutEffect(() => {
+    if (!due || turns.get(row.id) !== "watched") return;
+    turns.set(row.id, "played");
+    if (row.end !== "done") return;
+    setBeat(true);
+    haptic.done();
+    progress.set(withTiming(1, BEAT));
+  }, [due, progress, row.end, row.id, turns]);
+  return beat ? progress : undefined;
+}
+
+/** The π giving way to a check: crossfade, the check growing from 0.8 (no growth under reduced motion). */
+function FinishMark({ progress }: { progress: SharedValue<number> }): ReactNode {
+  const colors = useColors();
+  const reduced = useReducedMotion();
+  const mark = useAnimatedStyle(() => ({ opacity: 1 - progress.get() }));
+  const check = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: p, transform: [{ scale: reduced ? 1 : 0.8 + 0.2 * p }] };
+  }, [reduced]);
+  return (
+    <>
+      <Reanimated.View style={[StyleSheet.absoluteFill, CENTER, mark]}>
+        <BrandMark size={13} color={colors.fgGhost} />
+      </Reanimated.View>
+      <Reanimated.View style={check}>
+        <CheckGlyph size={14} color={colors.ok} />
+      </Reanimated.View>
+    </>
+  );
+}
+
+const CENTER = { alignItems: "center", justifyContent: "center" } as const;
+
+/** Fades its child in with `progress`; a plain wrapper otherwise. */
+function FadeIn({ progress, children }: { progress: SharedValue<number> | undefined; children: ReactNode }): ReactNode {
+  const fallback = useSharedValue(1);
+  const value = progress ?? fallback;
+  const style = useAnimatedStyle(() => ({ opacity: value.get() }));
+  return <Reanimated.View style={[FADE_WRAP, style]}>{children}</Reanimated.View>;
+}
+
+const FADE_WRAP = { flexShrink: 1 } as const;
 
 /** Images on a message or a step; tapping one opens it full screen. */
 export function Thumbs({
@@ -415,7 +564,7 @@ export function Thumbs({
 }
 
 /** The user's message: images above, then a tinted bubble, both on the right. A long press opens its actions. */
-function UserMessage({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
+function UserMessage({ item, machine, flight }: { item: MessageItem; machine: Machine; flight?: SendFlight }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const action = useContext(MessageActionContext);
@@ -423,26 +572,127 @@ function UserMessage({ item, machine }: { item: MessageItem; machine: Machine })
   // The actions offer Copy, so the bubble gives up text selection, which would take the long press.
   // Not until OMP has it: a fork from here needs OMP's copy of the message.
   const actionable = action !== undefined && item.createdAt !== undefined && item.local !== true;
+  const bubble = hasText ? (
+    <Pressable
+      onLongPress={actionable ? () => action(item) : undefined}
+      disabled={!actionable}
+      style={item.local === true ? [styles.bubble, styles.bubbleSending] : styles.bubble}
+      accessibilityHint={actionable ? t("fork.messageHint") : undefined}
+    >
+      <GradientFill colors={[colors.userA, colors.userB]} />
+      <Text style={styles.bubbleText} selectable={!actionable} maxFontSizeMultiplier={SCALE.body}>
+        {item.text.trim()}
+      </Text>
+    </Pressable>
+  ) : null;
   return (
     <View style={styles.userRow}>
       <Thumbs parts={item.images} machine={machine} size={hasText ? 96 : 140} end />
-      {hasText ? (
-        <Pressable
-          onLongPress={actionable ? () => action(item) : undefined}
-          disabled={!actionable}
-          style={item.local === true ? [styles.bubble, styles.bubbleSending] : styles.bubble}
-          accessibilityHint={actionable ? t("fork.messageHint") : undefined}
-        >
-          <GradientFill colors={[colors.userA, colors.userB]} />
-          <Text style={styles.bubbleText} selectable={!actionable} maxFontSizeMultiplier={SCALE.body}>
-            {item.text.trim()}
-          </Text>
-        </Pressable>
-      ) : null}
+      {flight !== undefined && bubble !== null ? (
+        <Landing flight={flight} text={item.text.trim()}>
+          {bubble}
+        </Landing>
+      ) : (
+        bubble
+      )}
       {item.local === true ? <Text style={styles.sending}>{item.queued === true ? t("composer.queuedLabel") : t("chat.sending")}</Text> : null}
     </View>
   );
 }
+
+/** The bubble a sent message flies into: hidden until the flight hands over, measured once laid out. */
+function Landing({ flight, text, children }: { flight: SendFlight; text: string; children: ReactNode }): ReactNode {
+  const opacity = useSharedValue(0);
+  const rise = useSharedValue(0);
+  const ref = useRef<View>(null);
+  const id = useRef<number | undefined>(undefined);
+  const measured = useRef(false);
+  useLayoutEffect(() => {
+    id.current = flight.claim(text, { opacity, rise });
+    // Too late for the flight (or a remount after it): just show.
+    if (id.current === undefined) opacity.set(1);
+  }, [flight, opacity, rise, text]);
+  const onLayout = useCallback(() => {
+    const claimed = id.current;
+    if (measured.current || claimed === undefined) return;
+    measured.current = true;
+    const node = ref.current;
+    if (node === null) flight.placed(claimed, undefined);
+    else node.measureInWindow((x, y, width, height) => flight.placed(claimed, { x, y, width, height } satisfies Frame));
+  }, [flight]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.get(), transform: [{ translateY: rise.get() }] }));
+  return (
+    <Reanimated.View ref={ref} onLayout={onLayout} style={[{ maxWidth: "100%" }, style]}>
+      {children}
+    </Reanimated.View>
+  );
+}
+
+/** Room the user's bubble leaves on the left (`userRow`'s indent). */
+const USER_INDENT = 48;
+
+/**
+ * The copy of a sent message's bubble that flies from the composer to its row
+ * (see `sendFlight.ts`). It lies over the whole chat screen and takes no touches.
+ */
+export function SendFlightLayer({ flight }: { flight: SendFlight }): ReactNode {
+  const styles = useStyles(createStyles);
+  const colors = useColors();
+  const { width } = useWindowDimensions();
+  const [shown, setShown] = useState<Shown | null>(null);
+  useEffect(() => {
+    flight.listener = setShown;
+    return () => {
+      flight.listener = null;
+    };
+  }, [flight]);
+  const values = flight.values;
+  const box = useAnimatedStyle(() => {
+    const p = values.progress.get();
+    const scale = values.fromScale.get();
+    return {
+      opacity: values.visible.get() * (1 - SENDING_DIM * p),
+      transform: [
+        { translateX: values.fromX.get() + (values.toX.get() - values.fromX.get()) * p },
+        { translateY: values.fromY.get() + (values.toY.get() - values.fromY.get()) * p },
+        { scale: scale + (1 - scale) * p },
+      ],
+    };
+  });
+  // The bubble's tint arrives a little ahead of its place, so it reads as a bubble before it settles.
+  const skin = useAnimatedStyle(() => ({ opacity: Math.min(1, values.progress.get() * 1.4) }));
+  const id = shown?.id;
+  return (
+    <View
+      ref={(node) => {
+        flight.host = node;
+      }}
+      style={styles.flightHost}
+      collapsable={false}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {/* Always mounted: a flight only waits for React to commit its text, never for the view to appear. */}
+      <Reanimated.View collapsable={false} style={[styles.flight, { maxWidth: width - 2 * GUTTER - USER_INDENT }, box]}>
+        {shown !== null ? (
+          // Keyed, so each flight's text reports its layout, which is what lets the flight show.
+          <View key={shown.id} style={styles.flightBody} onLayout={() => id !== undefined && flight.drawn(id)}>
+            <Reanimated.View style={[styles.flightSkin, skin]}>
+              <GradientFill colors={[colors.userA, colors.userB]} />
+            </Reanimated.View>
+            <Text style={styles.bubbleText} maxFontSizeMultiplier={SCALE.body}>
+              {shown.text}
+            </Text>
+          </View>
+        ) : null}
+      </Reanimated.View>
+    </View>
+  );
+}
+
+/** A bubble still sending is drawn at 0.7 (`bubbleSending`): the flight lands at the same. */
+const SENDING_DIM = 0.3;
 
 function Caret(): ReactNode {
   const styles = useStyles(createStyles);
@@ -468,11 +718,24 @@ function Reply({ item, machine }: { item: MessageItem; machine: Machine }): Reac
   );
 }
 
-/** A work row's leading slot: a 16 dp box holding the row's glyph, or a chevron once it is open. */
+/** A work row's leading slot: a 16 dp box holding the row's glyph, which turns into a chevron as the row opens. */
 function Lead({ open, children }: { open: boolean; children: ReactNode }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
-  return <View style={styles.lead}>{open ? <ChevronUpGlyph size={14} color={colors.fgFaint} /> : children}</View>;
+  const progress = useOpenProgress(open);
+  const glyph = useAnimatedStyle(() => ({ opacity: 1 - progress.get() }));
+  const chevron = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: p, transform: [{ rotate: `${p * 180}deg` }] };
+  });
+  return (
+    <View style={styles.lead}>
+      <Reanimated.View style={glyph}>{children}</Reanimated.View>
+      <Reanimated.View style={[styles.leadChevron, chevron]} pointerEvents="none">
+        <ChevronDownGlyph size={14} color={colors.fgFaint} />
+      </Reanimated.View>
+    </View>
+  );
 }
 
 /** "Thinking" while it streams, "Thought" after; opens in place onto the thinking, quiet and indented. */
@@ -480,6 +743,7 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -502,9 +766,9 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
         )}
       </Pressable>
       {open ? (
-        <View style={styles.thinkingBody}>
+        <Reveal play={mounted} style={styles.thinkingBody}>
           <Markdown text={(item.thinking ?? "").trim()} variant="thought" />
-        </View>
+        </Reveal>
       ) : null}
     </View>
   );
@@ -558,6 +822,7 @@ function ActivityRow({
   if (row.running && !watched) setWatched(true);
   const open = chosen ?? (row.running || watched);
   const [all, setAll] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -589,7 +854,7 @@ function ActivityRow({
         {row.failed > 0 && !row.running ? <View style={styles.failDot} /> : null}
       </Pressable>
       {open ? (
-        <View style={styles.steps}>
+        <Reveal play={mounted} style={styles.steps}>
           {row.steps.length > INLINE_STEPS ? (
             <Pressable
               onPress={() => {
@@ -606,14 +871,21 @@ function ActivityRow({
               </Text>
             </Pressable>
           ) : null}
-          {(all ? row.steps : row.steps.slice(-INLINE_STEPS)).map((value) =>
+          {stretches(all ? row.steps : row.steps.slice(-INLINE_STEPS)).map((value) =>
             value.kind === "thought" ? (
               <ThinkingRow key={value.item.id} item={value.item} />
             ) : (
-              <ToolRow key={value.tool.id} tool={value.tool} cwd={cwd} onOpen={onOpenStep} />
+              <View key={value.tools[0]!.id} style={styles.toolGroup}>
+                {value.tools.map((tool, index) => (
+                  <Fragment key={tool.id}>
+                    {index > 0 ? <View style={styles.toolSep} /> : null}
+                    <ToolRow tool={tool} cwd={cwd} onOpen={onOpenStep} />
+                  </Fragment>
+                ))}
+              </View>
             ),
           )}
-        </View>
+        </Reveal>
       ) : null}
       {images.length > 0 ? (
         <View style={styles.groupImages}>
@@ -624,8 +896,25 @@ function ActivityRow({
   );
 }
 
+type Stretch = Extract<Step, { kind: "thought" }> | { kind: "tools"; tools: ToolItem[] };
+
+/** Consecutive tool calls share one grouped container; a thought between them ends the group. */
+function stretches(steps: readonly Step[]): Stretch[] {
+  const out: Stretch[] = [];
+  for (const step of steps) {
+    if (step.kind === "thought") {
+      out.push(step);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last?.kind === "tools") last.tools.push(step.tool);
+    else out.push({ kind: "tools", tools: [step.tool] });
+  }
+  return out;
+}
+
 /**
- * One call: `[glyph] Title · summary   +3 −1`, grey and one line. Tapping it
+ * One call as a row in its group: `[tile] Title  summary   status`. Tapping it
  * opens the call in place (command output, a diff, the file it read); a long
  * press, or "Details" under it, opens the whole call in the step sheet.
  */
@@ -633,6 +922,7 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -647,20 +937,18 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const edit = stat !== undefined && /^\+\d+ −\d+$/.test(stat) ? stat.split(" ") : undefined;
   const title = toolTitle(tool);
   return (
-    <View style={running ? styles.toolCardRun : styles.toolCard}>
-      {running ? <GradientFill colors={[colors.accentV, colors.accentB]} radius={18} stroke={1.2} /> : null}
+    <View style={running ? styles.toolRowRun : undefined}>
       <Pressable
         onPress={toggle}
         onLongPress={details}
-        hitSlop={SLOP}
-        style={styles.toolLine}
+        style={({ pressed }) => (pressed ? [styles.toolLine, styles.pressed] : styles.toolLine)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={t("common.pair", { label: `${title} ${summary ?? ""}`.trim(), value: t(`step.status.${tool.status}`) })}
       >
         <View style={failed ? styles.tileErr : styles.tile}>
-          {running ? <GradientFill radius={11} /> : null}
-          <KindGlyph kind={kind} size={15} color={running ? "#ffffff" : failed ? colors.err : colors.tileFg} />
+          {running ? <GradientFill radius={8} /> : null}
+          <KindGlyph kind={kind} size={14} color={running ? "#ffffff" : failed ? colors.err : colors.tileFg} />
         </View>
         <View style={styles.toolText}>
           {running ? (
@@ -671,7 +959,7 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
             </Text>
           )}
           {summary !== undefined ? (
-            <Text style={failed ? styles.toolSummaryErr : styles.toolSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+            <Text style={styles.toolSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
               {summary}
             </Text>
           ) : null}
@@ -692,14 +980,14 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
             <Text style={styles.statAdd}>{edit[0]}</Text>
             <Text style={styles.statRemove}>{edit[1]?.replace("−", " −")}</Text>
           </Text>
-        ) : open ? (
-          <ChevronUpGlyph size={14} color={colors.fgFaint} />
-        ) : null}
+        ) : (
+          <Turn open={open} fade />
+        )}
       </Pressable>
       {open || (running && kind === "run") ? (
-        <View style={styles.toolBody}>
+        <Reveal play={mounted} style={styles.toolBody}>
           <ToolBody tool={tool} cwd={cwd} onDetails={details} />
-        </View>
+        </Reveal>
       ) : null}
     </View>
   );
@@ -973,6 +1261,16 @@ function createStyles(c: Palette) {
   const diffLine = { ...mono, paddingHorizontal: 14 } as const;
   const dot = { width: 6, height: 6, borderRadius: 3, marginTop: 7, backgroundColor: c.fgGhost } as const;
   const line = { flexDirection: "row", alignItems: "center", minHeight: LINE, alignSelf: "stretch" } as const;
+  const bubbleShape = {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 8,
+    borderWidth: 1,
+    borderColor: c.userBorder,
+    overflow: "hidden",
+  } as const;
+
   return {
     pressed: { backgroundColor: c.hover },
     fill: { flex: 1 },
@@ -992,22 +1290,17 @@ function createStyles(c: Palette) {
     dividerElapsed: { ...meta, fontSize: 13.5, lineHeight: 24, color: c.fgGhost, fontVariant: ["tabular-nums"] as FontVariant[] },
     dividerChevron: { marginLeft: 4 },
 
-    userRow: { alignItems: "flex-end", gap: 8, paddingLeft: 48 },
-    bubbleSending: { opacity: 0.7 },
+    userRow: { alignItems: "flex-end", gap: 8, paddingLeft: USER_INDENT },
+    bubbleSending: { opacity: 1 - SENDING_DIM },
     sending: { fontFamily: SANS, fontSize: 11.5, lineHeight: 15, color: c.fgFaint, marginTop: -4, marginRight: 6 },
-    bubble: {
-      maxWidth: "100%",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      borderBottomLeftRadius: 24,
-      borderBottomRightRadius: 8,
-      borderWidth: 1,
-      borderColor: c.userBorder,
-      overflow: "hidden",
-    },
+    bubble: { ...bubbleShape, maxWidth: "100%", paddingHorizontal: 16, paddingVertical: 12 },
     bubbleText: { fontFamily: SANS, fontSize: 15, lineHeight: 22, fontWeight: "400", color: c.fg },
+    // The flying copy, over everything (elevation too: Android draws raised siblings, like the glass bars, above later ones).
+    flightHost: { ...StyleSheet.absoluteFill, zIndex: 100, elevation: 100 },
+    flight: { position: "absolute", left: 0, top: 0, transformOrigin: "left top" },
+    // The bubble's text box (padding plus border); its shape is drawn by a skin that fades in.
+    flightBody: { paddingHorizontal: 17, paddingVertical: 13 },
+    flightSkin: { ...StyleSheet.absoluteFill, ...bubbleShape },
 
     reply: { gap: 10 },
     replyBubble: {
@@ -1023,19 +1316,22 @@ function createStyles(c: Palette) {
     },
     caret: { fontFamily: SANS, color: c.accentV },
 
-    toolCard: { borderRadius: 18, borderWidth: 1, borderColor: c.bubbleBorder, backgroundColor: c.card, overflow: "hidden", paddingBottom: 0 },
-    toolCardRun: { borderRadius: 18, backgroundColor: c.dark ? "#0b1418" : "#f1fbfc", overflow: "hidden" },
-    toolLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, paddingHorizontal: 10 },
-    tile: { width: 32, height: 32, borderRadius: 11, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
-    tileErr: { width: 32, height: 32, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.errSoft },
-    toolText: { flex: 1, minWidth: 0, gap: 1 },
-    toolTitle: { fontFamily: SANS, fontSize: 14, lineHeight: 19, fontWeight: "500", color: c.fg },
-    toolSummary: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
-    toolSummaryErr: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.err },
-    toolBody: { paddingHorizontal: 8, paddingBottom: 8, marginTop: -2 },
+    toolGroup: { borderRadius: radius.lg, backgroundColor: c.group, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: "hidden" },
+    // Inset like an iOS grouped list: the hairline starts after the tile (padding 12 + tile 28 + gap 12).
+    toolSep: { height: StyleSheet.hairlineWidth, marginLeft: 52, backgroundColor: c.separator },
+    toolRowRun: { backgroundColor: c.dark ? "#00dbe412" : "#00a8b00d" },
+    toolLine: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 48, paddingVertical: 10, paddingHorizontal: 12 },
+    tile: { width: 28, height: 28, borderRadius: 8, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
+    tileErr: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.errSoft },
+    // Title and path share a line when the path fits; otherwise the path wraps beneath, one line, ellipsized.
+    toolText: { flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8 },
+    toolTitle: { ...type.bodyMedium, color: c.fg, flexShrink: 1 },
+    toolSummary: { ...type.mono, color: c.fgFaint, flexShrink: 1, maxWidth: "100%" },
+    toolBody: { paddingHorizontal: 8, paddingBottom: 8, marginTop: -4 },
 
     line,
     lead: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },
+    leadChevron: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
     lineTitle: { ...meta, lineHeight: LINE, flexShrink: 0, maxWidth: "60%" },
     sep: { width: 2.5, height: 2.5, borderRadius: 1.25, marginHorizontal: 7, backgroundColor: c.fgGhost },
     lineSummary: { ...meta, lineHeight: LINE, flex: 1, minWidth: 0 },

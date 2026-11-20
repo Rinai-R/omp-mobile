@@ -1,5 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type PressableStateCallbackType } from "react-native";
+import Reanimated, { FadeIn, ReduceMotion } from "react-native-reanimated";
+import { EASE_OUT } from "../motion";
 import { todoProgress, type TodoPhase, type TodoTask } from "../todos";
 import { t } from "../i18n/index.ts";
 import { SANS, MONO, radius, useStyles, type Palette } from "../theme";
@@ -32,6 +34,9 @@ function TaskMark({ status }: { status: TodoTask["status"] }): ReactNode {
   }
   return <View style={styles.markPending} accessibilityLabel={t("todo.pending")} />;
 }
+
+/** The opened list fades in (a fade only, so it stays under reduced motion); its height is not animated. */
+const BODY_IN = FadeIn.duration(180).easing(EASE_OUT).reduceMotion(ReduceMotion.Never);
 
 /**
  * OMP's todo list above the composer: collapsed to the count and the current
@@ -70,7 +75,7 @@ export function TodoPanel({ phases }: { phases: readonly TodoPhase[] }): ReactNo
         <Disclosure open={open} size={12} />
       </Pressable>
       {open ? (
-        <View style={styles.body}>
+        <Reanimated.View entering={BODY_IN} style={styles.body}>
           {phases.map((phase, phaseIndex) => (
             <View key={`${phase.name}-${phaseIndex}`} style={styles.phase}>
               <Text style={styles.phaseName}>{phase.name}</Text>
@@ -97,7 +102,7 @@ export function TodoPanel({ phases }: { phases: readonly TodoPhase[] }): ReactNo
               ))}
             </View>
           ))}
-        </View>
+        </Reanimated.View>
       ) : null}
     </View>
   );

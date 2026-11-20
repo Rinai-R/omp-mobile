@@ -1,12 +1,15 @@
-import { useCallback, useState, type ReactNode } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View, type PressableStateCallbackType } from "react-native";
+import { useEffect, useMemo, useState, type ReactNode, type Ref } from "react";
+import { Image, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
+import Reanimated, { ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import type { Attachment } from "../attachments";
+import { QUICK, QUICK_CSS, popIn, popOut } from "../motion";
 import { levelLabel } from "../ompText";
 import { t } from "../i18n/index.ts";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { BrandMark, GradientFill } from "./brand";
 import { CameraGlyph, CloseGlyph, ImageGlyph, PlusGlyph, SendGlyph, StopGlyph } from "./icons";
+import { PressableScale } from "./ui";
 
 /**
  * The message box: attached photos above the text, `+` for photos on its left,
@@ -32,6 +35,7 @@ export function Composer({
   queued,
   onModel,
   bottomInset,
+  inputRef,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -55,6 +59,8 @@ export function Composer({
   queued: readonly string[];
   onModel: () => void;
   bottomInset: number;
+  /** The text field, measured on send so the message flies from where it was typed. */
+  inputRef?: Ref<TextInput>;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -64,20 +70,14 @@ export function Composer({
   const mode: "send" | "stop" | "idle" = hasContent ? "send" : streaming ? "stop" : "idle";
   const disabled = readOnly || !connected || mode === "idle";
   const action = mode === "stop" ? onStop : onSend;
-  const actionStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
-      mode === "stop" ? styles.stop : disabled ? styles.sendOff : styles.send,
-      pressed && !disabled && styles.pressedScale,
-    ],
-    [disabled, mode, styles],
-  );
-  const pick = useCallback(
-    (source: "library" | "camera") => {
-      setMenu(false);
-      onAttach(source);
-    },
-    [onAttach],
-  );
+  const reduced = useReducedMotion();
+  // The menu grows out of the `+` it hangs over and shrinks back into it.
+  const menuIn = useMemo(() => popIn(reduced), [reduced]);
+  const menuOut = useMemo(() => popOut(reduced), [reduced]);
+  const pick = (source: "library" | "camera") => {
+    setMenu(false);
+    onAttach(source);
+  };
   return (
     <View style={[styles.root, { paddingBottom: 8 + bottomInset }]}>
       {queued.length > 0 ? (
@@ -101,26 +101,28 @@ export function Composer({
       ) : null}
       <View>
       {menu ? (
-        <View style={styles.menu}>
+        <Reanimated.View entering={menuIn} exiting={menuOut} style={styles.menu}>
           <MenuItem icon={<ImageGlyph size={18} color={colors.fg} />} label={t("composer.library")} onPress={() => pick("library")} />
           <View style={styles.menuDivider} />
           <MenuItem icon={<CameraGlyph size={18} color={colors.fg} />} label={t("composer.camera")} onPress={() => pick("camera")} />
-        </View>
+        </Reanimated.View>
       ) : null}
       <View style={styles.row}>
-        <Pressable
+        <PressableScale
           onPress={() => (canAttach ? setMenu((open) => !open) : onAttach("library"))}
           disabled={readOnly}
-          style={({ pressed }) => [menu ? styles.plusOn : styles.plus, pressed && styles.pressedScale]}
+          style={styles.plus}
+          scale={0.94}
           accessibilityRole="button"
           accessibilityLabel={t("composer.attach")}
           accessibilityState={{ expanded: menu }}
         >
-          <View style={menu ? styles.plusTurned : undefined}>
+          <Reanimated.View style={[styles.plusFill, menu && styles.plusFillOn]} />
+          <Reanimated.View style={[styles.plusGlyph, menu && styles.plusTurned]}>
             <PlusGlyph size={18} color={menu ? colors.fgInverse : colors.fgMuted} />
-          </View>
-        </Pressable>
-        <View style={[styles.box, focused && styles.boxFocused, readOnly && styles.boxOff]}>
+          </Reanimated.View>
+        </PressableScale>
+        <Reanimated.View style={[styles.box, focused && styles.boxFocused, readOnly && styles.boxOff]}>
           {attachments.length > 0 ? (
             <View style={styles.attachments}>
               {attachments.map((item) => (
@@ -141,6 +143,7 @@ export function Composer({
           ) : null}
           <View style={styles.inputRow}>
             <TextInput
+              ref={inputRef}
               value={draft}
               onChangeText={onChangeDraft}
               onFocus={() => {
@@ -164,31 +167,36 @@ export function Composer({
               multiline
               style={styles.input}
             />
-            <Pressable
+            <PressableScale
               onPress={action}
               disabled={disabled && mode !== "stop"}
               accessibilityRole="button"
               accessibilityLabel={mode === "stop" ? t("composer.stop") : t("composer.send")}
               hitSlop={6}
-              style={actionStyle}
+              style={styles.action}
+              scale={0.94}
             >
-              {mode === "stop" ? (
+              {/* All three faces stay mounted and crossfade, so send ↔ stop morphs instead of swapping. */}
+              <Face active={mode === "send" && !disabled} reduced={reduced}>
+                <GradientFill />
+                <SendGlyph size={16} color="#FFFFFF" />
+              </Face>
+              <Face active={mode !== "stop" && disabled} reduced={reduced} style={styles.faceOff}>
+                <SendGlyph size={16} color={colors.fgGhost} />
+              </Face>
+              <Face active={mode === "stop"} reduced={reduced} style={styles.faceStop}>
                 <StopGlyph size={11} color={colors.fabFg} />
-              ) : (
-                <>
-                  {disabled ? null : <GradientFill />}
-                  <SendGlyph size={16} color={disabled ? colors.fgGhost : "#FFFFFF"} />
-                </>
-              )}
-            </Pressable>
+              </Face>
+            </PressableScale>
           </View>
-        </View>
+        </Reanimated.View>
       </View>
       </View>
       <View style={styles.meta}>
-        <Pressable
+        <PressableScale
           onPress={onModel}
-          style={({ pressed }) => [styles.chip, pressed && styles.chipPressed]}
+          style={styles.chip}
+          pressedStyle={styles.chipPressed}
           accessibilityRole="button"
           accessibilityLabel={level !== undefined ? t("composer.modelLevelA11y", { model, level: levelLabel(level) }) : t("composer.modelA11y", { model })}
           hitSlop={6}
@@ -202,7 +210,7 @@ export function Composer({
               · {levelLabel(level)}
             </Text>
           ) : null}
-        </Pressable>
+        </PressableScale>
         {contextPercent !== undefined ? (
           <View style={styles.chip} accessible accessibilityLabel={t("composer.contextA11y", { percent: Math.round(contextPercent) })}>
             <Ring percent={contextPercent} />
@@ -213,6 +221,28 @@ export function Composer({
         ) : null}
       </View>
     </View>
+  );
+}
+
+/** Small, so the face that leaves and the one that arrives overlap without either reading as a pop. */
+const FACE_SCALE = 0.8;
+
+/** One face of the send/stop button, faded and scaled in while `active`, out otherwise. */
+function Face({ active, reduced, style, children }: { active: boolean; reduced: boolean; style?: StyleProp<ViewStyle>; children: ReactNode }): ReactNode {
+  const styles = useStyles(createStyles);
+  const shown = useSharedValue(active ? 1 : 0);
+  useEffect(() => {
+    // Under reduced motion the crossfade stays (it explains the change) and the scale goes.
+    shown.set(withTiming(active ? 1 : 0, { ...QUICK, reduceMotion: ReduceMotion.Never }));
+  }, [active, shown]);
+  const animated = useAnimatedStyle(() => {
+    const v = shown.get();
+    return { opacity: v, transform: [{ scale: reduced ? 1 : FACE_SCALE + (1 - FACE_SCALE) * v }] };
+  }, [reduced]);
+  return (
+    <Reanimated.View style={[styles.face, style, animated]} pointerEvents="none">
+      {children}
+    </Reanimated.View>
   );
 }
 
@@ -267,7 +297,9 @@ function createStyles(c: Palette) {
     alignItems: "center",
     justifyContent: "center",
   } as const;
-  const plus = { ...action, backgroundColor: c.well } as const;
+  const plus = { ...action, width: 34, height: 34, borderRadius: 17, marginBottom: 2 } as const;
+  // State-driven changes with no finger on them: Reanimated CSS transitions, QUICK's curve and length.
+  const quick = QUICK_CSS;
   const chip = {
     flexDirection: "row",
     alignItems: "center",
@@ -281,7 +313,8 @@ function createStyles(c: Palette) {
   } as const;
   const chipText = { fontFamily: SANS, fontSize: 12, lineHeight: 15, color: c.fgFaint } as const;
   return {
-    root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.chrome, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
+    // Sits on the chat's glass bar: no fill of its own.
+    root: { paddingHorizontal: 10, paddingTop: 8 },
     queue: { gap: 4, paddingHorizontal: 6, paddingBottom: 8 },
     queueRow: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
     queueLabel: { fontFamily: SANS, fontSize: 12, lineHeight: 17, fontWeight: "600", color: c.tint },
@@ -295,12 +328,16 @@ function createStyles(c: Palette) {
       backgroundColor: c.dark ? "#ffffff08" : "#ffffff",
       padding: 3,
       gap: 6,
+      transitionProperty: ["borderColor", "opacity"],
+      ...quick,
     },
     boxFocused: { borderColor: c.dark ? "#ffffff48" : "#00000038" },
     boxOff: { opacity: 0.5 },
     inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 4 },
-    plus: { ...plus, width: 34, height: 34, borderRadius: 17, marginBottom: 2, backgroundColor: c.search },
-    plusOn: { ...plus, width: 34, height: 34, borderRadius: 17, marginBottom: 2, backgroundColor: c.fg },
+    plus,
+    plusFill: { ...StyleSheet.absoluteFill, backgroundColor: c.search, transitionProperty: "backgroundColor", ...quick },
+    plusFillOn: { backgroundColor: c.fg },
+    plusGlyph: { transform: [{ rotate: "0deg" }], transitionProperty: "transform", ...quick },
     plusTurned: { transform: [{ rotate: "45deg" }] },
     input: {
       flex: 1,
@@ -315,10 +352,10 @@ function createStyles(c: Palette) {
       color: c.fg,
       textAlignVertical: "top",
     },
-    send: action,
-    sendOff: { ...action, backgroundColor: c.well },
-    stop: { ...action, backgroundColor: c.fab },
-    pressedScale: { transform: [{ scale: 0.94 }] },
+    action,
+    face: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
+    faceOff: { backgroundColor: c.well },
+    faceStop: { backgroundColor: c.fab },
     attachments: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 3, paddingTop: 3 },
     attachment: { width: 58, height: 58 },
     attachmentImage: { width: 58, height: 58, borderRadius: 12, backgroundColor: c.inset },
@@ -347,6 +384,8 @@ function createStyles(c: Palette) {
       backgroundColor: c.overlay,
       paddingVertical: 4,
       zIndex: 5,
+      // Scales from its corner over the `+`, so it reads as coming out of the button.
+      transformOrigin: "left bottom",
       elevation: 12,
       shadowColor: "#000",
       shadowOpacity: 0.35,

@@ -4,41 +4,46 @@ import {
   AppState,
   FlatList,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
   type ListRenderItem,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
+  type TextInput,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import Reanimated, { useAnimatedScrollHandler, useReducedMotion, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 import * as Attention from "../../modules/omp-attention/src";
 import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
-import { BrandMark, GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
+import { GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
+import { EmptyHero } from "../components/EmptyHero";
 import { Composer } from "../components/Composer";
+import { Glass, GlassTarget, useBlurTarget } from "../components/Glass";
 import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { ToolSheet } from "../components/ToolSheet";
-import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
+import { SendFlightLayer, TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
+import { popIn, popOut } from "../motion";
 import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
-import { todoPhases } from "../todos";
+import { todoPhases, todoProgress } from "../todos";
 import { keepLive, prependHistory } from "../liveRows";
 import { refreshTranscript, setSyncOnScreen } from "../sync";
 import { loadCached, loadTail, markViewed, saveCached } from "../transcripts";
+import { useSendFlight } from "../sendFlight";
 import type {
   AgentMessage,
   ApprovalRequest,
@@ -88,8 +93,12 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
-  const keyboard = useKeyboardVisible();
+  const reduced = useReducedMotion();
+  const pillIn = useMemo(() => popIn(reduced), [reduced]);
+  const pillOut = useMemo(() => popOut(reduced), [reduced]);
   const listRef = useRef<FlatList<Row>>(null);
+  const composerInput = useRef<TextInput>(null);
+  const flight = useSendFlight();
   const socketRef = useRef<SessionSocket | null>(null);
   const [session, setSession] = useState(initialSession);
   const [state, setState] = useState<SessionState | null>(null);
@@ -522,14 +531,20 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       setError(t("chat.notConnected"));
       return;
     }
-    haptic.tap();
+    // Measured before the field clears: the bubble flies from where the text was typed.
+    // Away from the newest end the row's place is off screen; it fades in there instead.
+    const fly = !awayUI.get();
+    flight.launch(text, composerInput.current, fly);
     pending.current = { text: draft, attachments };
     // Shown at once: OMP's own copy, which replaces it, can take seconds over a relay.
     setItems((current) => [...current, localUserMessage(text, attachments.map((item) => ({ data: item.data, mimeType: item.mimeType })))]);
     setDraft("");
     setAttachments([]);
     setState((current) => (current === null ? current : { ...current, isStreaming: true }));
-    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    // A flight aims at the row's place now: the list must not glide under it.
+    listRef.current?.scrollToOffset({ offset: 0, animated: !fly });
+    // awayUI and flight are stable (declared below / created once).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachments, draft]);
 
   const abort = useCallback(() => {
@@ -660,19 +675,50 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     lastNewest.current = newest;
     if (away) setUnseen((count) => count + 1);
   }, [away, newest]);
-  const offset = useRef(0);
+  /** How far the list is from its newest end; JS reads it to move the list by a row's change in height. */
+  const scrollY = useSharedValue(0);
+  const awayUI = useSharedValue(false);
+  /** Content under the composer (newest side) and under the header (oldest side), in px: drives the glass hairlines. */
+  const newestEdge = useSharedValue(0);
+  const oldestEdge = useSharedValue(0);
+  const contentH = useRef(0);
+  const viewH = useRef(0);
+  /** The list runs the full height under both glass bars; their measured heights are its insets. */
+  const glassTarget = useBlurTarget();
+  const [topH, setTopH] = useState(() => insets.top + 54);
+  const [bottomH, setBottomH] = useState(() => insets.bottom + 64);
+  /** The list grew or the screen resized without a scroll: the oldest end moved relative to the view. */
+  const measureOldest = useCallback(() => {
+    oldestEdge.set(Math.max(0, contentH.current - viewH.current - scrollY.get()));
+  }, [oldestEdge, scrollY]);
   /** A row opened or closed on a tap: move the list by what it gained, so the tapped header stays put. */
-  const shift = useCallback((delta: number) => {
-    const next = Math.max(0, offset.current + delta);
-    offset.current = next;
-    listRef.current?.scrollToOffset({ offset: next, animated: false });
-  }, []);
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    offset.current = event.nativeEvent.contentOffset.y;
-    const isAway = event.nativeEvent.contentOffset.y > NEAR_BOTTOM;
+  const shift = useCallback(
+    (delta: number) => {
+      const next = Math.max(0, scrollY.get() + delta);
+      scrollY.set(next);
+      listRef.current?.scrollToOffset({ offset: next, animated: false });
+    },
+    [scrollY],
+  );
+  const setAwayJS = useCallback((isAway: boolean) => {
     setAway(isAway);
     if (!isAway) setUnseen(0);
   }, []);
+  // On the UI thread every frame: the fades follow the finger; React hears only when "away" flips.
+  const onScroll = useAnimatedScrollHandler(
+    (event) => {
+      const y = event.contentOffset.y;
+      scrollY.set(y);
+      newestEdge.set(Math.max(0, y));
+      oldestEdge.set(Math.max(0, event.contentSize.height - event.layoutMeasurement.height - y));
+      const isAway = y > NEAR_BOTTOM;
+      if (isAway !== awayUI.get()) {
+        awayUI.set(isAway);
+        scheduleOnRN(setAwayJS, isAway);
+      }
+    },
+    [setAwayJS],
+  );
   const jump = useCallback(() => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
     setUnseen(0);
@@ -719,10 +765,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     ({ item }) => {
       const map = seen.current;
       let animate = map?.get(item.id);
-      if (animate === undefined) {
-        animate = map !== null;
-        map?.set(item.id, animate);
-      }
+      if (animate === undefined) animate = map !== null;
+      // Once only: a live row that leaves the render window and comes back is remounted, and must not play again.
+      map?.set(item.id, false);
       return <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />;
     },
     [machine, session.cwd],
@@ -770,10 +815,75 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
-        // Android 15+ draws edge to edge, so the window no longer resizes for the keyboard; pad on both platforms.
+        // Frame-synced with the IME on the UI thread, so the composer rides the keyboard instead of jumping after it.
+        // The keyboard covers the home-indicator inset the composer always pads, so the view lifts by the rest only:
+        // composer and keyboard meet exactly when it is fully up, and the inset never snaps away.
         behavior="padding"
-        keyboardVerticalOffset={insets.top}
+        automaticOffset
+        keyboardVerticalOffset={-insets.bottom}
       >
+        <View style={styles.stage}>
+        <GlassTarget target={glassTarget} style={StyleSheet.absoluteFill}>
+          <TranscriptFolds onShift={shift} onMessageAction={canFork ? openMessageAction : undefined} flight={flight} live={live.current}>
+          <Reanimated.FlatList
+            ref={listRef}
+            inverted
+            data={rows}
+            keyExtractor={keyOf}
+            renderItem={renderItem}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            onLayout={(event) => {
+              viewH.current = event.nativeEvent.layout.height;
+              measureOldest();
+            }}
+            onContentSizeChange={(_, height) => {
+              contentH.current = height;
+              measureOldest();
+            }}
+            contentContainerStyle={[styles.list, { paddingTop: 16 + bottomH, paddingBottom: 12 + topH }]}
+            style={failure !== null ? styles.listDim : undefined}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+            // At the bottom the inverted list keeps the newest row pinned while it streams and grows.
+            // Scrolled up, the rows in view stay put while new ones arrive below.
+            maintainVisibleContentPosition={away ? { minIndexForVisible: 0 } : undefined}
+            initialNumToRender={14}
+            windowSize={11}
+            onScrollToIndexFailed={onScrollToIndexFailed}
+          />
+          </TranscriptFolds>
+          {rows.length === 0 && failure === null ? (
+            // Outside the list: an inverted list flips its children on both axes on Android. Between the bars, not under them.
+            <View style={[StyleSheet.absoluteFill, { top: topH, bottom: bottomH }]} pointerEvents="none">
+              <EmptyHero cwd={session.cwd} waiting={!connected} />
+            </View>
+          ) : null}
+          {away ? (
+            <AnimatedPressable
+              entering={pillIn}
+              exiting={pillOut}
+              onPress={jump}
+              style={[unseen > 0 ? styles.jump : styles.jumpRound, { bottom: bottomH + 12 }]}
+              accessibilityRole="button"
+              accessibilityLabel={unseen > 0 ? t("chat.unseen", { count: unseen }) : t("chat.jumpA11y")}
+            >
+              <ChevronDownGlyph size={15} color={colors.fgMuted} />
+              {unseen > 0 ? (
+                <Text style={styles.jumpText} maxFontSizeMultiplier={1.1}>
+                  {t("chat.unseen", { count: unseen })}
+                </Text>
+              ) : null}
+            </AnimatedPressable>
+          ) : null}
+        </GlassTarget>
+        <Glass
+          target={glassTarget}
+          edge="bottom"
+          under={oldestEdge}
+          style={{ paddingTop: insets.top }}
+          onLayout={(event) => setTopH(event.nativeEvent.layout.height)}
+        >
         <View style={styles.header}>
           <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [styles.back, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("common.back")}>
             <BackGlyph size={24} color={colors.tint} />
@@ -866,55 +976,14 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             </Pressable>
           </View>
         ) : null}
+        </Glass>
 
-        <View style={styles.listWrap}>
-          <TranscriptFolds onShift={shift} onMessageAction={canFork ? openMessageAction : undefined}>
-          <FlatList
-            ref={listRef}
-            inverted
-            data={rows}
-            keyExtractor={keyOf}
-            renderItem={renderItem}
-            onScroll={onScroll}
-            scrollEventThrottle={64}
-            contentContainerStyle={styles.list}
-            style={failure !== null ? styles.listDim : undefined}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-            // At the bottom the inverted list keeps the newest row pinned while it streams and grows.
-            // Scrolled up, the rows in view stay put while new ones arrive below.
-            maintainVisibleContentPosition={away ? { minIndexForVisible: 0 } : undefined}
-            initialNumToRender={14}
-            windowSize={11}
-            onScrollToIndexFailed={onScrollToIndexFailed}
-          />
-          </TranscriptFolds>
-          {rows.length === 0 && failure === null ? (
-            // Outside the list: an inverted list flips its children on both axes on Android.
-            <View style={styles.emptyOverlay} pointerEvents="none">
-              <View style={connected ? styles.emptyMark : styles.emptyMarkWaiting}>
-                <BrandMark size={26} />
-              </View>
-            </View>
-          ) : null}
-          {away ? (
-            <Pressable
-              onPress={jump}
-              style={unseen > 0 ? styles.jump : styles.jumpRound}
-              accessibilityRole="button"
-              accessibilityLabel={unseen > 0 ? t("chat.unseen", { count: unseen }) : t("chat.jumpA11y")}
-            >
-              <ChevronDownGlyph size={15} color={colors.fgMuted} />
-              {unseen > 0 ? (
-                <Text style={styles.jumpText} maxFontSizeMultiplier={1.1}>
-                  {t("chat.unseen", { count: unseen })}
-                </Text>
-              ) : null}
-            </Pressable>
-          ) : null}
-        </View>
-
-        <TodoPanel phases={todos} />
+        <Glass target={glassTarget} edge="top" under={newestEdge} onLayout={(event) => setBottomH(event.nativeEvent.layout.height)}>
+        {todoProgress(todos).total > 0 ? (
+          <View style={styles.todos}>
+            <TodoPanel phases={todos} />
+          </View>
+        ) : null}
 
         <Composer
           draft={draft}
@@ -934,8 +1003,11 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           contextPercent={contextPercent}
           queued={queuedElsewhere}
           onModel={openPicker}
-          bottomInset={keyboard ? 0 : insets.bottom}
+          bottomInset={insets.bottom}
+          inputRef={composerInput}
         />
+        </Glass>
+        </View>
       </KeyboardAvoidingView>
 
       {approval !== null ? <ApprovalSheet request={approval} onAnswer={answer} /> : null}
@@ -989,39 +1061,18 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         />
       </Sheet>
       <ToolSheet step={openStep} machine={machine} cwd={session.cwd} sessionId={initialSession.id} onClose={() => setStep(null)} />
+      <SendFlightLayer flight={flight} />
     </View>
   );
 }
+
+const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable);
 
 function keyOf(row: Row): string {
   return row.id;
 }
 
-/** Whether the software keyboard is up; the composer drops the home-indicator inset meanwhile. */
-function useKeyboardVisible(): boolean {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setVisible(true));
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setVisible(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-  return visible;
-}
-
 function createStyles(c: Palette) {
-  const emptyMark = {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.panel,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-  } as const;
   const jump = {
     position: "absolute",
     right: 16,
@@ -1036,22 +1087,17 @@ function createStyles(c: Palette) {
   } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    header: {
-      height: 54,
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 6,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.separator,
-      backgroundColor: c.chrome,
-    },
+    // The list fills the stage under both glass bars; the bars stay in flow at its two ends.
+    stage: { flex: 1, justifyContent: "space-between" },
+    header: { height: 54, flexDirection: "row", alignItems: "center", paddingHorizontal: 6 },
     back: { width: 48, height: 44, justifyContent: "center", paddingLeft: 4 },
     headerEnd: { width: 48, height: 44, alignItems: "flex-end", justifyContent: "center", paddingRight: 8 },
     title: { flex: 1, minWidth: 0, alignItems: "center", paddingVertical: 4, gap: 1 },
     titlePressed: { opacity: 0.6 },
     titleText: { maxWidth: "100%", fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.3, color: c.fg, textAlign: "center" },
     subtitleRow: { flexDirection: "row", alignItems: "center", gap: 5, minWidth: 0, maxWidth: "100%" },
-    subtitle: { flexShrink: 1, fontFamily: SANS, fontSize: 11.5, lineHeight: 15, color: c.fgFaint },
+    // Small text over glass: muted ink at 500, not the faint 400 the bare page could take.
+    subtitle: { flexShrink: 1, fontFamily: SANS, fontSize: 11.5, lineHeight: 15, fontWeight: "500", color: c.fgMuted },
 
     offline: {
       paddingHorizontal: 16,
@@ -1061,12 +1107,9 @@ function createStyles(c: Palette) {
       backgroundColor: c.panel,
     },
     offlineText: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgMuted },
-    listWrap: { flex: 1 },
+    todos: { paddingTop: 8 },
     list: { paddingTop: 16, paddingBottom: 12 },
     listDim: { opacity: 0.5 },
-    emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
-    emptyMark,
-    emptyMarkWaiting: { ...emptyMark, opacity: 0.45 },
     // The way back to the newest message: a small floating circle, a pill when it can say how many arrived.
     jump: { ...jump, gap: 6, paddingLeft: 11, paddingRight: 14 },
     jumpRound: { ...jump, width: 36, justifyContent: "center" },

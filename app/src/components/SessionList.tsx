@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { AppState, StyleSheet, Text, View } from "react-native";
 import { SEARCH_FEATURE, daemonFeatures, knownFeatures, listSessions, searchSessions } from "../api";
 import { age, folderOf, type SessionGroup } from "../sessionGroups";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
@@ -10,6 +10,7 @@ import type { Machine, SearchResult, SessionSummary } from "../types";
 import { t } from "../i18n/index.ts";
 import { ShimmerText, Spinner } from "./brand";
 import { ChevronGlyph } from "./icons";
+import { PressableScale } from "./ui";
 
 /**
  * A computer's sessions, as the phone last saw them while the daemon answers,
@@ -181,10 +182,13 @@ export function SessionRow({
   // A waiting session says so in its group and its badge; its detail stays the folder and the model.
   const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : when].filter(Boolean).join(" · ");
   return (
-    <Pressable
+    <PressableScale
       onPress={() => onPress(session)}
       onLongPress={onLongPress === undefined ? undefined : () => onLongPress(session)}
-      style={({ pressed }) => [styles.row, current && styles.rowCurrent, pressed && styles.rowPressed]}
+      // A full-width row only gives a little: more would open gaps at the group's edges.
+      scale={0.985}
+      style={[styles.row, current && styles.rowCurrent]}
+      pressedStyle={styles.rowPressed}
       accessibilityRole="button"
       accessibilityLabel={t("common.pair", {
         label: session.title,
@@ -219,7 +223,7 @@ export function SessionRow({
         ) : null}
         <ChevronGlyph size={15} color={colors.fgGhost} />
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 

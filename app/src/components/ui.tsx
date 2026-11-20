@@ -1,28 +1,112 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
-  Keyboard,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
   useWindowDimensions,
+  type GestureResponderEvent,
+  type Insets,
   type KeyboardTypeOptions,
-  type PressableStateCallbackType,
+  type LayoutChangeEvent,
+  type PressableProps,
+  type ScrollViewProps,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
+import { Gesture, GestureDetector, GestureHandlerRootView, type PanGesture } from "react-native-gesture-handler";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
+import Animated, {
+  Extrapolation,
+  cancelAnimation,
+  interpolate,
+  scrollTo,
+  useAnimatedRef,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
+  ReduceMotion,
+  type SharedValue,
+  type WithSpringConfig,
+  type WithTimingConfig,
+} from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { EASE_OUT, HEADER_HEIGHT, HIT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { HEADER_HEIGHT, HIT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { EASE_OUT, PRESS_IN, PRESS_OUT, PRESS_SCALE, QUICK, SPRING_SHEET, SPRING_SNAP, project, rubberband } from "../motion";
 import type { Dot } from "../probe";
 import { GradientTile, LiveDot, Spinner, Wordmark } from "./brand";
 import { BackGlyph, ChevronDownGlyph, ChevronGlyph, CloseGlyph } from "./icons";
 import { t } from "../i18n/index.ts";
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/** A full-width row is a large surface: it sinks less than a button. */
+const ROW_PRESS_SCALE = 0.985;
+/** A 22 px chip's touch target grown to 44 without growing the chip. */
+const CHIP_SLOP: Insets = { top: 11, bottom: 11, left: 4, right: 4 };
+
+type PressableScaleProps = Omit<PressableProps, "style" | "children"> & {
+  style?: StyleProp<ViewStyle>;
+  /** Merged while the finger is down: a highlight on top of the scale. */
+  pressedStyle?: StyleProp<ViewStyle>;
+  scale?: number;
+  children?: ReactNode | ((state: { pressed: boolean }) => ReactNode);
+};
+
+/**
+ * A Pressable that sinks on press-in and comes back on press-out, on the UI
+ * thread: feedback the moment the finger lands, the commit on release.
+ * Reduced motion drops the scale and keeps `pressedStyle`.
+ */
+export function PressableScale({
+  style,
+  pressedStyle,
+  scale = PRESS_SCALE,
+  children,
+  onPressIn,
+  onPressOut,
+  pressRetentionOffset = 16,
+  ...rest
+}: PressableScaleProps): ReactNode {
+  const reduced = useReducedMotion();
+  const sink = useSharedValue(1);
+  const [pressed, setPressed] = useState(false);
+  const scaled = useAnimatedStyle(() => ({ transform: [{ scale: sink.get() }] }));
+  const pressIn = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!reduced) sink.set(withTiming(scale, PRESS_IN));
+      setPressed(true);
+      onPressIn?.(event);
+    },
+    [onPressIn, reduced, scale, sink],
+  );
+  const pressOut = useCallback(
+    (event: GestureResponderEvent) => {
+      sink.set(withTiming(1, PRESS_OUT));
+      setPressed(false);
+      onPressOut?.(event);
+    },
+    [onPressOut, sink],
+  );
+  return (
+    <AnimatedPressable
+      {...rest}
+      pressRetentionOffset={pressRetentionOffset}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      style={[style, pressed && pressedStyle, scaled]}
+    >
+      {typeof children === "function" ? children({ pressed }) : children}
+    </AnimatedPressable>
+  );
+}
 
 export function Button({
   label,
@@ -42,15 +126,14 @@ export function Button({
   const styles = useStyles(createStyles);
   const colors = useColors();
   const foreground = kind === "primary" ? colors.bg : kind === "danger" ? colors.err : colors.fg;
-  const style = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
-      kind === "primary" ? styles.primary : kind === "danger" ? styles.danger : styles.secondary,
-      disabled ? styles.disabled : pressed ? styles.buttonPressed : null,
-    ],
-    [disabled, kind, styles],
-  );
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled || busy} style={style}>
+    <PressableScale
+      accessibilityRole="button"
+      onPress={onPress}
+      disabled={disabled || busy}
+      style={[kind === "primary" ? styles.primary : kind === "danger" ? styles.danger : styles.secondary, disabled && styles.disabled]}
+      pressedStyle={styles.buttonPressed}
+    >
       {busy ? (
         <ActivityIndicator size="small" color={foreground} />
       ) : (
@@ -66,7 +149,7 @@ export function Button({
           </Text>
         </>
       )}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -139,37 +222,53 @@ export function StateDot({ dot, used = false }: { dot: Dot; used?: boolean }): R
   );
 }
 
-/** A mono pill for metadata: a model, a directory, a count (`sh-chip`). */
+/** A mono pill for metadata: a model, a directory, a count (`sh-chip`); pressable when given `onPress`. */
 export function Chip({
   label,
   tone = "plain",
   leading,
+  onPress,
+  accessibilityLabel,
 }: {
   label: string;
   tone?: "plain" | "accent" | "ok" | "warn" | "err";
   leading?: ReactNode;
+  onPress?: () => void;
+  accessibilityLabel?: string;
 }): ReactNode {
   const styles = useStyles(createStyles);
-  return (
-    <View style={styles[`chip.${tone}`]}>
+  const body = (
+    <>
       {leading}
       <Text style={styles[`chipText.${tone}`]} numberOfLines={1} ellipsizeMode="middle">
         {label}
       </Text>
-    </View>
+    </>
+  );
+  if (onPress === undefined) return <View style={styles[`chip.${tone}`]}>{body}</View>;
+  return (
+    <PressableScale
+      onPress={onPress}
+      style={styles[`chip.${tone}`]}
+      hitSlop={CHIP_SLOP}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+    >
+      {body}
+    </PressableScale>
   );
 }
 
 /** A chevron that turns from right to down as `open` changes. */
 export function Disclosure({ open, size = 14 }: { open: boolean; size?: number }): ReactNode {
   const colors = useColors();
-  const value = useRef(new Animated.Value(open ? 1 : 0)).current;
+  const turn = useSharedValue(open ? 1 : 0);
   useEffect(() => {
-    Animated.timing(value, { toValue: open ? 1 : 0, duration: 180, easing: EASE_OUT, useNativeDriver: true }).start();
-  }, [open, value]);
-  const rotate = value.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] });
+    turn.set(withTiming(open ? 1 : 0, QUICK));
+  }, [open, turn]);
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.get() * 90}deg` }] }));
   return (
-    <Animated.View style={{ transform: [{ rotate }] }}>
+    <Animated.View style={style}>
       <ChevronGlyph size={size} color={colors.fgFaint} />
     </Animated.View>
   );
@@ -189,7 +288,7 @@ export function IconButton({
 }): ReactNode {
   const styles = useStyles(createStyles);
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
@@ -197,7 +296,7 @@ export function IconButton({
       style={styles.iconButton}
     >
       {({ pressed }) => <View style={pressed ? styles.iconWellPressed : styles.iconWell}>{children}</View>}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -253,8 +352,9 @@ export function Header({
         </IconButton>
       ) : null}
       {onTitlePress !== undefined ? (
-        <Pressable
-          style={({ pressed }) => [styles.headerText, pressed && styles.headerTextPressed]}
+        <PressableScale
+          style={styles.headerText}
+          pressedStyle={styles.headerTextPressed}
           onPress={onTitlePress}
           accessibilityRole="button"
           accessibilityLabel={titleLabel ?? title}
@@ -262,7 +362,7 @@ export function Header({
         >
           {titleText}
           {subtitleText}
-        </Pressable>
+        </PressableScale>
       ) : (
         <View style={styles.headerText}>
           {titleText}
@@ -323,10 +423,7 @@ export function Row({
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
-  const style = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [last ? styles.row : styles.rowDivided, pressed && styles.pressed],
-    [last, styles],
-  );
+  const style = last ? styles.row : styles.rowDivided;
   const showChevron = chevron ?? onPress !== undefined;
   const body = (
     <>
@@ -351,16 +448,18 @@ export function Row({
     return <View style={last ? styles.row : styles.rowDivided}>{body}</View>;
   }
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       onLongPress={onLongPress}
       style={style}
+      pressedStyle={styles.pressed}
+      scale={ROW_PRESS_SCALE}
       accessibilityRole={selected === undefined ? "button" : "radio"}
       accessibilityState={selected === undefined ? undefined : { selected }}
       accessibilityLabel={accessibilityLabel ?? title}
     >
       {body}
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -420,61 +519,312 @@ export function Banner({
   );
 }
 
+/** Past this share of its height (projected, so a flick counts) a released sheet dismisses. */
+const DISMISS_AT = 0.4;
+/** Reduced motion: a sheet or screen fades in place instead of sliding. Never itself reduced: it is the reduction. */
+export const FADE_REDUCED: WithTimingConfig = { duration: 200, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
 /**
- * A sheet's slide-up: 0 → 1 with the OMP ease-out when `visible` turns on, back
- * to 0 when it turns off; `mounted` stays true until the slide-out finishes.
+ * Leaving: SPRING_SHEET's time, critically damped and clamped, since springing
+ * past the bottom would flash the screen edge under the sheet.
  */
-export function useSheetMotion(visible: boolean): { mounted: boolean; progress: Animated.Value } {
+const SPRING_DISMISS: WithSpringConfig = { duration: 340, dampingRatio: 1, overshootClamping: true, reduceMotion: ReduceMotion.System };
+
+/** One sheet's motion state; made by `useSheet`, read by the Sheet* parts through context. */
+export interface SheetController {
+  /** True from opening until the slide-out lands: the Modal stays up meanwhile. */
+  mounted: boolean;
+  /** The parent's close, at once (Back, a close button); the sheet slides out after it. */
+  close: () => void;
+  /** The user let go of the sheet (the scrim): slide out, then the parent's close. Catchable until it lands. */
+  dismiss: () => void;
+  /** How far below its resting place the sheet is, in px; `height` is fully closed. */
+  offset: SharedValue<number>;
+  height: SharedValue<number>;
+  /** 1 except under reduced motion, where the sheet fades instead of sliding. */
+  fade: SharedValue<number>;
+  /** A worklet: hand a finger's release to the sheet, which dismisses or snaps back. */
+  release: (velocity: number) => void;
+  grab: PanGesture;
+  onLayout: (event: LayoutChangeEvent) => void;
+}
+
+/**
+ * A bottom sheet's motion: it rises by its own height on a spring, follows a
+ * finger 1:1 (resisting upward), and on release goes where the projected
+ * endpoint says, carrying the finger's velocity. Every move starts from where
+ * the sheet is, so a closing sheet can be caught. A dismissal the user makes
+ * calls `onClose` when it lands; a close the parent makes (`visible` off)
+ * slides it out, then unmounts.
+ */
+export function useSheet(visible: boolean, onClose: () => void): SheetController {
+  const reduced = useReducedMotion();
+  const { height: windowHeight } = useWindowDimensions();
   const [mounted, setMounted] = useState(visible);
-  const progress = useRef(new Animated.Value(0)).current;
+  // Off screen until measured: the first frame must not flash the sheet in place.
+  const offset = useSharedValue(windowHeight);
+  const height = useSharedValue(0);
+  const fade = useSharedValue(1);
+  const open = useSharedValue(visible);
+  const start = useSharedValue(0);
+  const state = useRef({ visible, onClose, pending: visible, landed: false });
   useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      const run = Animated.timing(progress, { toValue: 1, duration: 360, easing: EASE_OUT, useNativeDriver: true });
-      run.start();
-      return () => run.stop();
-    }
-    const run = Animated.timing(progress, {
-      toValue: 0,
-      duration: 200,
-      easing: Easing.in(Easing.cubic),
-      useNativeDriver: true,
-    });
-    run.start(({ finished }) => {
-      if (finished) setMounted(false);
-    });
-    return () => run.stop();
-  }, [progress, visible]);
-  return { mounted, progress };
-}
+    state.current.onClose = onClose;
+  });
 
-/** The backdrop's opacity and the sheet's slide for a sheet's progress. */
-export function sheetTransforms(progress: Animated.Value, height: number) {
-  return {
-    backdrop: { opacity: progress },
-    sheet: {
-      transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [Math.max(320, height * 0.6), 0] }) }],
-    },
-  };
-}
+  const unmount = useCallback(() => {
+    setMounted(false);
+    height.set(0);
+    offset.set(windowHeight);
+  }, [height, offset, windowHeight]);
+  // At rest below the screen: the user's dismissal tells the parent; the parent's close takes the Modal down.
+  const landed = useCallback(() => {
+    const current = state.current;
+    if (!current.visible) return unmount();
+    current.landed = true;
+    current.onClose();
+  }, [unmount]);
 
-/** The software keyboard's height while it is up, 0 otherwise. */
-export function useKeyboardHeight(): number {
-  const [height, setHeight] = useState(0);
-  useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", (event) =>
-      setHeight(event.endCoordinates.height),
-    );
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setHeight(0));
-    return () => {
-      show.remove();
-      hide.remove();
+  const motion = useMemo(() => {
+    const toOpen = (velocity: number, snap: boolean): void => {
+      "worklet";
+      if (reduced) {
+        offset.set(0);
+        fade.set(withTiming(1, FADE_REDUCED));
+        return;
+      }
+      offset.set(withSpring(0, { ...(snap ? SPRING_SNAP : SPRING_SHEET), velocity }));
     };
-  }, []);
-  return height;
+    const toClosed = (velocity: number): void => {
+      "worklet";
+      const done = (finished?: boolean): void => {
+        "worklet";
+        if (finished === true) scheduleOnRN(landed);
+      };
+      if (reduced) {
+        fade.set(withTiming(0, FADE_REDUCED, done));
+        return;
+      }
+      offset.set(withSpring(height.get(), { ...SPRING_DISMISS, velocity }, done));
+    };
+    const release = (velocity: number): void => {
+      "worklet";
+      // A sheet the parent already closed only finishes leaving.
+      if (open.get() && offset.get() + project(velocity) < height.get() * DISMISS_AT) {
+        toOpen(velocity, true);
+        return;
+      }
+      toClosed(velocity);
+    };
+    return { toOpen, toClosed, release };
+  }, [fade, height, landed, offset, open, reduced]);
+
+  const grab = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-6, 6])
+        .failOffsetX([-24, 24])
+        .onStart(() => {
+          cancelAnimation(offset);
+          start.set(offset.get());
+        })
+        .onUpdate((event) => {
+          const next = start.get() + event.translationY;
+          offset.set(next >= 0 ? next : rubberband(next, height.get()));
+        })
+        .onEnd((event) => motion.release(event.velocityY)),
+    [height, motion, offset, start],
+  );
+
+  useEffect(() => {
+    const current = state.current;
+    current.visible = visible;
+    open.set(visible);
+    if (visible) {
+      current.landed = false;
+      setMounted(true);
+      // Reopened mid-close: from where it is. Otherwise once it has been measured.
+      if (height.get() > 0) motion.toOpen(0, false);
+      else current.pending = true;
+      return;
+    }
+    current.pending = false;
+    if (current.landed || height.get() === 0) unmount();
+    else motion.toClosed(0);
+    // Only the parent's `visible` drives this; `motion` changes with reduced motion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const measured = event.nativeEvent.layout.height;
+      height.set(measured);
+      const current = state.current;
+      if (!current.pending) return;
+      current.pending = false;
+      offset.set(measured);
+      if (reduced) fade.set(0);
+      motion.toOpen(0, false);
+    },
+    [fade, height, motion, offset, reduced],
+  );
+  const close = useCallback(() => state.current.onClose(), []);
+  const dismiss = useCallback(() => motion.toClosed(0), [motion]);
+  return { mounted, close, dismiss, offset, height, fade, release: motion.release, grab, onLayout };
 }
 
-/** A bottom sheet in a transparent modal, padded above the home indicator; it slides up and back down. */
+const SheetContext = createContext<SheetController | null>(null);
+
+function useSheetContext(): SheetController {
+  const sheet = useContext(SheetContext);
+  if (sheet === null) throw new Error("Sheet parts render inside a SheetHost");
+  return sheet;
+}
+
+/**
+ * A sheet's stage: the scrim (its opacity follows the sheet), keyboard
+ * avoidance and, by default, the transparent Modal that holds it. Tapping
+ * the scrim dismisses the sheet down its own path.
+ */
+export function SheetHost({
+  sheet,
+  modal = true,
+  backdropLabel,
+  children,
+}: {
+  sheet: SheetController;
+  /** Off for a sheet drawn inside its screen (it covers that screen only). */
+  modal?: boolean;
+  backdropLabel: string;
+  children: ReactNode;
+}): ReactNode {
+  const styles = useStyles(createStyles);
+  const insets = useSafeAreaInsets();
+  const keyboard = useReanimatedKeyboardAnimation();
+  const { offset, height, fade } = sheet;
+  // The one layout animation here: with the keyboard up the sheet must get
+  // shorter, not just move. It follows the keyboard's own frames on the UI
+  // thread; the sheet's bottom padding already clears the home indicator.
+  const lift = useAnimatedStyle(() => ({ paddingBottom: Math.max(0, -keyboard.height.get() - insets.bottom) }));
+  const backdrop = useAnimatedStyle(() => {
+    const full = height.get();
+    return { opacity: full > 0 ? interpolate(offset.get(), [0, full], [1, 0], Extrapolation.CLAMP) * fade.get() : 0 };
+  });
+  const body = (
+    <SheetContext.Provider value={sheet}>
+      <Animated.View style={[styles.sheetRoot, lift]}>
+        <Animated.View style={[styles.scrim, backdrop]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={sheet.dismiss} accessibilityLabel={backdropLabel} />
+        </Animated.View>
+        {children}
+      </Animated.View>
+    </SheetContext.Provider>
+  );
+  if (!modal) return body;
+  return (
+    <Modal visible={sheet.mounted} transparent animationType="none" statusBarTranslucent onRequestClose={sheet.close}>
+      {/* A Modal is its own native root on Android: gestures need their own root view in it. */}
+      <GestureHandlerRootView style={styles.fill}>{body}</GestureHandlerRootView>
+    </Modal>
+  );
+}
+
+/** The sheet itself: measured for its travel, moved by the sheet's offset. `skirt` fills under a snap-back's overshoot. */
+export function SheetSurface({
+  style,
+  skirt,
+  children,
+}: {
+  style?: StyleProp<ViewStyle>;
+  /** The surface's color, continued below its bottom edge. */
+  skirt?: string;
+  children: ReactNode;
+}): ReactNode {
+  const styles = useStyles(createStyles);
+  const { offset, fade, onLayout } = useSheetContext();
+  const slide = useAnimatedStyle(() => ({ opacity: fade.get(), transform: [{ translateY: offset.get() }] }));
+  return (
+    <Animated.View onLayout={onLayout} style={[styles.sheetSurface, style, slide]}>
+      {skirt !== undefined ? <View pointerEvents="none" style={[styles.skirt, { backgroundColor: skirt }]} /> : null}
+      {children}
+    </Animated.View>
+  );
+}
+
+/** The part of a sheet that drags it: the grab handle and the header. One per sheet. */
+export function SheetGrab({ style, children }: { style?: StyleProp<ViewStyle>; children: ReactNode }): ReactNode {
+  const { grab } = useSheetContext();
+  return (
+    <GestureDetector gesture={grab}>
+      <View style={style} collapsable={false}>
+        {children}
+      </View>
+    </GestureDetector>
+  );
+}
+
+/**
+ * A ScrollView inside a sheet that hands a downward drag to the sheet once
+ * the content is at its top, and takes it back when the sheet is up again,
+ * so pulling the list down past its start pulls the sheet down.
+ */
+export function SheetScrollView({ style, children, ...rest }: ScrollViewProps): ReactNode {
+  const styles = useStyles(createStyles);
+  const { offset, release } = useSheetContext();
+  const ref = useAnimatedRef<Animated.ScrollView>();
+  const scrollY = useSharedValue(0);
+  const last = useSharedValue(0);
+  const holding = useSharedValue(false);
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.set(event.contentOffset.y);
+  });
+  const native = useMemo(() => Gesture.Native(), []);
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-10, 10])
+        .failOffsetX([-16, 16])
+        .simultaneousWithExternalGesture(native)
+        .onStart((event) => {
+          last.set(event.translationY);
+          holding.set(false);
+        })
+        .onUpdate((event) => {
+          const dy = event.translationY - last.get();
+          last.set(event.translationY);
+          const y = offset.get();
+          // The content scrolls until it is at its top; then the finger has the sheet.
+          if (y <= 0 && (scrollY.get() > 0 || dy <= 0)) return;
+          if (!holding.get()) {
+            cancelAnimation(offset);
+            holding.set(true);
+          }
+          const next = Math.max(0, y + dy);
+          offset.set(next);
+          // While the sheet is down the content stays put: the finger moves one thing.
+          if (next > 0) scrollTo(ref, 0, 0, false);
+        })
+        .onEnd((event) => {
+          if (!holding.get()) return;
+          // Back at rest before the release: the scroll has the velocity, not the sheet.
+          if (offset.get() > 0) release(event.velocityY);
+          else offset.set(withSpring(0, SPRING_SNAP));
+        }),
+    [holding, last, native, offset, ref, release, scrollY],
+  );
+  return (
+    <GestureDetector gesture={pan}>
+      <View style={[styles.sheetScrollFrame, style]} collapsable={false}>
+        <GestureDetector gesture={native}>
+          <Animated.ScrollView {...rest} ref={ref} onScroll={onScroll} scrollEventThrottle={16} bounces={false} overScrollMode="never">
+            {children}
+          </Animated.ScrollView>
+        </GestureDetector>
+      </View>
+    </GestureDetector>
+  );
+}
+
+/** A bottom sheet in a transparent modal, padded above the home indicator; drag it down or tap the scrim to close. */
 export function Sheet({
   visible,
   title,
@@ -486,28 +836,21 @@ export function Sheet({
   title: string;
   onClose: () => void;
   children: ReactNode;
-  /** Scroll the content when it outgrows the sheet (the keyboard is up); off for content that scrolls itself. */
+  /** Scroll the content when it outgrows the sheet (the keyboard is up); off for content that scrolls itself (use SheetScrollView). */
   scroll?: boolean;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const { mounted, progress } = useSheetMotion(visible);
-  const keyboard = useKeyboardHeight();
+  const sheet = useSheet(visible, onClose);
   // While it slides out, the sheet keeps what it showed: callers clear their content on close.
   const shown = useRef({ title, children });
   if (visible) shown.current = { title, children };
-  const motion = sheetTransforms(progress, height);
   return (
-    <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.sheetRoot} behavior="padding">
-        <Animated.View style={[styles.scrim, motion.backdrop]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t("common.close")} />
-        </Animated.View>
-        <Animated.View
-          style={[styles.sheet, { paddingBottom: keyboard > 0 ? 12 : 20 + insets.bottom, maxHeight: height - insets.top - 12 - keyboard }, motion.sheet]}
-        >
+    <SheetHost sheet={sheet} backdropLabel={t("common.close")}>
+      <SheetSurface style={[styles.sheet, { paddingBottom: 20 + insets.bottom, maxHeight: height - insets.top - 12 }]} skirt={colors.overlay}>
+        <SheetGrab style={styles.sheetGrabArea}>
           <View style={styles.grab} />
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle} numberOfLines={2}>
@@ -517,21 +860,16 @@ export function Sheet({
               <CloseGlyph size={16} color={colors.fgMuted} />
             </IconButton>
           </View>
-          {scroll ? (
-            <ScrollView
-              style={styles.sheetScroll}
-              contentContainerStyle={styles.sheetBody}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              {shown.current.children}
-            </ScrollView>
-          ) : (
-            shown.current.children
-          )}
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </Modal>
+        </SheetGrab>
+        {scroll ? (
+          <SheetScrollView contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {shown.current.children}
+          </SheetScrollView>
+        ) : (
+          shown.current.children
+        )}
+      </SheetSurface>
+    </SheetHost>
   );
 }
 
@@ -669,7 +1007,7 @@ function createStyles(c: Palette) {
       borderColor: c.errBorder,
     },
     disabled: { opacity: 0.4 },
-    buttonPressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+    buttonPressed: { opacity: 0.85 },
     primaryText: { fontFamily: SANS, fontSize: 15, fontWeight: "600", color: c.bg },
     secondaryText: { fontFamily: SANS, fontSize: 15, fontWeight: "500", color: c.fg },
     dangerText: { fontFamily: SANS, fontSize: 15, fontWeight: "600", color: c.err },
@@ -766,10 +1104,15 @@ function createStyles(c: Palette) {
 
     dotSlot: { width: 12, height: 12, alignItems: "center", justifyContent: "center" },
 
-    sheetRoot: { flex: 1, justifyContent: "flex-end" },
+    fill: { flex: 1 },
+    sheetRoot: { ...StyleSheet.absoluteFill, justifyContent: "flex-end" },
     scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
+    // Shrinks to the room left above the keyboard instead of running off the top.
+    sheetSurface: { flexShrink: 1 },
+    skirt: { position: "absolute", left: 0, right: 0, top: "100%", height: 240 },
     sheet: { ...sheetSurface(c), gap: 14 },
-    sheetScroll: { flexGrow: 0 },
+    sheetGrabArea: { gap: 14 },
+    sheetScrollFrame: { flexShrink: 1 },
     sheetBody: { gap: 14 },
     grab: { alignSelf: "center", width: 38, height: 5, borderRadius: 3, backgroundColor: c.borderStrong },
     sheetHeader: { flexDirection: "row", alignItems: "center", marginLeft: 2, marginRight: -10, marginTop: -6 },

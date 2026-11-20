@@ -110,6 +110,7 @@ export const en = {
   "chat.offline": "out of reach",
   "chat.offlineSaved": "Can't reach {name}. This is the saved copy; it updates when the computer is back.",
   "chat.offlineEmpty": "Can't reach {name}. Nothing is saved for this chat yet; it opens when the computer is back.",
+  "chat.emptyPrompt": "What should OMP do?",
   "chat.jumpA11y": "Jump to the newest message",
   "chat.unseen": "{count} new",
 

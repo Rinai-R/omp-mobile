@@ -11,7 +11,7 @@ import { t } from "../i18n/index.ts";
 import { Markdown } from "./Markdown";
 import { SubagentList, SubagentScreen } from "./Subagents";
 import { KindGlyph, Thumbs } from "./Transcript";
-import { Sheet } from "./ui";
+import { Sheet, SheetScrollView } from "./ui";
 
 /** One step of an activity card in full: what was asked, what came back, the images. */
 
@@ -174,9 +174,9 @@ export function ToolSheet({
 
   return (
     <Sheet visible={step !== null} title={content?.title ?? ""} onClose={onClose} scroll={false}>
-      <ScrollView style={{ maxHeight: height * 0.72 }} contentContainerStyle={styles.scroll}>
+      <SheetScrollView style={{ maxHeight: height * 0.72 }} contentContainerStyle={styles.scroll}>
         {content?.body}
-      </ScrollView>
+      </SheetScrollView>
       {sessionId !== undefined ? (
         <SubagentScreen
           machine={machine}
