@@ -4,6 +4,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.0
+
 The app moves and looks like a native one: screens slide and swipe back, sheets follow your finger, chrome is glass, and the moments that matter get a beat of their own.
 
 - Chat, settings and the scanner slide in over the tabs and swipe back from the left; a short slow drag snaps back, a flick goes back.
