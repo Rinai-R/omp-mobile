@@ -11,6 +11,7 @@ The app moves and looks like a native one: screens slide and swipe back, sheets 
 - Header, composer and tab bar are blurred glass that content scrolls under; Sessions, Computers and Settings have large titles that collapse into the bar as you scroll.
 - Tool calls in a turn are one grouped list instead of a stack of cards.
 - A new session opens on a brand hero; a sent message flies from the composer into place; a finished turn ticks over to a check with a haptic; pairing a computer ends on a short celebration.
+- The phone vibrates only when something happens: OMP asks for an approval, a turn you watched finishes, a computer pairs. Tapping tabs, filters and buttons, sending and swiping are silent.
 - With reduced motion on, all of this fades instead of moving.
 
 ### 中文
@@ -22,6 +23,7 @@ The app moves and looks like a native one: screens slide and swipe back, sheets 
 - 顶栏、输入区、标签栏是毛玻璃，内容从下面滚过；会话、电脑、设置页是大标题，滚动时收进顶栏。
 - 同一轮的工具调用合成一个分组列表，不再是一叠卡片。
 - 新会话显示品牌主视觉；发送的消息从输入框飞到对话里；一轮结束时状态图标变成对勾并伴随震动；配对电脑成功有一段简短的庆祝动画。
+- 只在有事发生时震动：OMP 请求批准、你正在看的一轮结束、电脑配对成功。点标签、筛选和按钮，发送消息，滑动手势都不再震动。
 - 开启"减少动态效果"后，以上都改为淡入淡出。
 
 ## v0.7.4

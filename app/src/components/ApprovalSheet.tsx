@@ -13,7 +13,6 @@ import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme
 import type { ApprovalRequest } from "../types";
 import { t } from "../i18n/index.ts";
 import { approvalText, optionLabel } from "../ompText";
-import { haptic } from "../haptics";
 import { BrandMark, GradientFill } from "./brand";
 import { SheetGrab, SheetHost, SheetSurface, useSheet } from "./ui";
 
@@ -72,14 +71,6 @@ export function ApprovalSheet({
   useEffect(() => {
     setValue(request.prefill ?? "");
   }, [request.id, request.prefill]);
-
-  const reply = useCallback(
-    (answer: Answer) => {
-      haptic.select();
-      onAnswer(answer);
-    },
-    [onAnswer],
-  );
 
   const cancelStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [styles.cancel, pressed && styles.optionPressed],
@@ -146,7 +137,7 @@ export function ApprovalSheet({
                   description={request.optionDetails?.[index]?.description}
                  
                   primary={index === 0}
-                  onPress={() => reply({ value: option })}
+                  onPress={() => onAnswer({ value: option })}
                 />
               ))}
             </ScrollView>
@@ -154,12 +145,12 @@ export function ApprovalSheet({
 
           {request.method === "confirm" ? (
             <>
-              <Option label={t("approval.yes")} primary onPress={() => reply({ confirmed: true })} />
-              <Option label={t("approval.no")} primary={false} onPress={() => reply({ confirmed: false })} />
+              <Option label={t("approval.yes")} primary onPress={() => onAnswer({ confirmed: true })} />
+              <Option label={t("approval.no")} primary={false} onPress={() => onAnswer({ confirmed: false })} />
             </>
           ) : null}
 
-          {input ? <Option label={t("approval.submit")} primary onPress={() => reply({ value })} /> : null}
+          {input ? <Option label={t("approval.submit")} primary onPress={() => onAnswer({ value })} /> : null}
         </View>
 
         <Pressable onPress={cancel} style={cancelStyle} accessibilityRole="button">

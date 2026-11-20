@@ -13,7 +13,6 @@ import Animated, {
   type WithTimingConfig,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import { haptic } from "../haptics";
 import { EASE_OUT, project, rubberband, SPRING_SCREEN } from "../motion";
 
 /** A screen pushed over the shell; a new `key` replaces it in place. */
@@ -75,7 +74,6 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
   }, []);
   const swipedBack = useCallback(() => {
     swiped.current = true;
-    haptic.tap();
     onSwipeBackRef.current();
   }, []);
 

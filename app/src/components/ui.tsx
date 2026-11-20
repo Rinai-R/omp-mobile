@@ -40,7 +40,6 @@ import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { HEADER_HEIGHT, HIT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { EASE_OUT, PRESS_IN, PRESS_OUT, PRESS_SCALE, QUICK, SPRING_SHEET, SPRING_SNAP, project, rubberband } from "../motion";
-import { haptic } from "../haptics";
 import type { Dot } from "../probe";
 import { GradientTile, LiveDot, Spinner, Wordmark } from "./brand";
 import { BackGlyph, ChevronDownGlyph, ChevronGlyph, CloseGlyph } from "./icons";
@@ -611,7 +610,6 @@ export function useSheet(visible: boolean, onClose: () => void): SheetController
       "worklet";
       // A sheet the parent already closed only finishes leaving.
       if (open.get() && offset.get() + project(velocity) < height.get() * DISMISS_AT) {
-        if (offset.get() > 2) scheduleOnRN(haptic.tap);
         toOpen(velocity, true);
         return;
       }

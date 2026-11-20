@@ -131,8 +131,13 @@ const MessageActionContext = createContext<((item: MessageItem) => void) | undef
 /** The flight of a message just sent, which the newest user row may be the landing of. */
 const FlightContext = createContext<SendFlight | undefined>(undefined);
 
-/** The daemon's transcript is in: a turn seen running from here on is live, not replayed history. */
-const LiveContext = createContext(false);
+/**
+ * The daemon's transcript is in (`live`): a turn seen running from here on is live, not
+ * replayed history. `turns` remembers, per turn id, that it was seen running and whether its
+ * finish has played, outside the divider: the divider remounts as the turn's rows regroup
+ * on finishing, which would forget it was ever watched.
+ */
+const LiveContext = createContext<{ live: boolean; turns: Map<string, "watched" | "played"> }>({ live: false, turns: new Map() });
 
 function useArm(): () => void {
   return useContext(ArmContext);
@@ -156,6 +161,8 @@ export function TranscriptFolds({
   live?: boolean;
 }): ReactNode {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
+  const [turns] = useState(() => new Map<string, "watched" | "played">());
+  const liveValue = useMemo(() => ({ live, turns }), [live, turns]);
   const toggle = useCallback((turn: string) => {
     setFolded((current) => {
       const next = new Set(current);
@@ -170,7 +177,7 @@ export function TranscriptFolds({
     <ShiftContext.Provider value={shift}>
       <MessageActionContext.Provider value={onMessageAction}>
         <FlightContext.Provider value={flight}>
-          <LiveContext.Provider value={live}>
+          <LiveContext.Provider value={liveValue}>
             <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
           </LiveContext.Provider>
         </FlightContext.Provider>
@@ -442,28 +449,25 @@ const BEAT: WithTimingConfig = { duration: 220, easing: EASE_OUT, reduceMotion: 
 
 /**
  * The moment a turn seen running live finishes "Done": its progress 0 → 1 (220 ms),
- * with one success tap. Undefined for turns loaded finished, replayed, failed or stopped.
+ * with one success tap. Undefined for turns loaded finished, replayed, failed or stopped,
+ * and for a finish that already played (a remount shows the plain mark).
  */
 function useFinishBeat(row: Extract<Row, { kind: "turn" }>): SharedValue<number> | undefined {
-  const live = useContext(LiveContext);
+  const { live, turns } = useContext(LiveContext);
   const progress = useSharedValue(0);
-  const [running, setRunning] = useState(row.running);
-  const [watched, setWatched] = useState(false);
   const [beat, setBeat] = useState(false);
-  // Derived while rendering, so the frame the turn ends already draws the beat's first state.
-  if (row.running && live && !watched) setWatched(true);
-  if (row.running !== running) {
-    setRunning(row.running);
-    if (!row.running && watched) {
-      setWatched(false);
-      if (row.end === "done") setBeat(true);
-    }
-  }
-  useEffect(() => {
-    if (!beat) return;
+  // Idempotent, so safe while rendering: the mark outlives this divider.
+  if (row.running && live && !turns.has(row.id)) turns.set(row.id, "watched");
+  const due = !row.running && turns.get(row.id) === "watched";
+  // Before paint: the frame the turn ends already draws the beat's first state, not the plain text.
+  useLayoutEffect(() => {
+    if (!due || turns.get(row.id) !== "watched") return;
+    turns.set(row.id, "played");
+    if (row.end !== "done") return;
+    setBeat(true);
     haptic.done();
     progress.set(withTiming(1, BEAT));
-  }, [beat, progress]);
+  }, [due, progress, row.end, row.id, turns]);
   return beat ? progress : undefined;
 }
 

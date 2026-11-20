@@ -531,7 +531,6 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       setError(t("chat.notConnected"));
       return;
     }
-    haptic.tap();
     // Measured before the field clears: the bubble flies from where the text was typed.
     // Away from the newest end the row's place is off screen; it fades in there instead.
     const fly = !awayUI.get();

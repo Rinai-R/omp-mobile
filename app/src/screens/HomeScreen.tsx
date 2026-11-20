@@ -10,7 +10,6 @@ import { GlassTarget, useBlurTarget } from "../components/Glass";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch, useTranscriptSync } from "../components/SessionList";
-import { haptic } from "../haptics";
 import { displayName, machineLabel } from "../machines";
 import { Banner, Button, ConfirmSheet, Field, PressableScale, Sheet } from "../components/ui";
 import { QUICK, QUICK_CSS } from "../motion";
@@ -359,10 +358,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
       <PageBar target={target} y={page.y} title={name} />
 
       <PressableScale
-        onPress={() => {
-          haptic.tap();
-          openCreate();
-        }}
+        onPress={openCreate}
         style={[styles.fab, { bottom: TAB_BAR_HEIGHT + 26 + insets.bottom }]}
         accessibilityRole="button"
         accessibilityLabel={t("home.new")}
@@ -467,11 +463,7 @@ function Segments({ value, onChange }: { value: Segment; onChange: (segment: Seg
         <Pressable
           key={key}
           onLayout={measure(key)}
-          onPress={() => {
-            // On the press, in the same frame the pill starts to move.
-            if (key !== value) haptic.select();
-            onChange(key);
-          }}
+          onPress={() => onChange(key)}
           style={styles.segment}
           accessibilityRole="tab"
           accessibilityState={{ selected: key === value }}

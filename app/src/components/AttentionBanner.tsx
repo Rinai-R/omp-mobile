@@ -15,7 +15,6 @@ import Reanimated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import type { Attention } from "../../modules/omp-attention/src";
-import { haptic } from "../haptics";
 import { t, type Key } from "../i18n/index.ts";
 import { EASE_OUT, SPRING_SETTLE, SPRING_SHEET, SPRING_SNAP, project, rubberband } from "../motion";
 import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme";
@@ -134,7 +133,6 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
           // The flick decides, not just the distance: a short fast swipe up dismisses.
           const projected = y.get() + project(event.velocityY);
           if (projected < -travel.get() / 2) {
-            scheduleOnRN(haptic.tap);
             scheduleOnRN(leave, event.velocityY);
           } else {
             y.set(withSpring(0, { ...SPRING_SNAP, velocity: event.velocityY }));

@@ -2,7 +2,6 @@ import type { ReactNode, RefObject } from "react";
 import { Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { haptic } from "../haptics";
 import { t } from "../i18n/index.ts";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { Glass } from "./Glass";
@@ -49,10 +48,7 @@ export function TabBar({
           // Press feedback only: switching tabs itself never animates (peers, not depth).
           <PressableScale
             key={tab}
-            onPress={() => {
-              if (!on) haptic.select();
-              onSelect(tab);
-            }}
+            onPress={() => onSelect(tab)}
             // A small icon and label: a deeper sink than a row so it reads at this size.
             scale={0.92}
             style={styles.tab}

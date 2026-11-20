@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { t } from "../i18n/index.ts";
-import { haptic } from "../haptics";
 import { approvalText, TOOL_APPROVAL_PREFIX } from "../ompText";
 import { age } from "../sessionGroups";
 import { MONO, SANS, useColors, useStyles, type Palette } from "../theme";
@@ -85,7 +84,6 @@ export function ApprovalWidget({
           <PressableScale
             disabled={busy}
             onPress={() => {
-              haptic.press();
               setBusy(true);
               setError(null);
               onAnswer(answer)
