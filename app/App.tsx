@@ -12,6 +12,8 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import appConfig from "./app.json";
 import * as Attention from "./modules/omp-attention/src";
@@ -536,6 +538,8 @@ export default function App(): ReactNode {
   const { fontScale } = useWindowDimensions();
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+    <KeyboardProvider>
     <SafeAreaProvider>
       {/* Keyed by the language and the font size: every screen and sheet renders again in the new one. */}
       <Fragment key={`${language}\n${fontScale}`}>
@@ -579,5 +583,7 @@ export default function App(): ReactNode {
         ) : null}
       </Fragment>
     </SafeAreaProvider>
+    </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 }
