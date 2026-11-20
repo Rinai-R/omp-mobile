@@ -4,7 +4,6 @@ import {
   AppState,
   FlatList,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -14,6 +13,8 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import Reanimated, { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Attention from "../../modules/omp-attention/src";
 import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
@@ -30,6 +31,7 @@ import { ToolSheet } from "../components/ToolSheet";
 import { TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
+import { popIn, popOut } from "../motion";
 import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
@@ -88,7 +90,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
-  const keyboard = useKeyboardVisible();
+  const reduced = useReducedMotion();
+  const pillIn = useMemo(() => popIn(reduced), [reduced]);
+  const pillOut = useMemo(() => popOut(reduced), [reduced]);
   const listRef = useRef<FlatList<Row>>(null);
   const socketRef = useRef<SessionSocket | null>(null);
   const [session, setSession] = useState(initialSession);
@@ -719,10 +723,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     ({ item }) => {
       const map = seen.current;
       let animate = map?.get(item.id);
-      if (animate === undefined) {
-        animate = map !== null;
-        map?.set(item.id, animate);
-      }
+      if (animate === undefined) animate = map !== null;
+      // Once only: a live row that leaves the render window and comes back is remounted, and must not play again.
+      map?.set(item.id, false);
       return <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />;
     },
     [machine, session.cwd],
@@ -770,9 +773,12 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
-        // Android 15+ draws edge to edge, so the window no longer resizes for the keyboard; pad on both platforms.
+        // Frame-synced with the IME on the UI thread, so the composer rides the keyboard instead of jumping after it.
+        // The keyboard covers the home-indicator inset the composer always pads, so the view lifts by the rest only:
+        // composer and keyboard meet exactly when it is fully up, and the inset never snaps away.
         behavior="padding"
-        keyboardVerticalOffset={insets.top}
+        automaticOffset
+        keyboardVerticalOffset={-insets.bottom}
       >
         <View style={styles.header}>
           <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [styles.back, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("common.back")}>
@@ -898,7 +904,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             </View>
           ) : null}
           {away ? (
-            <Pressable
+            <AnimatedPressable
+              entering={pillIn}
+              exiting={pillOut}
               onPress={jump}
               style={unseen > 0 ? styles.jump : styles.jumpRound}
               accessibilityRole="button"
@@ -910,7 +918,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
                   {t("chat.unseen", { count: unseen })}
                 </Text>
               ) : null}
-            </Pressable>
+            </AnimatedPressable>
           ) : null}
         </View>
 
@@ -934,7 +942,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           contextPercent={contextPercent}
           queued={queuedElsewhere}
           onModel={openPicker}
-          bottomInset={keyboard ? 0 : insets.bottom}
+          bottomInset={insets.bottom}
         />
       </KeyboardAvoidingView>
 
@@ -993,22 +1001,10 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   );
 }
 
+const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable);
+
 function keyOf(row: Row): string {
   return row.id;
-}
-
-/** Whether the software keyboard is up; the composer drops the home-indicator inset meanwhile. */
-function useKeyboardVisible(): boolean {
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setVisible(true));
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setVisible(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-  return visible;
 }
 
 function createStyles(c: Palette) {

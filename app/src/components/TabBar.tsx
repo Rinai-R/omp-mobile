@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptic } from "../haptics";
 import { t } from "../i18n/index.ts";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { ChatGlyph, ComputerGlyph, SettingsGlyph } from "./icons";
+import { PressableScale } from "./ui";
 
 /** The app's three root tabs: one bar under all of them, so moving between them never leaves the shell. */
 export type Tab = "sessions" | "computers" | "settings";
@@ -28,12 +29,15 @@ export function TabBar({ current, badge, onSelect }: { current: Tab; badge: numb
       {TABS.map(({ tab, label, icon }) => {
         const on = tab === current;
         return (
-          <Pressable
+          // Press feedback only: switching tabs itself never animates (peers, not depth).
+          <PressableScale
             key={tab}
             onPress={() => {
               if (!on) haptic.select();
               onSelect(tab);
             }}
+            // A small icon and label: a deeper sink than a row so it reads at this size.
+            scale={0.92}
             style={styles.tab}
             accessibilityRole="tab"
             accessibilityState={{ selected: on }}
@@ -46,7 +50,7 @@ export function TabBar({ current, badge, onSelect }: { current: Tab; badge: numb
                 <Text style={styles.badgeText}>{badge}</Text>
               </View>
             ) : null}
-          </Pressable>
+          </PressableScale>
         );
       })}
     </View>

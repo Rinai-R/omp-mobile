@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,7 +14,7 @@ import type { ModelOption } from "../types";
 import { levelLabel } from "../ompText";
 import { t } from "../i18n/index.ts";
 import { CheckGlyph } from "./icons";
-import { Group, Row, SectionHeader, Sheet } from "./ui";
+import { Group, Row, SectionHeader, Sheet, SheetScrollView } from "./ui";
 
 const LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -110,7 +109,7 @@ export function ModelSheet({
   const total = models?.length ?? 0;
 
   return (
-    <Sheet visible={visible} title={t("model.title")} onClose={onClose}>
+    <Sheet visible={visible} title={t("model.title")} onClose={onClose} scroll={false}>
       <View style={styles.sheet}>
         <View style={styles.levelBlock}>
           <Text style={styles.levelLabel}>{t("model.thinking")}</Text>
@@ -147,7 +146,7 @@ export function ModelSheet({
           </Text>
         ) : null}
 
-        <ScrollView
+        <SheetScrollView
           style={{ maxHeight: Math.max(180, Math.round(height * 0.52)) }}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
@@ -187,7 +186,7 @@ export function ModelSheet({
               </Group>
             </View>
           ))}
-        </ScrollView>
+        </SheetScrollView>
       </View>
     </Sheet>
   );
@@ -207,7 +206,8 @@ function createStyles(c: Palette) {
     justifyContent: "center",
   } as const;
   return {
-    sheet: { gap: 12, paddingBottom: 6 },
+    // Shrinks with the sheet when the keyboard comes up: the list gives way, not the search.
+    sheet: { gap: 12, paddingBottom: 6, flexShrink: 1 },
     levelBlock: { gap: 8, flexShrink: 0 },
     levelLabel: {
       fontFamily: MONO,

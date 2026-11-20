@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
-  useWindowDimensions,
   type PressableStateCallbackType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,7 +15,7 @@ import { t } from "../i18n/index.ts";
 import { approvalText, optionLabel } from "../ompText";
 import { haptic } from "../haptics";
 import { BrandMark, GradientFill } from "./brand";
-import { sheetTransforms, useSheetMotion } from "./ui";
+import { SheetGrab, SheetHost, SheetSurface, useSheet } from "./ui";
 
 type Answer = { value?: string; confirmed?: boolean; cancelled?: boolean };
 
@@ -67,9 +63,9 @@ export function ApprovalSheet({
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
-  const { progress } = useSheetMotion(true);
-  const motion = sheetTransforms(progress, height);
+  const cancel = useCallback(() => onAnswer({ cancelled: true }), [onAnswer]);
+  // Dragging (by the handle only) or tapping the scrim cancels, once the sheet has left.
+  const sheet = useSheet(true, cancel);
   const [value, setValue] = useState(request.prefill ?? "");
   const [focused, setFocused] = useState(false);
 
@@ -84,7 +80,7 @@ export function ApprovalSheet({
     },
     [onAnswer],
   );
-  const cancel = useCallback(() => onAnswer({ cancelled: true }), [onAnswer]);
+
   const cancelStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [styles.cancel, pressed && styles.optionPressed],
     [styles],
@@ -93,11 +89,12 @@ export function ApprovalSheet({
   const options = request.options ?? [];
   const text = approvalText(request.title, request.message);
   return (
-    <KeyboardAvoidingView style={styles.wrap} behavior="padding">
-      <Animated.View style={[styles.scrim, motion.backdrop]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={cancel} accessibilityLabel={t("common.cancel")} />
-      </Animated.View>
-      <Animated.View style={[styles.sheet, { paddingBottom: 10 + insets.bottom }, motion.sheet]}>
+    <SheetHost sheet={sheet} modal={false} backdropLabel={t("common.cancel")}>
+      <SheetSurface style={[styles.sheet, { paddingBottom: 10 + insets.bottom }]}>
+        {/* The handle alone drags: a slip on the options must not cancel the question. */}
+        <SheetGrab style={styles.grabArea}>
+          <View style={styles.grab} />
+        </SheetGrab>
         <View style={styles.group}>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.head} bounces={false}>
             <View style={styles.icon}>
@@ -168,8 +165,8 @@ export function ApprovalSheet({
         <Pressable onPress={cancel} style={cancelStyle} accessibilityRole="button">
           <Text style={styles.cancelText}>{t("common.cancel")}</Text>
         </Pressable>
-      </Animated.View>
-    </KeyboardAvoidingView>
+      </SheetSurface>
+    </SheetHost>
   );
 }
 
@@ -192,9 +189,10 @@ function createStyles(c: Palette) {
   const option = { fontFamily: SANS, fontSize: 18, lineHeight: 23, textAlign: "center", color: c.tint } as const;
   const surface = c.dark ? "#1c1c1e" : "#f9f9f9";
   return {
-    wrap: { ...StyleSheet.absoluteFill, justifyContent: "flex-end" },
-    scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
     sheet: { maxHeight: "88%", paddingHorizontal: 8, gap: 8 },
+    // Drawn on the scrim above the cards, so it is light in both themes; tall enough to catch a thumb.
+    grabArea: { alignItems: "center", justifyContent: "center", height: 32, marginBottom: -8 },
+    grab: { width: 38, height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.55)" },
     group: { borderRadius: 14, overflow: "hidden", backgroundColor: surface, flexShrink: 1 },
     scroll: { flexGrow: 0, flexShrink: 1 },
     head: { alignItems: "center", paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16, gap: 10 },

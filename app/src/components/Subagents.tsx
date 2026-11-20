@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FlatList, Modal, Text, View, type ListRenderItem } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FlatList, Modal, StyleSheet, Text, View, useWindowDimensions, type ListRenderItem } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated, { Extrapolation, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchSubagent, listSubagents } from "../api";
 import { heldOf } from "../cache";
@@ -7,11 +10,12 @@ import { t } from "../i18n/index.ts";
 import { snapshotItems } from "../messages";
 import { layoutRows, type Row, type Step } from "../rows";
 import { mergeSubagent, subagentsOf } from "../subagents";
+import { SPRING_SCREEN } from "../motion";
 import { MONO, SANS, useColors, useStyles, type Palette } from "../theme";
 import type { AgentMessage, Machine, Subagent } from "../types";
 import { Spinner } from "./brand";
 import { TranscriptFolds, TranscriptRow } from "./Transcript";
-import { Banner, Group, Header, Row as ListRow, StatusDot } from "./ui";
+import { Banner, FADE_REDUCED, Group, Header, Row as ListRow, StatusDot } from "./ui";
 
 /**
  * The subagents a `task` call started, and one subagent's transcript, read
@@ -104,7 +108,8 @@ export function SubagentList({
 /**
  * One subagent's transcript, full screen and read-only, with the chat's rows.
  * `renderStep` draws a step's details sheet: the caller's, so a subagent's own
- * `task` calls open their subagents the same way.
+ * `task` calls open their subagents the same way. It is a level deeper than
+ * the list it came from, so it pushes in from the right and leaves the same way.
  */
 export function SubagentScreen({
   machine,
@@ -123,6 +128,53 @@ export function SubagentScreen({
 }): ReactNode {
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const reduced = useReducedMotion();
+  const visible = subagent !== null;
+  const [mounted, setMounted] = useState(visible);
+  const x = useSharedValue(width);
+  const fade = useSharedValue(reduced ? 0 : 1);
+  const laidOut = useRef(false);
+  const pending = useRef(visible);
+  const enter = useCallback(() => {
+    if (reduced) {
+      x.set(0);
+      fade.set(withTiming(1, FADE_REDUCED));
+    } else x.set(withSpring(0, SPRING_SCREEN));
+  }, [fade, reduced, x]);
+  const unmount = useCallback(() => {
+    laidOut.current = false;
+    setMounted(false);
+    x.set(width);
+  }, [width, x]);
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      // Reopened mid-exit: from where it is. Otherwise once the Modal has laid it out.
+      if (laidOut.current) enter();
+      else pending.current = true;
+      return;
+    }
+    pending.current = false;
+    const done = (finished?: boolean): void => {
+      "worklet";
+      if (finished === true) scheduleOnRN(unmount);
+    };
+    if (!laidOut.current) unmount();
+    else if (reduced) fade.set(withTiming(0, FADE_REDUCED, done));
+    else x.set(withSpring(width, SPRING_SCREEN, done));
+    // Only `subagent` opening or closing drives this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  const onLayout = useCallback(() => {
+    laidOut.current = true;
+    if (!pending.current) return;
+    pending.current = false;
+    enter();
+  }, [enter]);
+  const slide = useAnimatedStyle(() => ({ opacity: fade.get(), transform: [{ translateX: x.get() }] }));
+  // The sheet it came from dims as the transcript covers it.
+  const scrim = useAnimatedStyle(() => ({ opacity: interpolate(x.get(), [0, width], [1, 0], Extrapolation.CLAMP) * fade.get() }));
   const [info, setInfo] = useState<Subagent | null>(subagent);
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -130,13 +182,14 @@ export function SubagentScreen({
   const messagesRef = useRef<AgentMessage[]>([]);
   const id = subagent?.id;
 
+  // Leaving keeps the transcript on screen while it slides away; the next one starts clean.
   useEffect(() => {
+    if (id === undefined) return;
     messagesRef.current = [];
     setMessages([]);
     setInfo(subagent);
     setError(null);
     setStep(null);
-    if (id === undefined) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () => {
@@ -182,21 +235,24 @@ export function SubagentScreen({
 
   const subtitle = info === null ? undefined : [info.agent, t(`subagents.status.${info.status}`), t("subagents.messages", { count: messages.length })].filter(Boolean).join(" · ");
   return (
-    <Modal visible={subagent !== null} animationType="slide" statusBarTranslucent onRequestClose={onClose}>
-      <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <Header title={info?.agentId ?? ""} subtitle={subtitle} onBack={onClose} />
-        {error !== null ? <Banner text={error} /> : null}
-        <View style={styles.listWrap}>
-          <TranscriptFolds>
-            <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
-          </TranscriptFolds>
-          {rows.length === 0 && error === null ? (
-            <View style={styles.empty} pointerEvents="none">
-              <Text style={styles.note}>{t("subagents.empty")}</Text>
-            </View>
-          ) : null}
-        </View>
-      </View>
+    <Modal visible={mounted} transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
+      <GestureHandlerRootView style={styles.fill}>
+        <Animated.View style={[styles.scrim, scrim]} />
+        <Animated.View onLayout={onLayout} style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }, slide]}>
+          <Header title={info?.agentId ?? ""} subtitle={subtitle} onBack={onClose} />
+          {error !== null ? <Banner text={error} /> : null}
+          <View style={styles.listWrap}>
+            <TranscriptFolds>
+              <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
+            </TranscriptFolds>
+            {rows.length === 0 && error === null ? (
+              <View style={styles.empty} pointerEvents="none">
+                <Text style={styles.note}>{t("subagents.empty")}</Text>
+              </View>
+            ) : null}
+          </View>
+        </Animated.View>
+      </GestureHandlerRootView>
       {id !== undefined ? renderStep(openStep, () => setStep(null), id) : null}
     </Modal>
   );
@@ -217,6 +273,8 @@ function createStyles(c: Palette) {
     note: { fontFamily: SANS, fontSize: 13, lineHeight: 18, color: c.fgFaint, paddingHorizontal: 2 },
     error: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: c.err, paddingHorizontal: 2 },
     status: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16 },
+    fill: { flex: 1 },
+    scrim: { ...StyleSheet.absoluteFill, backgroundColor: c.backdrop },
     screen: { flex: 1, backgroundColor: c.bg },
     listWrap: { flex: 1 },
     list: { paddingTop: 16, paddingBottom: 12 },

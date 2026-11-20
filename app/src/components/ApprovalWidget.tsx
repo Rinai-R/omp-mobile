@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { t } from "../i18n/index.ts";
 import { haptic } from "../haptics";
 import { approvalText, TOOL_APPROVAL_PREFIX } from "../ompText";
@@ -7,6 +7,7 @@ import { age } from "../sessionGroups";
 import { MONO, SANS, useColors, useStyles, type Palette } from "../theme";
 import type { SessionSummary } from "../types";
 import { BrandMark, GradientFill, Spinner } from "./brand";
+import { PressableScale } from "./ui";
 
 
 type Request = NonNullable<SessionSummary["request"]>;
@@ -72,16 +73,16 @@ export function ApprovalWidget({
       </Text>
       {error !== null ? <Text style={styles.error}>{error}</Text> : null}
       <View style={styles.actions}>
-        <Pressable
+        <PressableScale
           onPress={onView}
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+          style={styles.action}
           accessibilityRole="button"
           accessibilityLabel={t("home.widget.view")}
         >
           <Text style={styles.actionText}>{t("home.widget.view")}</Text>
-        </Pressable>
+        </PressableScale>
         {answer !== undefined ? (
-          <Pressable
+          <PressableScale
             disabled={busy}
             onPress={() => {
               haptic.press();
@@ -91,12 +92,12 @@ export function ApprovalWidget({
                 .catch((cause: unknown) => setError(t("home.widget.failed", { error: cause instanceof Error ? cause.message : String(cause) })))
                 .finally(() => setBusy(false));
             }}
-            style={({ pressed }) => [styles.allow, pressed && styles.pressed]}
+            style={styles.allow}
             accessibilityRole="button"
             accessibilityLabel={t("home.widget.allow")}
           >
             {busy ? <Spinner size={14} color={c.fabFg} /> : <Text style={styles.allowText}>{t("home.widget.allow")}</Text>}
-          </Pressable>
+          </PressableScale>
         ) : null}
       </View>
     </View>
@@ -128,6 +129,5 @@ function createStyles(c: Palette) {
     actionText: { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "600", color: strong },
     allow: { ...action, backgroundColor: c.fab },
     allowText: { fontFamily: SANS, fontSize: 15, lineHeight: 20, fontWeight: "600", color: c.fabFg },
-    pressed: { opacity: 0.7, transform: [{ scale: 0.97 }] },
   } as const;
 }

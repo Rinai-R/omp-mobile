@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, StyleSheet, Text, View, type TextStyle, type ViewStyle } from "react-native";
+import Reanimated, {
+  Easing as REasing,
+  cancelAnimation,
+  interpolateColor,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+  ReduceMotion,
+  type SharedValue,
+} from "react-native-reanimated";
 import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
+import { EASE_OUT as EASE_OUT_UI } from "../motion";
 import { EASE_OUT, GRADIENT, MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import { t } from "../i18n/index.ts";
 
@@ -43,15 +58,18 @@ export function usePulse(active = true, period = 1400): Animated.Value {
   return value;
 }
 
-/** A value that plays 0 → 1 once on mount with the OMP ease-out. */
-export function useEnter(duration = 320, skip = false): Animated.Value {
-  // `skip` starts at the end: read once, so a row that stops animating keeps its value.
-  const value = useRef(new Animated.Value(skip ? 1 : 0)).current;
+/**
+ * A value that plays 0 → 1 once on mount with the strong ease-out, on the UI
+ * thread. `skip` starts at the end and is read once, so a row that stops
+ * animating keeps its value.
+ */
+export function useEnter(duration = 220, skip = false): SharedValue<number> {
+  const value = useSharedValue(skip ? 1 : 0);
   useEffect(() => {
     if (skip) return undefined;
-    const run = Animated.timing(value, { toValue: 1, duration, easing: EASE_OUT, useNativeDriver: true });
-    run.start();
-    return () => run.stop();
+    // Runs under reduced motion too: callers keep the fade and drop their travel.
+    value.set(withTiming(1, { duration, easing: EASE_OUT_UI, reduceMotion: ReduceMotion.Never }));
+    return () => cancelAnimation(value);
     // Only the first `skip` counts (see above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duration, value]);
@@ -334,38 +352,74 @@ export function ShimmerText({
   maxFontSizeMultiplier?: number;
 }): ReactNode {
   const c = useColors();
-  const value = useRef(new Animated.Value(0)).current;
+  const reduced = useReducedMotion();
+  // One UI-thread clock for every glyph: the sweep runs every frame while a turn streams, so it must not touch JS.
+  const value = useSharedValue(0);
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(value, { toValue: 1, duration: SHIMMER_MS, easing: Easing.linear, useNativeDriver: false }),
-        Animated.delay(SHIMMER_DELAY),
-        Animated.timing(value, { toValue: 0, duration: 0, useNativeDriver: false }),
-      ]),
+    if (reduced) return undefined;
+    value.set(
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: SHIMMER_MS, easing: REasing.linear }),
+          withDelay(SHIMMER_DELAY, withTiming(0, { duration: 0 })),
+        ),
+        -1,
+      ),
     );
-    loop.start();
-    return () => loop.stop();
-  }, [value]);
+    return () => cancelAnimation(value);
+  }, [reduced, value]);
   const glyphs = Array.from(text);
   const base = typeof style.color === "string" ? style.color : c.fgFaint;
-  const span = 1 + 2 * SWEEP;
   const n = glyphs.length;
   return (
     <View style={{ flexDirection: "row", flexShrink: 1, minWidth: 0, overflow: "hidden" }} accessible accessibilityLabel={text}>
-      {glyphs.map((glyph, index) => {
-        const at = n <= 1 ? 0.5 : index / (n - 1);
-        const point = (d: number) => (at + d + SWEEP) / span;
-        const color = value.interpolate({
-          inputRange: [point(-SWEEP), point(-SWEEP / 2), point(0), point(SWEEP / 2), point(SWEEP)],
-          outputRange: [base, c.accentA, c.accentV, c.accentB, base],
-          extrapolate: "clamp",
-        });
-        return (
-          <Animated.Text key={index} style={[style, { color }]} maxFontSizeMultiplier={maxFontSizeMultiplier} importantForAccessibility="no">
-            {glyph}
-          </Animated.Text>
-        );
-      })}
+      {glyphs.map((glyph, index) => (
+        <ShimmerGlyph
+          key={index}
+          glyph={glyph}
+          at={n <= 1 ? 0.5 : index / (n - 1)}
+          value={value}
+          base={base}
+          colors={[c.accentA, c.accentV, c.accentB]}
+          style={style}
+          maxFontSizeMultiplier={maxFontSizeMultiplier}
+        />
+      ))}
     </View>
+  );
+}
+
+/** One glyph of a shimmer: its colour is where the sweep is, relative to the glyph's place in the label. */
+function ShimmerGlyph({
+  glyph,
+  at,
+  value,
+  base,
+  colors,
+  style,
+  maxFontSizeMultiplier,
+}: {
+  glyph: string;
+  at: number;
+  value: SharedValue<number>;
+  base: string;
+  colors: [string, string, string];
+  style: TextStyle;
+  maxFontSizeMultiplier?: number;
+}): ReactNode {
+  const [a, v, b] = colors;
+  const animated = useAnimatedStyle(() => {
+    const span = 1 + 2 * SWEEP;
+    const point = (d: number) => (at + d + SWEEP) / span;
+    const x = value.get();
+    // Outside the sweep the glyph rests on its base colour (interpolateColor clamps at the ends).
+    return {
+      color: interpolateColor(x, [point(-SWEEP), point(-SWEEP / 2), point(0), point(SWEEP / 2), point(SWEEP)], [base, a, v, b, base]),
+    };
+  }, [at, base, a, v, b]);
+  return (
+    <Reanimated.Text style={[style, animated]} maxFontSizeMultiplier={maxFontSizeMultiplier} importantForAccessibility="no">
+      {glyph}
+    </Reanimated.Text>
   );
 }

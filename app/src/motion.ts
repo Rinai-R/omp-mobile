@@ -10,7 +10,15 @@
  *   release point, so a short flick commits.
  * - Everything starts from the value on screen, so it can be caught mid-flight.
  */
-import { Easing, ReduceMotion, type WithSpringConfig, type WithTimingConfig } from "react-native-reanimated";
+import {
+  Easing,
+  cubicBezier,
+  ReduceMotion,
+  withTiming,
+  type EntryExitAnimationFunction,
+  type WithSpringConfig,
+  type WithTimingConfig,
+} from "react-native-reanimated";
 
 /** Strong ease-out for entering and leaving; on-screen moves; the iOS sheet curve. Never ease-in on UI. */
 export const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
@@ -48,3 +56,36 @@ export function rubberband(overshoot: number, dimension: number, constant = 0.55
   "worklet";
   return (overshoot * dimension * constant) / (dimension + constant * Math.abs(overshoot));
 }
+
+/**
+ * A small surface appearing in place (a menu, a pill): from 0.95 and clear
+ * to full, never from nothing. Pair with `popOut` so it leaves the way it
+ * came. Under reduced motion only the fade remains. Build it in `useMemo`.
+ */
+export function popIn(reduced: boolean, duration = 180): EntryExitAnimationFunction {
+  const timing: WithTimingConfig = { duration, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
+  const from = reduced ? 1 : 0.95;
+  return () => {
+    "worklet";
+    return {
+      initialValues: { opacity: 0, transform: [{ scale: from }] },
+      animations: { opacity: withTiming(1, timing), transform: [{ scale: withTiming(1, timing) }] },
+    };
+  };
+}
+
+/** `popIn` in reverse, about a fifth quicker: the user is done with it. */
+export function popOut(reduced: boolean, duration = 150): EntryExitAnimationFunction {
+  const timing: WithTimingConfig = { duration, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
+  const to = reduced ? 1 : 0.95;
+  return () => {
+    "worklet";
+    return {
+      initialValues: { opacity: 1, transform: [{ scale: 1 }] },
+      animations: { opacity: withTiming(0, timing), transform: [{ scale: withTiming(to, timing) }] },
+    };
+  };
+}
+
+/** QUICK as a Reanimated CSS transition (style props take a CSS easing, not an Easing function). */
+export const QUICK_CSS = { transitionDuration: 220, transitionTimingFunction: cubicBezier(0.77, 0, 0.175, 1) } as const;

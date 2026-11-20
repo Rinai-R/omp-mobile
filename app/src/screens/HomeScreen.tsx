@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FORK_FEATURE, answerRequest, createSession, daemonFeatures, deleteSession, forkSession, knownFeatures } from "../api";
 import { ApprovalWidget } from "../components/ApprovalWidget";
@@ -9,7 +10,8 @@ import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch, useTranscriptSync } from "../components/SessionList";
 import { haptic } from "../haptics";
 import { displayName, machineLabel } from "../machines";
-import { Banner, Button, ConfirmSheet, Field, Sheet } from "../components/ui";
+import { Banner, Button, ConfirmSheet, Field, PressableScale, Sheet } from "../components/ui";
+import { QUICK, QUICK_CSS } from "../motion";
 import { reasonText, type Probe } from "../probe";
 import { attentionCount, folderOf, groupSessions } from "../sessionGroups";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -41,15 +43,26 @@ interface Props {
   onRetry: (machine: Machine) => void;
   /** Ask the home to open the New session sheet (from the switcher); a changing nonce opens it again. */
   newRequest: number;
+  /**
+   * Whether the home is the screen in front. It stays mounted under a pushed
+   * chat, so coming back to it (false → true) refreshes the list quietly.
+   */
+  active?: boolean;
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest, active = true }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { sessions, loading, error, refresh, setSessions } = useMachineSessions(machine);
   useTranscriptSync(machine, sessions, refresh);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active && !wasActive.current) void refresh(true);
+    wasActive.current = active;
+  }, [active, refresh]);
+  const [searching, setSearching] = useState(false);
   const [creating, setCreating] = useState(false);
   const [cwd, setCwd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -223,9 +236,10 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         }
       >
         {/* The tab already says "Sessions": the header names the computer they run on, and switches it. */}
-        <Pressable
+        <PressableScale
           onPress={onPickMachine}
-          style={({ pressed }) => [styles.machine, pressed && styles.pressed]}
+          style={styles.machine}
+          scale={0.985}
           accessibilityRole="button"
           accessibilityLabel={t("home.machineA11y", { name, detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
         >
@@ -252,13 +266,15 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
               {detail ?? t(reachable ? "home.online" : "chat.status.connecting")}
             </Text>
           </View>
-        </Pressable>
+        </PressableScale>
 
-        <View style={styles.search}>
+        <Reanimated.View style={[styles.search, searching && styles.searchFocused]}>
           <SearchGlyph size={16} color={colors.fgFaint} />
           <TextInput
             value={query}
             onChangeText={setQuery}
+            onFocus={() => setSearching(true)}
+            onBlur={() => setSearching(false)}
             placeholder={t("sessions.search")}
             placeholderTextColor={colors.fgFaint}
             selectionColor={colors.tint}
@@ -273,24 +289,9 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
               </View>
             </Pressable>
           ) : null}
-        </View>
+        </Reanimated.View>
 
-        <View style={styles.segments} accessibilityRole="tablist">
-          {SEGMENTS.map((key) => (
-            <Pressable
-              key={key}
-              onPress={() => {
-                if (key !== segment) haptic.select();
-                setSegment(key);
-              }}
-              style={key === segment ? styles.segmentOn : styles.segment}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: key === segment }}
-            >
-              <Text style={key === segment ? styles.segmentTextOn : styles.segmentText}>{t(`home.segment.${key}`)}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <Segments value={segment} onChange={setSegment} />
 
         {asking.map((session) => (
           <ApprovalWidget
@@ -355,17 +356,17 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         )}
       </ScrollView>
 
-      <Pressable
+      <PressableScale
         onPress={() => {
           haptic.tap();
           openCreate();
         }}
-        style={({ pressed }) => [styles.fab, { bottom: TAB_BAR_HEIGHT + 26 + insets.bottom }, pressed && styles.fabPressed]}
+        style={[styles.fab, { bottom: TAB_BAR_HEIGHT + 26 + insets.bottom }]}
         accessibilityRole="button"
         accessibilityLabel={t("home.new")}
       >
         <PlusGlyph size={26} color={colors.fabFg} />
-      </Pressable>
+      </PressableScale>
 
       <Sheet visible={creating} title={t("home.new")} onClose={() => setCreating(false)}>
         <Field label={t("home.newSheet.cwd")} value={cwd} onChangeText={setCwd} placeholder={machine.cwd} />
@@ -428,6 +429,58 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
   );
 }
 
+/**
+ * The segmented control: one pill slides under the chosen segment. The pill
+ * is absolute and childless, so its width can animate without laying out
+ * anything else; segments are measured once with onLayout, never per frame.
+ */
+function Segments({ value, onChange }: { value: Segment; onChange: (segment: Segment) => void }): ReactNode {
+  const styles = useStyles(createStyles);
+  const [layouts, setLayouts] = useState<Partial<Record<Segment, { x: number; width: number }>>>({});
+  const x = useSharedValue(0);
+  const width = useSharedValue(0);
+  const placed = useRef(false);
+  useEffect(() => {
+    const layout = layouts[value];
+    if (layout === undefined) return;
+    if (!placed.current) {
+      // The first measure puts the pill in place; only a change of segment slides it.
+      placed.current = true;
+      x.set(layout.x);
+      width.set(layout.width);
+      return;
+    }
+    x.set(withTiming(layout.x, QUICK));
+    width.set(withTiming(layout.width, QUICK));
+  }, [layouts, value, width, x]);
+  const pill = useAnimatedStyle(() => ({ width: width.get(), transform: [{ translateX: x.get() }] }));
+  const measure = (key: Segment) => (event: LayoutChangeEvent) => {
+    const { x: at, width: w } = event.nativeEvent.layout;
+    setLayouts((current) => (current[key]?.x === at && current[key]?.width === w ? current : { ...current, [key]: { x: at, width: w } }));
+  };
+  return (
+    <View style={styles.segments} accessibilityRole="tablist">
+      {layouts[value] !== undefined ? <Reanimated.View style={[styles.segmentPill, pill]} pointerEvents="none" /> : null}
+      {SEGMENTS.map((key) => (
+        <Pressable
+          key={key}
+          onLayout={measure(key)}
+          onPress={() => {
+            // On the press, in the same frame the pill starts to move.
+            if (key !== value) haptic.select();
+            onChange(key);
+          }}
+          style={styles.segment}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: key === value }}
+        >
+          <Text style={key === value ? styles.segmentTextOn : styles.segmentText}>{t(`home.segment.${key}`)}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function createStyles(c: Palette) {
   const chip = {
     height: 30,
@@ -453,12 +506,40 @@ function createStyles(c: Palette) {
     machineName: { flexShrink: 1, fontFamily: SANS, fontSize: 22, lineHeight: 28, fontWeight: "600", letterSpacing: -0.5, color: c.fg },
     machineDetail: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgFaint },
     machineDetailDown: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.err },
-    search: { flexDirection: "row", alignItems: "center", gap: 8, height: 38, borderRadius: 11, paddingHorizontal: 10, marginHorizontal: 16, marginBottom: 12, backgroundColor: c.search },
+    search: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      height: 38,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: "transparent",
+      paddingHorizontal: 10,
+      marginHorizontal: 16,
+      marginBottom: 12,
+      backgroundColor: c.search,
+      // Focus shows as a ring easing in, not a hard swap (QUICK's curve and length).
+      transitionProperty: "borderColor",
+      ...QUICK_CSS,
+    },
+    searchFocused: { borderColor: c.ring },
     searchInput: { flex: 1, height: 38, paddingVertical: 0, fontFamily: SANS, fontSize: 16, color: c.fg },
     clear: { width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.fgFaint },
     segments: { flexDirection: "row", padding: 2, borderRadius: 9, marginHorizontal: 16, marginBottom: 16, backgroundColor: c.search },
     segment,
-    segmentOn: { ...segment, backgroundColor: c.segment, elevation: 2, shadowColor: "#000000", shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
+    segmentPill: {
+      position: "absolute",
+      top: 2,
+      bottom: 2,
+      left: 0,
+      borderRadius: 7,
+      backgroundColor: c.segment,
+      elevation: 2,
+      shadowColor: "#000000",
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+    },
     segmentText: { ...segmentText, color: c.fgMuted },
     segmentTextOn: { ...segmentText, fontWeight: "600" },
     bannerWrap: { marginBottom: 12, marginHorizontal: 16, borderRadius: radius.md, overflow: "hidden" },
@@ -485,7 +566,6 @@ function createStyles(c: Palette) {
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
     },
-    fabPressed: { transform: [{ scale: 0.92 }] },
     recent: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: -4 },
     recentChip: chip,
     recentChipOn: { ...chip, borderColor: c.accent, backgroundColor: c.accentMuted },

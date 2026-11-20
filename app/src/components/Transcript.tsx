@@ -21,7 +21,11 @@ import {
   View,
   type FontVariant,
   type LayoutChangeEvent,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
+import Reanimated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
+import { QUICK } from "../motion";
 import { editDiff } from "../diff";
 import { imageUri, relayImageUri } from "../media";
 import { resultText } from "../messages";
@@ -49,7 +53,6 @@ import {
   AgentsGlyph,
   CheckGlyph,
   ChevronDownGlyph,
-  ChevronUpGlyph,
   CloseGlyph,
   CopyGlyph,
   FileGlyph,
@@ -249,8 +252,12 @@ export const TranscriptRow = memo(
     sameRow(prev.row, next.row),
 );
 
+/** A live row's entrance: a short fade and an 8 dp rise (just the fade under reduced motion). */
+const RISE = 8;
+
 function Enter({ animate, gap, children }: { animate: boolean; gap: number; children: ReactNode }): ReactNode {
-  const value = useEnter(300, !animate);
+  const value = useEnter(220, !animate);
+  const reduced = useReducedMotion();
   const shift = useContext(ShiftContext);
   const height = useRef<number | undefined>(undefined);
   const armed = useRef(false);
@@ -269,20 +276,59 @@ function Enter({ animate, gap, children }: { animate: boolean; gap: number; chil
     },
     [shift],
   );
+  const entrance = useAnimatedStyle(() => {
+    const v = value.get();
+    return { opacity: v, transform: [{ translateY: reduced ? 0 : (1 - v) * RISE }] };
+  }, [reduced]);
   return (
     <ArmContext.Provider value={arm}>
-    <Animated.View
-      onLayout={onLayout}
-      style={{
-        marginTop: gap,
-        paddingHorizontal: GUTTER,
-        opacity: value,
-        transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
-      }}
-    >
+    <Reanimated.View onLayout={onLayout} style={[{ marginTop: gap, paddingHorizontal: GUTTER }, entrance]}>
       {children}
-    </Animated.View>
+    </Reanimated.View>
     </ArmContext.Provider>
+  );
+}
+
+/** Follows `open` 0 → 1 on the UI thread, starting where it is so a quick second tap reverses it. */
+function useOpenProgress(open: boolean): SharedValue<number> {
+  const value = useSharedValue(open ? 1 : 0);
+  useEffect(() => {
+    value.set(withTiming(open ? 1 : 0, QUICK));
+  }, [open, value]);
+  return value;
+}
+
+/** False only during the first render: what is open as a row mounts shows at once, what opens on a tap fades in. */
+function useMounted(): boolean {
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+  }, []);
+  return mounted.current;
+}
+
+/**
+ * What a row opens onto. It fades in when opened by a tap; its height is not
+ * animated (that would lay the list out every frame), the fade carries the change.
+ */
+function Reveal({ play, style, children }: { play: boolean; style: StyleProp<ViewStyle>; children: ReactNode }): ReactNode {
+  const value = useEnter(180, !play);
+  const fade = useAnimatedStyle(() => ({ opacity: value.get() }));
+  return <Reanimated.View style={[style, fade]}>{children}</Reanimated.View>;
+}
+
+/** A chevron that points down while closed and turns to point up as its row opens; `fade` also hides it while closed. */
+function Turn({ open, fade = false }: { open: boolean; fade?: boolean }): ReactNode {
+  const colors = useColors();
+  const progress = useOpenProgress(open);
+  const style = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: fade ? p : 1, transform: [{ rotate: `${p * 180}deg` }] };
+  }, [fade]);
+  return (
+    <Reanimated.View style={style}>
+      <ChevronDownGlyph size={14} color={colors.fgFaint} />
+    </Reanimated.View>
   );
 }
 
@@ -348,7 +394,7 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
       )}
       {foldable ? (
         <View style={styles.dividerChevron}>
-          {open ? <ChevronUpGlyph size={14} color={colors.fgFaint} /> : <ChevronDownGlyph size={14} color={colors.fgFaint} />}
+          <Turn open={open} />
         </View>
       ) : null}
     </Pressable>
@@ -468,11 +514,24 @@ function Reply({ item, machine }: { item: MessageItem; machine: Machine }): Reac
   );
 }
 
-/** A work row's leading slot: a 16 dp box holding the row's glyph, or a chevron once it is open. */
+/** A work row's leading slot: a 16 dp box holding the row's glyph, which turns into a chevron as the row opens. */
 function Lead({ open, children }: { open: boolean; children: ReactNode }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
-  return <View style={styles.lead}>{open ? <ChevronUpGlyph size={14} color={colors.fgFaint} /> : children}</View>;
+  const progress = useOpenProgress(open);
+  const glyph = useAnimatedStyle(() => ({ opacity: 1 - progress.get() }));
+  const chevron = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: p, transform: [{ rotate: `${p * 180}deg` }] };
+  });
+  return (
+    <View style={styles.lead}>
+      <Reanimated.View style={glyph}>{children}</Reanimated.View>
+      <Reanimated.View style={[styles.leadChevron, chevron]} pointerEvents="none">
+        <ChevronDownGlyph size={14} color={colors.fgFaint} />
+      </Reanimated.View>
+    </View>
+  );
 }
 
 /** "Thinking" while it streams, "Thought" after; opens in place onto the thinking, quiet and indented. */
@@ -480,6 +539,7 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -502,9 +562,9 @@ function ThinkingRow({ item }: { item: MessageItem }): ReactNode {
         )}
       </Pressable>
       {open ? (
-        <View style={styles.thinkingBody}>
+        <Reveal play={mounted} style={styles.thinkingBody}>
           <Markdown text={(item.thinking ?? "").trim()} variant="thought" />
-        </View>
+        </Reveal>
       ) : null}
     </View>
   );
@@ -558,6 +618,7 @@ function ActivityRow({
   if (row.running && !watched) setWatched(true);
   const open = chosen ?? (row.running || watched);
   const [all, setAll] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -589,7 +650,7 @@ function ActivityRow({
         {row.failed > 0 && !row.running ? <View style={styles.failDot} /> : null}
       </Pressable>
       {open ? (
-        <View style={styles.steps}>
+        <Reveal play={mounted} style={styles.steps}>
           {row.steps.length > INLINE_STEPS ? (
             <Pressable
               onPress={() => {
@@ -613,7 +674,7 @@ function ActivityRow({
               <ToolRow key={value.tool.id} tool={value.tool} cwd={cwd} onOpen={onOpenStep} />
             ),
           )}
-        </View>
+        </Reveal>
       ) : null}
       {images.length > 0 ? (
         <View style={styles.groupImages}>
@@ -633,6 +694,7 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [open, setOpen] = useState(false);
+  const mounted = useMounted();
   const arm = useArm();
   const toggle = useCallback(() => {
     arm();
@@ -692,14 +754,14 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
             <Text style={styles.statAdd}>{edit[0]}</Text>
             <Text style={styles.statRemove}>{edit[1]?.replace("−", " −")}</Text>
           </Text>
-        ) : open ? (
-          <ChevronUpGlyph size={14} color={colors.fgFaint} />
-        ) : null}
+        ) : (
+          <Turn open={open} fade />
+        )}
       </Pressable>
       {open || (running && kind === "run") ? (
-        <View style={styles.toolBody}>
+        <Reveal play={mounted} style={styles.toolBody}>
           <ToolBody tool={tool} cwd={cwd} onDetails={details} />
-        </View>
+        </Reveal>
       ) : null}
     </View>
   );
@@ -1036,6 +1098,7 @@ function createStyles(c: Palette) {
 
     line,
     lead: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },
+    leadChevron: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center" },
     lineTitle: { ...meta, lineHeight: LINE, flexShrink: 0, maxWidth: "60%" },
     sep: { width: 2.5, height: 2.5, borderRadius: 1.25, marginHorizontal: 7, backgroundColor: c.fgGhost },
     lineSummary: { ...meta, lineHeight: LINE, flex: 1, minWidth: 0 },
