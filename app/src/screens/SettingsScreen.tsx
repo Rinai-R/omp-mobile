@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ScrollView, Switch, Text, View } from "react-native";
+import { Switch, Text, View } from "react-native";
+import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { BackGlyph, CheckGlyph } from "../components/icons";
-import { LargeTitle, TAB_BAR_HEIGHT } from "../components/TabBar";
+import { GlassTarget, useBlurTarget } from "../components/Glass";
+import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
+import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { Button, Group, IconButton, Row, SectionHeader } from "../components/ui";
 import { t, type LanguagePreference } from "../i18n/index.ts";
 import type { AppearancePreference } from "../storage";
@@ -33,6 +36,9 @@ interface Props {
   /** Back to the computers screen: only before any computer is paired, when there is no tab bar. */
   onBack?: () => void;
   version: string;
+  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar; only as a tab. */
+  blurTarget?: RefObject<View | null>;
+  under?: SharedValue<number>;
 }
 
 /** Each language under its own name, the same in every language. */
@@ -54,23 +60,26 @@ export function SettingsScreen({
   onAllowLive,
   onBack,
   version,
+  blurTarget,
+  under,
 }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const ownTarget = useBlurTarget();
+  const target = blurTarget ?? ownTarget;
+  const page = usePageScroll(under);
+  const top = usePageTop();
   const showBattery = notifications === "on" && batteryRestricted;
   return (
     <View style={styles.root}>
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: (onBack === undefined ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}>
-        {onBack !== undefined ? (
-          <View style={styles.back}>
-            <IconButton onPress={onBack} label={t("common.back")}>
-              <BackGlyph size={24} color={colors.tint} />
-            </IconButton>
-          </View>
-        ) : null}
+      <GlassTarget target={target}>
+      <Reanimated.ScrollView
+        {...page.props}
+        contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: (onBack === undefined ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}
+      >
         <View style={styles.bleed}>
-          <LargeTitle title={t("settings.title")} />
+          <LargeTitle y={page.y} title={t("settings.title")} />
         </View>
         <Group>
           <Row
@@ -157,7 +166,20 @@ export function SettingsScreen({
         <Group>
           <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last />
         </Group>
-      </ScrollView>
+      </Reanimated.ScrollView>
+      </GlassTarget>
+      <PageBar
+        target={target}
+        y={page.y}
+        title={t("settings.title")}
+        left={
+          onBack !== undefined ? (
+            <IconButton onPress={onBack} label={t("common.back")}>
+              <BackGlyph size={24} color={colors.tint} />
+            </IconButton>
+          ) : undefined
+        }
+      />
     </View>
   );
 }
@@ -170,7 +192,6 @@ function createStyles(c: Palette) {
     gap: { height: 24 },
     // The large title keeps the home's 20 px inset inside this 16 px-padded list.
     bleed: { marginHorizontal: -16 },
-    back: { position: "absolute", top: 0, left: -12 },
     version: { fontFamily: MONO, fontSize: 12, lineHeight: 16, color: c.fgFaint },
   } as const;
 }

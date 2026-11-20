@@ -14,10 +14,12 @@ import {
 } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
+import { useSharedValue } from "react-native-reanimated";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import appConfig from "./app.json";
 import * as Attention from "./modules/omp-attention/src";
 import { AttentionBanner } from "./src/components/AttentionBanner";
+import { useBlurTarget } from "./src/components/Glass";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MachineSwitcher } from "./src/components/MachineSwitcher";
 import { ScreenStack, type Layer } from "./src/components/ScreenStack";
@@ -67,7 +69,8 @@ function withChat(current: Route, machine: Machine, session: SessionSummary, foc
   return { base, top: { kind: "chat", machine, session, focus } };
 }
 
-const EDGES = ["top", "left", "right"] as const;
+// No top edge: every screen's glass bar runs up under the status bar and pads itself by the inset.
+const EDGES = ["left", "right"] as const;
 
 /** How often the machines screen probes every machine while it is shown. */
 const PROBE_INTERVAL_MS = 15_000;
@@ -437,6 +440,10 @@ export default function App(): ReactNode {
     [settings, updateSettings],
   );
 
+  // Each tab's page is what the tab bar blurs while that tab is current, and how much of it runs on under the bar.
+  const tabTargets = { sessions: useBlurTarget(), computers: useBlurTarget(), settings: useBlurTarget() };
+  const tabUnder = { sessions: useSharedValue(0), computers: useSharedValue(0), settings: useSharedValue(0) };
+
   const fixBattery = useCallback(() => Attention.requestBatteryExemption(), []);
   const dismissBanner = useCallback(() => setBanner(null), []);
   const openBanner = useCallback((attention: Attention.Attention) => {
@@ -463,6 +470,8 @@ export default function App(): ReactNode {
         live={live}
         onAllowLive={() => void Attention.openPromotionSettings()}
         onBack={onBack}
+        blurTarget={onBack === undefined ? tabTargets.settings : undefined}
+        under={onBack === undefined ? tabUnder.settings : undefined}
         version={appConfig.expo.version}
       />
     );
@@ -481,6 +490,8 @@ export default function App(): ReactNode {
         onRename={renameMachine}
         onSettings={() => setRoute((current) => ({ ...current, top: { kind: "settings" } }))}
         tabbed={tabbed}
+        blurTarget={tabbed ? tabTargets.computers : undefined}
+        under={tabbed ? tabUnder.computers : undefined}
         refreshing={refreshing}
         onRefresh={() => {
           setRefreshing(true);
@@ -517,11 +528,19 @@ export default function App(): ReactNode {
             newRequest={home.create ?? 0}
             // Under a pushed chat it stays mounted; coming back to it refreshes the list quietly.
             active={route.top === null && tab === "sessions"}
+            blurTarget={tabTargets.sessions}
+            under={tabUnder.sessions}
           />
         </View>
         {tab === "computers" ? machinesScreen(true) : tab === "settings" ? settingsScreen() : null}
         {/* Tabs switch in place: no motion between peers. */}
-        <TabBar current={tab} badge={waiting} onSelect={(next) => setRoute({ base: { ...home, tab: next, create: undefined }, top: null })} />
+        <TabBar
+          current={tab}
+          badge={waiting}
+          onSelect={(next) => setRoute({ base: { ...home, tab: next, create: undefined }, top: null })}
+          target={tabTargets[tab]}
+          under={tabUnder[tab]}
+        />
       </View>
     );
   } else {

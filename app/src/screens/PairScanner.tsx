@@ -14,7 +14,9 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { pairMachine } from "../api";
+import { PairSuccess } from "../components/PairSuccess";
 import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
+import { displayName } from "../machines";
 import { parsePairingTicket, type PairingTicket } from "../relay/pairing";
 import { CloseGlyph, KeyboardGlyph } from "../components/icons";
 import { pairingMessage, readPairing } from "../pairing";
@@ -149,8 +151,21 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const camera = useCameraAccess();
-  const relay = useRelayPairing(machines, onAdd);
-  const pairing = usePairing(machines, onAdd, relay.start);
+  // A paired computer is celebrated first; it is handed to `onAdd` once, when the moment ends.
+  const [paired, setPaired] = useState<Machine | null>(null);
+  const pending = useRef<Machine | null>(null);
+  const celebrate = useCallback((machine: Machine) => {
+    pending.current = machine;
+    setPaired(machine);
+  }, []);
+  const handOn = useCallback(() => {
+    const machine = pending.current;
+    if (machine === null) return;
+    pending.current = null;
+    onAdd(machine);
+  }, [onAdd]);
+  const relay = useRelayPairing(machines, celebrate);
+  const pairing = usePairing(machines, celebrate, relay.start);
   /** The camera granted but failed to start; a retry remounts it under a new key. */
   const [mountFailed, setMountFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -195,7 +210,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
           style={StyleSheet.absoluteFill}
           facing="back"
           barcodeScannerSettings={QR_ONLY}
-          onBarcodeScanned={pairing.scan}
+          onBarcodeScanned={paired === null ? pairing.scan : undefined}
           onMountError={mountError}
         />
       ) : null}
@@ -242,6 +257,7 @@ export function PairScanner({ machines, onAdd, onClose, onManual }: Props): Reac
           </>
         ) : null}
       </View>
+      {paired !== null ? <PairSuccess name={displayName(paired)} c={DARK} scrim onDone={handOn} /> : null}
     </View>
   );
 }

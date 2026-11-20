@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,9 +25,20 @@ import {
   type LayoutChangeEvent,
   type StyleProp,
   type ViewStyle,
+  useWindowDimensions,
 } from "react-native";
-import Reanimated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
-import { QUICK } from "../motion";
+import Reanimated, {
+  ReduceMotion,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+  type WithTimingConfig,
+} from "react-native-reanimated";
+import { EASE_OUT, QUICK } from "../motion";
+import { haptic } from "../haptics";
+import type { Frame, SendFlight, Shown } from "../sendFlight";
 import { editDiff } from "../diff";
 import { imageUri, relayImageUri } from "../media";
 import { resultText } from "../messages";
@@ -116,6 +128,12 @@ const ArmContext = createContext<() => void>(() => undefined);
  */
 const MessageActionContext = createContext<((item: MessageItem) => void) | undefined>(undefined);
 
+/** The flight of a message just sent, which the newest user row may be the landing of. */
+const FlightContext = createContext<SendFlight | undefined>(undefined);
+
+/** The daemon's transcript is in: a turn seen running from here on is live, not replayed history. */
+const LiveContext = createContext(false);
+
 function useArm(): () => void {
   return useContext(ArmContext);
 }
@@ -128,10 +146,14 @@ export function TranscriptFolds({
   children,
   onShift,
   onMessageAction,
+  flight,
+  live = false,
 }: {
   children: ReactNode;
   onShift?: (delta: number) => void;
   onMessageAction?: (item: MessageItem) => void;
+  flight?: SendFlight;
+  live?: boolean;
 }): ReactNode {
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((turn: string) => {
@@ -147,7 +169,11 @@ export function TranscriptFolds({
   return (
     <ShiftContext.Provider value={shift}>
       <MessageActionContext.Provider value={onMessageAction}>
-        <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+        <FlightContext.Provider value={flight}>
+          <LiveContext.Provider value={live}>
+            <FoldContext.Provider value={value}>{children}</FoldContext.Provider>
+          </LiveContext.Provider>
+        </FlightContext.Provider>
       </MessageActionContext.Provider>
     </ShiftContext.Provider>
   );
@@ -164,11 +190,14 @@ interface RowProps {
 
 function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps): ReactNode {
   const { folded } = useContext(FoldContext);
+  const flight = useContext(FlightContext);
+  // Decided once, as the row mounts: the message just sent (the optimistic copy) lands here instead of playing the entrance.
+  const [flying] = useState(() => row.kind === "user" && row.item.local === true && flight !== undefined && flight.wants(row.item.text.trim()));
   const hidden = (row.kind === "thinking" || row.kind === "activity") && folded.has(row.turn);
   let body: ReactNode;
   switch (row.kind) {
     case "user":
-      body = <UserMessage item={row.item} machine={machine} />;
+      body = <UserMessage item={row.item} machine={machine} flight={flying ? flight : undefined} />;
       break;
     case "turn":
       body = <TurnDivider row={row} />;
@@ -196,7 +225,7 @@ function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps)
   }
   // Always the same wrapper: switching it off after the first frame would remount the row.
   return (
-    <Enter animate={animate} gap={hidden ? 0 : row.gap}>
+    <Enter animate={animate && !flying} gap={hidden ? 0 : row.gap}>
       {hidden ? null : body}
     </Enter>
   );
@@ -363,6 +392,7 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
     arm();
     toggle(row.id);
   }, [arm, row.id, toggle]);
+  const beat = useFinishBeat(row);
   const foldable = row.members > 0;
   const label = row.running ? liveLabel(row.live) : turnLabel(row);
   const elapsed = row.running && row.startedAt !== undefined ? turnDuration(Math.max(0, now - row.startedAt)) : undefined;
@@ -377,7 +407,11 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
       accessibilityHint={foldable ? (open ? t("turn.foldA11y") : t("turn.unfoldA11y")) : undefined}
     >
       <Animated.View style={[styles.dividerMark, row.running ? { opacity: markOpacity } : null]}>
-        <BrandMark size={13} color={row.running ? undefined : row.end === "failed" ? colors.err : colors.fgGhost} />
+        {beat !== undefined ? (
+          <FinishMark progress={beat} />
+        ) : (
+          <BrandMark size={13} color={row.running ? undefined : row.end === "failed" ? colors.err : colors.fgGhost} />
+        )}
       </Animated.View>
       {row.running ? (
         <>
@@ -389,9 +423,11 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
           ) : null}
         </>
       ) : (
-        <Text style={row.end === "failed" ? styles.dividerFailed : styles.dividerText} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
-          {label}
-        </Text>
+        <FadeIn progress={beat}>
+          <Text style={row.end === "failed" ? styles.dividerFailed : styles.dividerText} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+            {label}
+          </Text>
+        </FadeIn>
       )}
       {foldable ? (
         <View style={styles.dividerChevron}>
@@ -401,6 +437,68 @@ function TurnDivider({ row }: { row: Extract<Row, { kind: "turn" }> }): ReactNod
     </Pressable>
   );
 }
+
+const BEAT: WithTimingConfig = { duration: 220, easing: EASE_OUT, reduceMotion: ReduceMotion.Never };
+
+/**
+ * The moment a turn seen running live finishes "Done": its progress 0 → 1 (220 ms),
+ * with one success tap. Undefined for turns loaded finished, replayed, failed or stopped.
+ */
+function useFinishBeat(row: Extract<Row, { kind: "turn" }>): SharedValue<number> | undefined {
+  const live = useContext(LiveContext);
+  const progress = useSharedValue(0);
+  const [running, setRunning] = useState(row.running);
+  const [watched, setWatched] = useState(false);
+  const [beat, setBeat] = useState(false);
+  // Derived while rendering, so the frame the turn ends already draws the beat's first state.
+  if (row.running && live && !watched) setWatched(true);
+  if (row.running !== running) {
+    setRunning(row.running);
+    if (!row.running && watched) {
+      setWatched(false);
+      if (row.end === "done") setBeat(true);
+    }
+  }
+  useEffect(() => {
+    if (!beat) return;
+    haptic.done();
+    progress.set(withTiming(1, BEAT));
+  }, [beat, progress]);
+  return beat ? progress : undefined;
+}
+
+/** The π giving way to a check: crossfade, the check growing from 0.8 (no growth under reduced motion). */
+function FinishMark({ progress }: { progress: SharedValue<number> }): ReactNode {
+  const colors = useColors();
+  const reduced = useReducedMotion();
+  const mark = useAnimatedStyle(() => ({ opacity: 1 - progress.get() }));
+  const check = useAnimatedStyle(() => {
+    const p = progress.get();
+    return { opacity: p, transform: [{ scale: reduced ? 1 : 0.8 + 0.2 * p }] };
+  }, [reduced]);
+  return (
+    <>
+      <Reanimated.View style={[StyleSheet.absoluteFill, CENTER, mark]}>
+        <BrandMark size={13} color={colors.fgGhost} />
+      </Reanimated.View>
+      <Reanimated.View style={check}>
+        <CheckGlyph size={14} color={colors.ok} />
+      </Reanimated.View>
+    </>
+  );
+}
+
+const CENTER = { alignItems: "center", justifyContent: "center" } as const;
+
+/** Fades its child in with `progress`; a plain wrapper otherwise. */
+function FadeIn({ progress, children }: { progress: SharedValue<number> | undefined; children: ReactNode }): ReactNode {
+  const fallback = useSharedValue(1);
+  const value = progress ?? fallback;
+  const style = useAnimatedStyle(() => ({ opacity: value.get() }));
+  return <Reanimated.View style={[FADE_WRAP, style]}>{children}</Reanimated.View>;
+}
+
+const FADE_WRAP = { flexShrink: 1 } as const;
 
 /** Images on a message or a step; tapping one opens it full screen. */
 export function Thumbs({
@@ -462,7 +560,7 @@ export function Thumbs({
 }
 
 /** The user's message: images above, then a tinted bubble, both on the right. A long press opens its actions. */
-function UserMessage({ item, machine }: { item: MessageItem; machine: Machine }): ReactNode {
+function UserMessage({ item, machine, flight }: { item: MessageItem; machine: Machine; flight?: SendFlight }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const action = useContext(MessageActionContext);
@@ -470,26 +568,127 @@ function UserMessage({ item, machine }: { item: MessageItem; machine: Machine })
   // The actions offer Copy, so the bubble gives up text selection, which would take the long press.
   // Not until OMP has it: a fork from here needs OMP's copy of the message.
   const actionable = action !== undefined && item.createdAt !== undefined && item.local !== true;
+  const bubble = hasText ? (
+    <Pressable
+      onLongPress={actionable ? () => action(item) : undefined}
+      disabled={!actionable}
+      style={item.local === true ? [styles.bubble, styles.bubbleSending] : styles.bubble}
+      accessibilityHint={actionable ? t("fork.messageHint") : undefined}
+    >
+      <GradientFill colors={[colors.userA, colors.userB]} />
+      <Text style={styles.bubbleText} selectable={!actionable} maxFontSizeMultiplier={SCALE.body}>
+        {item.text.trim()}
+      </Text>
+    </Pressable>
+  ) : null;
   return (
     <View style={styles.userRow}>
       <Thumbs parts={item.images} machine={machine} size={hasText ? 96 : 140} end />
-      {hasText ? (
-        <Pressable
-          onLongPress={actionable ? () => action(item) : undefined}
-          disabled={!actionable}
-          style={item.local === true ? [styles.bubble, styles.bubbleSending] : styles.bubble}
-          accessibilityHint={actionable ? t("fork.messageHint") : undefined}
-        >
-          <GradientFill colors={[colors.userA, colors.userB]} />
-          <Text style={styles.bubbleText} selectable={!actionable} maxFontSizeMultiplier={SCALE.body}>
-            {item.text.trim()}
-          </Text>
-        </Pressable>
-      ) : null}
+      {flight !== undefined && bubble !== null ? (
+        <Landing flight={flight} text={item.text.trim()}>
+          {bubble}
+        </Landing>
+      ) : (
+        bubble
+      )}
       {item.local === true ? <Text style={styles.sending}>{item.queued === true ? t("composer.queuedLabel") : t("chat.sending")}</Text> : null}
     </View>
   );
 }
+
+/** The bubble a sent message flies into: hidden until the flight hands over, measured once laid out. */
+function Landing({ flight, text, children }: { flight: SendFlight; text: string; children: ReactNode }): ReactNode {
+  const opacity = useSharedValue(0);
+  const rise = useSharedValue(0);
+  const ref = useRef<View>(null);
+  const id = useRef<number | undefined>(undefined);
+  const measured = useRef(false);
+  useLayoutEffect(() => {
+    id.current = flight.claim(text, { opacity, rise });
+    // Too late for the flight (or a remount after it): just show.
+    if (id.current === undefined) opacity.set(1);
+  }, [flight, opacity, rise, text]);
+  const onLayout = useCallback(() => {
+    const claimed = id.current;
+    if (measured.current || claimed === undefined) return;
+    measured.current = true;
+    const node = ref.current;
+    if (node === null) flight.placed(claimed, undefined);
+    else node.measureInWindow((x, y, width, height) => flight.placed(claimed, { x, y, width, height } satisfies Frame));
+  }, [flight]);
+  const style = useAnimatedStyle(() => ({ opacity: opacity.get(), transform: [{ translateY: rise.get() }] }));
+  return (
+    <Reanimated.View ref={ref} onLayout={onLayout} style={[{ maxWidth: "100%" }, style]}>
+      {children}
+    </Reanimated.View>
+  );
+}
+
+/** Room the user's bubble leaves on the left (`userRow`'s indent). */
+const USER_INDENT = 48;
+
+/**
+ * The copy of a sent message's bubble that flies from the composer to its row
+ * (see `sendFlight.ts`). It lies over the whole chat screen and takes no touches.
+ */
+export function SendFlightLayer({ flight }: { flight: SendFlight }): ReactNode {
+  const styles = useStyles(createStyles);
+  const colors = useColors();
+  const { width } = useWindowDimensions();
+  const [shown, setShown] = useState<Shown | null>(null);
+  useEffect(() => {
+    flight.listener = setShown;
+    return () => {
+      flight.listener = null;
+    };
+  }, [flight]);
+  const values = flight.values;
+  const box = useAnimatedStyle(() => {
+    const p = values.progress.get();
+    const scale = values.fromScale.get();
+    return {
+      opacity: values.visible.get() * (1 - SENDING_DIM * p),
+      transform: [
+        { translateX: values.fromX.get() + (values.toX.get() - values.fromX.get()) * p },
+        { translateY: values.fromY.get() + (values.toY.get() - values.fromY.get()) * p },
+        { scale: scale + (1 - scale) * p },
+      ],
+    };
+  });
+  // The bubble's tint arrives a little ahead of its place, so it reads as a bubble before it settles.
+  const skin = useAnimatedStyle(() => ({ opacity: Math.min(1, values.progress.get() * 1.4) }));
+  const id = shown?.id;
+  return (
+    <View
+      ref={(node) => {
+        flight.host = node;
+      }}
+      style={styles.flightHost}
+      collapsable={false}
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      {/* Always mounted: a flight only waits for React to commit its text, never for the view to appear. */}
+      <Reanimated.View collapsable={false} style={[styles.flight, { maxWidth: width - 2 * GUTTER - USER_INDENT }, box]}>
+        {shown !== null ? (
+          // Keyed, so each flight's text reports its layout, which is what lets the flight show.
+          <View key={shown.id} style={styles.flightBody} onLayout={() => id !== undefined && flight.drawn(id)}>
+            <Reanimated.View style={[styles.flightSkin, skin]}>
+              <GradientFill colors={[colors.userA, colors.userB]} />
+            </Reanimated.View>
+            <Text style={styles.bubbleText} maxFontSizeMultiplier={SCALE.body}>
+              {shown.text}
+            </Text>
+          </View>
+        ) : null}
+      </Reanimated.View>
+    </View>
+  );
+}
+
+/** A bubble still sending is drawn at 0.7 (`bubbleSending`): the flight lands at the same. */
+const SENDING_DIM = 0.3;
 
 function Caret(): ReactNode {
   const styles = useStyles(createStyles);
@@ -1058,6 +1257,16 @@ function createStyles(c: Palette) {
   const diffLine = { ...mono, paddingHorizontal: 14 } as const;
   const dot = { width: 6, height: 6, borderRadius: 3, marginTop: 7, backgroundColor: c.fgGhost } as const;
   const line = { flexDirection: "row", alignItems: "center", minHeight: LINE, alignSelf: "stretch" } as const;
+  const bubbleShape = {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 8,
+    borderWidth: 1,
+    borderColor: c.userBorder,
+    overflow: "hidden",
+  } as const;
+
   return {
     pressed: { backgroundColor: c.hover },
     fill: { flex: 1 },
@@ -1077,22 +1286,17 @@ function createStyles(c: Palette) {
     dividerElapsed: { ...meta, fontSize: 13.5, lineHeight: 24, color: c.fgGhost, fontVariant: ["tabular-nums"] as FontVariant[] },
     dividerChevron: { marginLeft: 4 },
 
-    userRow: { alignItems: "flex-end", gap: 8, paddingLeft: 48 },
-    bubbleSending: { opacity: 0.7 },
+    userRow: { alignItems: "flex-end", gap: 8, paddingLeft: USER_INDENT },
+    bubbleSending: { opacity: 1 - SENDING_DIM },
     sending: { fontFamily: SANS, fontSize: 11.5, lineHeight: 15, color: c.fgFaint, marginTop: -4, marginRight: 6 },
-    bubble: {
-      maxWidth: "100%",
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      borderBottomLeftRadius: 24,
-      borderBottomRightRadius: 8,
-      borderWidth: 1,
-      borderColor: c.userBorder,
-      overflow: "hidden",
-    },
+    bubble: { ...bubbleShape, maxWidth: "100%", paddingHorizontal: 16, paddingVertical: 12 },
     bubbleText: { fontFamily: SANS, fontSize: 15, lineHeight: 22, fontWeight: "400", color: c.fg },
+    // The flying copy, over everything (elevation too: Android draws raised siblings, like the glass bars, above later ones).
+    flightHost: { ...StyleSheet.absoluteFill, zIndex: 100, elevation: 100 },
+    flight: { position: "absolute", left: 0, top: 0, transformOrigin: "left top" },
+    // The bubble's text box (padding plus border); its shape is drawn by a skin that fades in.
+    flightBody: { paddingHorizontal: 17, paddingVertical: 13 },
+    flightSkin: { ...StyleSheet.absoluteFill, ...bubbleShape },
 
     reply: { gap: 10 },
     replyBubble: {

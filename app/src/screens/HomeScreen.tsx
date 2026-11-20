@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
-import Reanimated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
+import Reanimated, { useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FORK_FEATURE, answerRequest, createSession, daemonFeatures, deleteSession, forkSession, knownFeatures } from "../api";
 import { ApprovalWidget } from "../components/ApprovalWidget";
 import { LiveDot, PulseDot } from "../components/brand";
-import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ComputerGlyph, ForkGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
+import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ForkGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
+import { GlassTarget, useBlurTarget } from "../components/Glass";
+import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch, useTranscriptSync } from "../components/SessionList";
 import { haptic } from "../haptics";
@@ -48,13 +50,20 @@ interface Props {
    * chat, so coming back to it (false → true) refreshes the list quietly.
    */
   active?: boolean;
+  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar. */
+  blurTarget?: RefObject<View | null>;
+  under?: SharedValue<number>;
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest, active = true }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest, active = true, blurTarget, under }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const ownTarget = useBlurTarget();
+  const target = blurTarget ?? ownTarget;
+  const page = usePageScroll(under);
+  const top = usePageTop();
   const { sessions, loading, error, refresh, setSessions } = useMachineSessions(machine);
   useTranscriptSync(machine, sessions, refresh);
   const wasActive = useRef(active);
@@ -218,9 +227,10 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
 
   return (
     <View style={styles.root}>
-
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: 6, paddingBottom: 168 + insets.bottom }]}
+      <GlassTarget target={target}>
+      <Reanimated.ScrollView
+        {...page.props}
+        contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: 168 + insets.bottom }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -232,41 +242,31 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
             tintColor={colors.fgFaint}
             colors={[colors.accent]}
             progressBackgroundColor={colors.overlay}
+            progressViewOffset={top}
           />
         }
       >
-        {/* The tab already says "Sessions": the header names the computer they run on, and switches it. */}
-        <PressableScale
+        {/* The tab already says "Sessions": the large title names the computer they run on, and switches it. */}
+        <LargeTitle
+          y={page.y}
+          title={name}
+          accessory={<ChevronDownGlyph size={22} color={colors.fgFaint} />}
           onPress={onPickMachine}
-          style={styles.machine}
-          scale={0.985}
-          accessibilityRole="button"
           accessibilityLabel={t("home.machineA11y", { name, detail: detail ?? t(reachable ? "chat.status.live" : "chat.status.connecting") })}
         >
-          <View style={styles.machineTile}>
-            <ComputerGlyph size={20} color={colors.tileFg} />
-            <View style={styles.machineDot}>
-              {down ? (
-                <LiveDot color={colors.err} size={9} />
-              ) : reachable ? (
-                <LiveDot color={colors.sysGreen} size={9} ping={counts.running > 0} />
-              ) : (
-                <PulseDot color={colors.warn} size={9} />
-              )}
-            </View>
-          </View>
-          <View style={styles.machineText}>
-            <View style={styles.machineNameRow}>
-              <Text style={styles.machineName} numberOfLines={1} accessibilityRole="header">
-                {name}
-              </Text>
-              <ChevronDownGlyph size={16} color={colors.fgFaint} />
-            </View>
-            <Text style={down ? styles.machineDetailDown : styles.machineDetail} numberOfLines={1}>
+          <View style={styles.status}>
+            {down ? (
+              <LiveDot color={colors.err} size={8} />
+            ) : reachable ? (
+              <LiveDot color={colors.sysGreen} size={8} ping={counts.running > 0} />
+            ) : (
+              <PulseDot color={colors.warn} size={8} />
+            )}
+            <Text style={down ? styles.statusDown : styles.statusText} numberOfLines={1}>
               {detail ?? t(reachable ? "home.online" : "chat.status.connecting")}
             </Text>
           </View>
-        </PressableScale>
+        </LargeTitle>
 
         <Reanimated.View style={[styles.search, searching && styles.searchFocused]}>
           <SearchGlyph size={16} color={colors.fgFaint} />
@@ -354,7 +354,9 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
         ) : (
           <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={longPress} />
         )}
-      </ScrollView>
+      </Reanimated.ScrollView>
+      </GlassTarget>
+      <PageBar target={target} y={page.y} title={name} />
 
       <PressableScale
         onPress={() => {
@@ -498,14 +500,10 @@ function createStyles(c: Palette) {
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 640, alignSelf: "center" },
     pressed: { opacity: 0.6 },
-    machine: { flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: 16, marginTop: 14, marginBottom: 14, alignSelf: "flex-start", maxWidth: "100%" },
-    machineTile: { width: 44, height: 44, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
-    machineDot: { position: "absolute", right: -2, bottom: -2, padding: 2, borderRadius: 8, backgroundColor: c.bg },
-    machineText: { flexShrink: 1, minWidth: 0, gap: 1 },
-    machineNameRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-    machineName: { flexShrink: 1, fontFamily: SANS, fontSize: 22, lineHeight: 28, fontWeight: "600", letterSpacing: -0.5, color: c.fg },
-    machineDetail: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.fgFaint },
-    machineDetailDown: { fontFamily: SANS, fontSize: 13, lineHeight: 17, color: c.err },
+    // The computer's state under its large title: why it is down, what runs, or that it is online.
+    status: { flexDirection: "row", alignItems: "center", gap: 7, marginTop: 2, minWidth: 0 },
+    statusText: { flexShrink: 1, fontFamily: SANS, fontSize: 15, lineHeight: 20, color: c.fgFaint },
+    statusDown: { flexShrink: 1, fontFamily: SANS, fontSize: 15, lineHeight: 20, color: c.err },
     search: {
       flexDirection: "row",
       alignItems: "center",

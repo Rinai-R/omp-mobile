@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { RefreshControl, ScrollView, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { RefreshControl, Text, View } from "react-native";
+import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { pairMachine } from "../api";
 import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
-import { LargeTitle, TAB_BAR_HEIGHT } from "../components/TabBar";
+import { GlassTarget, useBlurTarget } from "../components/Glass";
+import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
+import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MachineSheet } from "../components/MachineSheet";
 import {
@@ -17,6 +20,7 @@ import {
   StateDot,
 } from "../components/ui";
 import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
+import { PairSuccess } from "../components/PairSuccess";
 import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
 import { parsePairingTicket } from "../relay/pairing";
 import { summaryOf, type Probe } from "../probe";
@@ -51,6 +55,9 @@ interface Props {
   onRefresh: () => void;
   /** Shown as a tab under the tab bar; false while no computer is paired (this is the first screen then, settings behind a button). */
   tabbed: boolean;
+  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar; only as a tab. */
+  blurTarget?: RefObject<View | null>;
+  under?: SharedValue<number>;
 }
 
 export function MachinesScreen({
@@ -67,10 +74,16 @@ export function MachinesScreen({
   refreshing,
   onRefresh,
   tabbed,
+  blurTarget,
+  under,
 }: Props): ReactNode {
   const colors = useColors();
   const styles = useStyles(createStyles);
   const insets = useSafeAreaInsets();
+  const ownTarget = useBlurTarget();
+  const target = blurTarget ?? ownTarget;
+  const page = usePageScroll(under);
+  const top = usePageTop();
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -83,21 +96,39 @@ export function MachinesScreen({
   const closeSheet = useCallback(() => setSheet(null), []);
   /** The machine whose removal is being confirmed. */
   const [removing, setRemoving] = useState<Machine | null>(null);
+  /**
+   * A computer just paired: the sheet celebrates it, then closes and hands it to
+   * `onAdd` once. It stays shown while the sheet slides away and is cleared on the next open.
+   */
+  const [paired, setPaired] = useState<Machine | null>(null);
+  const pending = useRef<Machine | null>(null);
+  const celebrate = useCallback((machine: Machine) => {
+    pending.current = machine;
+    setPaired(machine);
+  }, []);
+  const handOn = useCallback(() => {
+    const machine = pending.current;
+    if (machine === null) return;
+    pending.current = null;
+    setAdding(false);
+    onAdd(machine);
+  }, [onAdd]);
   /** A relay pairing code pasted into the address: paired here, then the sheet closes. */
   const relay = useRelayPairing(
     machines,
     useCallback(
       (machine: Machine) => {
         setUrl("");
-        setAdding(false);
-        onAdd(machine);
+        celebrate(machine);
       },
-      [onAdd],
+      [celebrate],
     ),
   );
   const ticket = parsePairingTicket(url.trim());
 
   const close = useCallback(() => {
+    // Dismissed mid-celebration: the pairing still counts.
+    if (pending.current !== null) return handOn();
     relay.cancel();
     setAdding(false);
     setError(null);
@@ -108,13 +139,14 @@ export function MachinesScreen({
       setToken("");
       setFromLink(false);
     }
-  }, [fromLink, relay.cancel]);
+  }, [fromLink, handOn, relay.cancel]);
 
   // A pairing link or the scanner's "Enter address" opens the sheet.
   useEffect(() => {
     if (addRequest === null) return;
     onAddRequestHandled();
     setBusy(false);
+    setPaired(null);
     setAdding(true);
     if (addRequest.link === null) {
       setError(null);
@@ -154,51 +186,48 @@ export function MachinesScreen({
         base = normalizeUrl(url);
         secret = token;
       }
-      onAdd(await pairMachine(base, secret, machines));
+      celebrate(await pairMachine(base, secret, machines));
       setUrl("");
       setToken("");
       setFromLink(false);
-      setAdding(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setBusy(false);
     }
-  }, [machines, onAdd, relay.start, ticket, token, url]);
+  }, [celebrate, machines, relay.start, ticket, token, url]);
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
-  const openAdd = useCallback(() => setAdding(true), []);
+  const openAdd = useCallback(() => {
+    setPaired(null);
+    setAdding(true);
+  }, []);
   // "seen 5 min ago" is recomputed on each render; each probe round re-renders the list.
   const now = Date.now();
 
   return (
     <View style={styles.root}>
-
-      <ScrollView
-        contentContainerStyle={[machines.length === 0 ? styles.emptyContent : styles.content, { paddingBottom: (tabbed ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom }]}
+      <GlassTarget target={target}>
+      <Reanimated.ScrollView
+        {...page.props}
+        contentContainerStyle={[
+          machines.length === 0 ? styles.emptyContent : styles.content,
+          { paddingTop: top, paddingBottom: (tabbed ? TAB_BAR_HEIGHT : 0) + 24 + insets.bottom },
+        ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.fgMuted} colors={[colors.accent]} progressBackgroundColor={colors.overlay} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.fgMuted}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.overlay}
+            progressViewOffset={top}
+          />
         }
       >
         <View style={machines.length === 0 ? undefined : styles.bleed}>
-          <LargeTitle
-            title={t("machines.title")}
-            right={
-              <>
-                {machines.length > 0 ? (
-                  <IconButton onPress={onScan} label={t("machines.add")}>
-                    <PlusGlyph size={24} color={colors.tint} />
-                  </IconButton>
-                ) : null}
-                {tabbed ? null : (
-                  <IconButton onPress={onSettings} label={t("common.settings")}>
-                    <SettingsGlyph size={22} color={colors.tint} />
-                  </IconButton>
-                )}
-              </>
-            }
-          />
+          <LargeTitle y={page.y} title={t("machines.title")} />
         </View>
         {machines.length === 0 ? (
           <EmptyState
@@ -248,7 +277,27 @@ export function MachinesScreen({
             </Group>
           </>
         )}
-      </ScrollView>
+      </Reanimated.ScrollView>
+      </GlassTarget>
+      <PageBar
+        target={target}
+        y={page.y}
+        title={t("machines.title")}
+        right={
+          <>
+            {machines.length > 0 ? (
+              <IconButton onPress={onScan} label={t("machines.add")}>
+                <PlusGlyph size={24} color={colors.tint} />
+              </IconButton>
+            ) : null}
+            {tabbed ? null : (
+              <IconButton onPress={onSettings} label={t("common.settings")}>
+                <SettingsGlyph size={22} color={colors.tint} />
+              </IconButton>
+            )}
+          </>
+        }
+      />
 
       <MachineSheet
         machine={sheet}
@@ -275,7 +324,9 @@ export function MachinesScreen({
       />
 
       <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
-        {relay.busy ? (
+        {paired !== null ? (
+          <PairSuccess name={displayName(paired)} c={colors} onDone={handOn} />
+        ) : relay.busy ? (
           <RelayPairingCard code={relay.code} c={colors} onCancel={relay.cancel} />
         ) : (
           <>

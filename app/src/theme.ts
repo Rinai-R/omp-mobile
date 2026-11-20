@@ -16,12 +16,20 @@ import { Easing, useColorScheme, type ColorSchemeName } from "react-native";
  * `card`s (`bubbleBorder`) with violet `tile`s, the approval widget gradient
  * (`widgetA` → `widgetB` → `widgetC`), the New button (`fab`), and the system
  * colours (`sysRed`, `sysGreen`, `sysBlue`, `sysOrange`, `sysYellow`).
+ * Chrome over scrolling content is glass: over a real blur a thin
+ * `glassThin` tint, where blur is unavailable the thicker `glass` tint that
+ * keeps text legible on its own, and a `glassEdge` hairline where the bar
+ * meets content.
  */
 export function palette(scheme: ColorSchemeName) {
   return scheme === "light"
     ? {
         dark: false,
         bg: "#f2f2f7",
+        glass: "#f9f9fbb8",
+        // Light glass stays frosted over a blur too: thin, the blur's own darkening shows as gray.
+        glassThin: "#f9f9fbc7",
+        glassEdge: "#00000026",
         panel: "#ffffff",
         raised: "#ffffff",
         inset: "#f3f3f5",
@@ -89,6 +97,9 @@ export function palette(scheme: ColorSchemeName) {
     : {
         dark: true,
         bg: "#000000",
+        glass: "#0b0b0eb3",
+        glassThin: "#0b0b0e40",
+        glassEdge: "#ffffff1f",
         panel: "#0a0a0c",
         raised: "#121215",
         inset: "#060607",
@@ -204,6 +215,9 @@ export const EASE_OUT = Easing.bezier(0.16, 1, 0.3, 1);
 export const GRADIENT = { x1: "0", y1: "0", x2: "1", y2: "1" } as const;
 
 export const type = {
+  /** A root tab's large title, iOS's 34/41: it collapses into `inlineTitle` on the glass bar as the page scrolls. */
+  largeTitle: { fontFamily: SANS, fontSize: 34, lineHeight: 41, fontWeight: "600" as const, letterSpacing: -0.9 },
+  inlineTitle: { fontFamily: SANS, fontSize: 17, lineHeight: 22, fontWeight: "600" as const, letterSpacing: -0.4 },
   display: { fontFamily: SANS, fontSize: 28, lineHeight: 34, fontWeight: "600" as const, letterSpacing: -0.8 },
   title: { fontFamily: SANS, fontSize: 20, lineHeight: 26, fontWeight: "600" as const, letterSpacing: -0.4 },
   heading: { fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600" as const, letterSpacing: -0.2 },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode, type Ref } from "react";
 import { Image, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import Reanimated, { ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
@@ -35,6 +35,7 @@ export function Composer({
   queued,
   onModel,
   bottomInset,
+  inputRef,
 }: {
   draft: string;
   onChangeDraft: (text: string) => void;
@@ -58,6 +59,8 @@ export function Composer({
   queued: readonly string[];
   onModel: () => void;
   bottomInset: number;
+  /** The text field, measured on send so the message flies from where it was typed. */
+  inputRef?: Ref<TextInput>;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -140,6 +143,7 @@ export function Composer({
           ) : null}
           <View style={styles.inputRow}>
             <TextInput
+              ref={inputRef}
               value={draft}
               onChangeText={onChangeDraft}
               onFocus={() => {
@@ -309,8 +313,8 @@ function createStyles(c: Palette) {
   } as const;
   const chipText = { fontFamily: SANS, fontSize: 12, lineHeight: 15, color: c.fgFaint } as const;
   return {
-    // On the page itself, no slab or hairline: the transcript's fade above it marks the edge while rows run under it.
-    root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.bg },
+    // Sits on the chat's glass bar: no fill of its own.
+    root: { paddingHorizontal: 10, paddingTop: 8 },
     queue: { gap: 4, paddingHorizontal: 6, paddingBottom: 8 },
     queueRow: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
     queueLabel: { fontFamily: SANS, fontSize: 12, lineHeight: 17, fontWeight: "600", color: c.tint },
