@@ -1,6 +1,7 @@
 import * as Clipboard from "expo-clipboard";
 import {
   createContext,
+  Fragment,
   memo,
   useCallback,
   useContext,
@@ -46,7 +47,7 @@ import {
   type Step,
   type ToolKind,
 } from "../rows";
-import { MONO, SANS, SCALE, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, SANS, SCALE, radius, type, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem, ToolItem } from "../types";
 import { BrandMark, GradientFill, Orb, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
 import {
@@ -667,11 +668,18 @@ function ActivityRow({
               </Text>
             </Pressable>
           ) : null}
-          {(all ? row.steps : row.steps.slice(-INLINE_STEPS)).map((value) =>
+          {stretches(all ? row.steps : row.steps.slice(-INLINE_STEPS)).map((value) =>
             value.kind === "thought" ? (
               <ThinkingRow key={value.item.id} item={value.item} />
             ) : (
-              <ToolRow key={value.tool.id} tool={value.tool} cwd={cwd} onOpen={onOpenStep} />
+              <View key={value.tools[0]!.id} style={styles.toolGroup}>
+                {value.tools.map((tool, index) => (
+                  <Fragment key={tool.id}>
+                    {index > 0 ? <View style={styles.toolSep} /> : null}
+                    <ToolRow tool={tool} cwd={cwd} onOpen={onOpenStep} />
+                  </Fragment>
+                ))}
+              </View>
             ),
           )}
         </Reveal>
@@ -685,8 +693,25 @@ function ActivityRow({
   );
 }
 
+type Stretch = Extract<Step, { kind: "thought" }> | { kind: "tools"; tools: ToolItem[] };
+
+/** Consecutive tool calls share one grouped container; a thought between them ends the group. */
+function stretches(steps: readonly Step[]): Stretch[] {
+  const out: Stretch[] = [];
+  for (const step of steps) {
+    if (step.kind === "thought") {
+      out.push(step);
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last?.kind === "tools") last.tools.push(step.tool);
+    else out.push({ kind: "tools", tools: [step.tool] });
+  }
+  return out;
+}
+
 /**
- * One call: `[glyph] Title · summary   +3 −1`, grey and one line. Tapping it
+ * One call as a row in its group: `[tile] Title  summary   status`. Tapping it
  * opens the call in place (command output, a diff, the file it read); a long
  * press, or "Details" under it, opens the whole call in the step sheet.
  */
@@ -709,20 +734,18 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
   const edit = stat !== undefined && /^\+\d+ −\d+$/.test(stat) ? stat.split(" ") : undefined;
   const title = toolTitle(tool);
   return (
-    <View style={running ? styles.toolCardRun : styles.toolCard}>
-      {running ? <GradientFill colors={[colors.accentV, colors.accentB]} radius={18} stroke={1.2} /> : null}
+    <View style={running ? styles.toolRowRun : undefined}>
       <Pressable
         onPress={toggle}
         onLongPress={details}
-        hitSlop={SLOP}
-        style={styles.toolLine}
+        style={({ pressed }) => (pressed ? [styles.toolLine, styles.pressed] : styles.toolLine)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         accessibilityLabel={t("common.pair", { label: `${title} ${summary ?? ""}`.trim(), value: t(`step.status.${tool.status}`) })}
       >
         <View style={failed ? styles.tileErr : styles.tile}>
-          {running ? <GradientFill radius={11} /> : null}
-          <KindGlyph kind={kind} size={15} color={running ? "#ffffff" : failed ? colors.err : colors.tileFg} />
+          {running ? <GradientFill radius={8} /> : null}
+          <KindGlyph kind={kind} size={14} color={running ? "#ffffff" : failed ? colors.err : colors.tileFg} />
         </View>
         <View style={styles.toolText}>
           {running ? (
@@ -733,7 +756,7 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
             </Text>
           )}
           {summary !== undefined ? (
-            <Text style={failed ? styles.toolSummaryErr : styles.toolSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
+            <Text style={styles.toolSummary} numberOfLines={1} maxFontSizeMultiplier={SCALE.meta}>
               {summary}
             </Text>
           ) : null}
@@ -1085,16 +1108,18 @@ function createStyles(c: Palette) {
     },
     caret: { fontFamily: SANS, color: c.accentV },
 
-    toolCard: { borderRadius: 18, borderWidth: 1, borderColor: c.bubbleBorder, backgroundColor: c.card, overflow: "hidden", paddingBottom: 0 },
-    toolCardRun: { borderRadius: 18, backgroundColor: c.dark ? "#0b1418" : "#f1fbfc", overflow: "hidden" },
-    toolLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 9, paddingHorizontal: 10 },
-    tile: { width: 32, height: 32, borderRadius: 11, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
-    tileErr: { width: 32, height: 32, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: c.errSoft },
-    toolText: { flex: 1, minWidth: 0, gap: 1 },
-    toolTitle: { fontFamily: SANS, fontSize: 14, lineHeight: 19, fontWeight: "500", color: c.fg },
-    toolSummary: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgFaint },
-    toolSummaryErr: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.err },
-    toolBody: { paddingHorizontal: 8, paddingBottom: 8, marginTop: -2 },
+    toolGroup: { borderRadius: radius.lg, backgroundColor: c.group, borderWidth: StyleSheet.hairlineWidth, borderColor: c.border, overflow: "hidden" },
+    // Inset like an iOS grouped list: the hairline starts after the tile (padding 12 + tile 28 + gap 12).
+    toolSep: { height: StyleSheet.hairlineWidth, marginLeft: 52, backgroundColor: c.separator },
+    toolRowRun: { backgroundColor: c.dark ? "#00dbe412" : "#00a8b00d" },
+    toolLine: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 48, paddingVertical: 10, paddingHorizontal: 12 },
+    tile: { width: 28, height: 28, borderRadius: 8, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: c.tile },
+    tileErr: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.errSoft },
+    // Title and path share a line when the path fits; otherwise the path wraps beneath, one line, ellipsized.
+    toolText: { flex: 1, minWidth: 0, flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8 },
+    toolTitle: { ...type.bodyMedium, color: c.fg, flexShrink: 1 },
+    toolSummary: { ...type.mono, color: c.fgFaint, flexShrink: 1, maxWidth: "100%" },
+    toolBody: { paddingHorizontal: 8, paddingBottom: 8, marginTop: -4 },
 
     line,
     lead: { width: 16, height: 16, marginRight: 6, alignItems: "center", justifyContent: "center" },

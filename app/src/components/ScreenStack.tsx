@@ -149,9 +149,11 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
     <View style={styles.fill}>
       <Animated.View
         style={[styles.fill, baseStyle]}
-        // Under a pushed screen the shell is out of reach for TalkBack too.
+        // Under a pushed screen the shell is out of reach for TalkBack and touch alike, also the strip a push or
+        // swipe uncovers. `top` stays set through an interactive swipe back: the shell returns once the pop commits.
         importantForAccessibility={top !== null ? "no-hide-descendants" : "auto"}
         accessibilityElementsHidden={top !== null}
+        pointerEvents={top !== null ? "none" : "auto"}
       >
         {base}
       </Animated.View>

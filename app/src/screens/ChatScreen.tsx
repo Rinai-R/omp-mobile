@@ -10,12 +10,11 @@ import {
   Text,
   View,
   type ListRenderItem,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import Reanimated, { useReducedMotion } from "react-native-reanimated";
+import Reanimated, { useAnimatedScrollHandler, useReducedMotion, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 import * as Attention from "../../modules/omp-attention/src";
 import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
@@ -24,6 +23,7 @@ import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { BrandMark, GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { Composer } from "../components/Composer";
+import { EdgeFade } from "../components/EdgeFade";
 import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
@@ -35,7 +35,7 @@ import { popIn, popOut } from "../motion";
 import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
-import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
+import { MONO, SANS, radius, type as typeScale, useColors, useStyles, type Palette } from "../theme";
 import { canTakeOver, confirmBody, heldLine } from "../takeover.ts";
 import { todoPhases } from "../todos";
 import { keepLive, prependHistory } from "../liveRows";
@@ -664,19 +664,46 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     lastNewest.current = newest;
     if (away) setUnseen((count) => count + 1);
   }, [away, newest]);
-  const offset = useRef(0);
+  /** How far the list is from its newest end; JS reads it to move the list by a row's change in height. */
+  const scrollY = useSharedValue(0);
+  const awayUI = useSharedValue(false);
+  /** Content under the composer (newest side) and under the header (oldest side), in px: drives the edge fades. */
+  const newestEdge = useSharedValue(0);
+  const oldestEdge = useSharedValue(0);
+  const contentH = useRef(0);
+  const viewH = useRef(0);
+  /** The list grew or the screen resized without a scroll: the oldest end moved relative to the view. */
+  const measureOldest = useCallback(() => {
+    oldestEdge.set(Math.max(0, contentH.current - viewH.current - scrollY.get()));
+  }, [oldestEdge, scrollY]);
   /** A row opened or closed on a tap: move the list by what it gained, so the tapped header stays put. */
-  const shift = useCallback((delta: number) => {
-    const next = Math.max(0, offset.current + delta);
-    offset.current = next;
-    listRef.current?.scrollToOffset({ offset: next, animated: false });
-  }, []);
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    offset.current = event.nativeEvent.contentOffset.y;
-    const isAway = event.nativeEvent.contentOffset.y > NEAR_BOTTOM;
+  const shift = useCallback(
+    (delta: number) => {
+      const next = Math.max(0, scrollY.get() + delta);
+      scrollY.set(next);
+      listRef.current?.scrollToOffset({ offset: next, animated: false });
+    },
+    [scrollY],
+  );
+  const setAwayJS = useCallback((isAway: boolean) => {
     setAway(isAway);
     if (!isAway) setUnseen(0);
   }, []);
+  // On the UI thread every frame: the fades follow the finger; React hears only when "away" flips.
+  const onScroll = useAnimatedScrollHandler(
+    (event) => {
+      const y = event.contentOffset.y;
+      scrollY.set(y);
+      newestEdge.set(Math.max(0, y));
+      oldestEdge.set(Math.max(0, event.contentSize.height - event.layoutMeasurement.height - y));
+      const isAway = y > NEAR_BOTTOM;
+      if (isAway !== awayUI.get()) {
+        awayUI.set(isAway);
+        scheduleOnRN(setAwayJS, isAway);
+      }
+    },
+    [setAwayJS],
+  );
   const jump = useCallback(() => {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
     setUnseen(0);
@@ -875,14 +902,22 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
 
         <View style={styles.listWrap}>
           <TranscriptFolds onShift={shift} onMessageAction={canFork ? openMessageAction : undefined}>
-          <FlatList
+          <Reanimated.FlatList
             ref={listRef}
             inverted
             data={rows}
             keyExtractor={keyOf}
             renderItem={renderItem}
             onScroll={onScroll}
-            scrollEventThrottle={64}
+            scrollEventThrottle={16}
+            onLayout={(event) => {
+              viewH.current = event.nativeEvent.layout.height;
+              measureOldest();
+            }}
+            onContentSizeChange={(_, height) => {
+              contentH.current = height;
+              measureOldest();
+            }}
             contentContainerStyle={styles.list}
             style={failure !== null ? styles.listDim : undefined}
             keyboardShouldPersistTaps="handled"
@@ -895,11 +930,21 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             onScrollToIndexFailed={onScrollToIndexFailed}
           />
           </TranscriptFolds>
+          {/* Scroll-edge effects in place of the bars' hairlines: drawn only while rows run on under the bar. */}
+          <EdgeFade chrome="above" under={oldestEdge} />
+          <EdgeFade chrome="below" under={newestEdge} />
           {rows.length === 0 && failure === null ? (
             // Outside the list: an inverted list flips its children on both axes on Android.
+            // Waiting for the computer, the whole invitation stays dimmed: nothing can be sent yet.
             <View style={styles.emptyOverlay} pointerEvents="none">
-              <View style={connected ? styles.emptyMark : styles.emptyMarkWaiting}>
-                <BrandMark size={26} />
+              <View style={connected ? styles.emptyContent : styles.emptyContentWaiting}>
+                <View style={styles.emptyMark}>
+                  <BrandMark size={26} />
+                </View>
+                <Text style={styles.emptyTitle}>{t("chat.emptyPrompt")}</Text>
+                <Text style={styles.emptyCwd} numberOfLines={1} ellipsizeMode="middle">
+                  {session.cwd}
+                </Text>
               </View>
             </View>
           ) : null}
@@ -1008,16 +1053,7 @@ function keyOf(row: Row): string {
 }
 
 function createStyles(c: Palette) {
-  const emptyMark = {
-    width: 56,
-    height: 56,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.panel,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: c.border,
-  } as const;
+  const emptyContent = { alignItems: "center", gap: 6, maxWidth: "100%" } as const;
   const jump = {
     position: "absolute",
     right: 16,
@@ -1032,15 +1068,8 @@ function createStyles(c: Palette) {
   } as const;
   return {
     root: { flex: 1, backgroundColor: c.bg },
-    header: {
-      height: 54,
-      flexDirection: "row",
-      alignItems: "center",
-      paddingHorizontal: 6,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.separator,
-      backgroundColor: c.chrome,
-    },
+    // The page's own black, no hairline: the fade at the top of the list marks the edge once rows run under it.
+    header: { height: 54, flexDirection: "row", alignItems: "center", paddingHorizontal: 6, backgroundColor: c.bg },
     back: { width: 48, height: 44, justifyContent: "center", paddingLeft: 4 },
     headerEnd: { width: 48, height: 44, alignItems: "flex-end", justifyContent: "center", paddingRight: 8 },
     title: { flex: 1, minWidth: 0, alignItems: "center", paddingVertical: 4, gap: 1 },
@@ -1061,8 +1090,21 @@ function createStyles(c: Palette) {
     list: { paddingTop: 16, paddingBottom: 12 },
     listDim: { opacity: 0.5 },
     emptyOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 40 },
-    emptyMark,
-    emptyMarkWaiting: { ...emptyMark, opacity: 0.45 },
+    emptyContent,
+    emptyContentWaiting: { ...emptyContent, opacity: 0.45 },
+    emptyMark: {
+      width: 56,
+      height: 56,
+      marginBottom: 10,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.panel,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    emptyTitle: { ...typeScale.heading, color: c.fg, textAlign: "center" },
+    emptyCwd: { ...typeScale.mono, color: c.fgFaint, textAlign: "center", maxWidth: "100%" },
     // The way back to the newest message: a small floating circle, a pill when it can say how many arrived.
     jump: { ...jump, gap: 6, paddingLeft: 11, paddingRight: 14 },
     jumpRound: { ...jump, width: 36, justifyContent: "center" },

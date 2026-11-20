@@ -309,7 +309,8 @@ function createStyles(c: Palette) {
   } as const;
   const chipText = { fontFamily: SANS, fontSize: 12, lineHeight: 15, color: c.fgFaint } as const;
   return {
-    root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.chrome, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
+    // On the page itself, no slab or hairline: the transcript's fade above it marks the edge while rows run under it.
+    root: { paddingHorizontal: 10, paddingTop: 8, backgroundColor: c.bg },
     queue: { gap: 4, paddingHorizontal: 6, paddingBottom: 8 },
     queueRow: { flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0 },
     queueLabel: { fontFamily: SANS, fontSize: 12, lineHeight: 17, fontWeight: "600", color: c.tint },

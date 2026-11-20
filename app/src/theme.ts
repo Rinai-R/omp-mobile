@@ -85,7 +85,6 @@ export function palette(scheme: ColorSchemeName) {
         sysBlue: "#007aff",
         sysOrange: "#ff9500",
         sysYellow: "#b88400",
-        chrome: "#f9f9f9e6",
       }
     : {
         dark: true,
@@ -153,7 +152,6 @@ export function palette(scheme: ColorSchemeName) {
         sysBlue: "#0a84ff",
         sysOrange: "#ff9f0a",
         sysYellow: "#ffd60a",
-        chrome: "#121214e6",
       };
 }
 

@@ -109,6 +109,7 @@ export const zhCN: Record<Key, Message> = {
   "chat.offline": "无法连接",
   "chat.offlineSaved": "无法连接 {name}。这是保存的副本，电脑恢复连接后会自动更新。",
   "chat.offlineEmpty": "无法连接 {name}。这个对话还没有保存的副本，电脑恢复连接后会打开。",
+  "chat.emptyPrompt": "想让 OMP 做什么？",
   "chat.jumpA11y": "跳到最新消息",
   "chat.unseen": "{count} 条新消息",
 

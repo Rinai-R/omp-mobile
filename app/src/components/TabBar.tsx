@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptic } from "../haptics";
 import { t } from "../i18n/index.ts";
 import { SANS, useColors, useStyles, type Palette } from "../theme";
 import { ChatGlyph, ComputerGlyph, SettingsGlyph } from "./icons";
+import { EdgeFade } from "./EdgeFade";
 import { PressableScale } from "./ui";
 
 /** The app's three root tabs: one bar under all of them, so moving between them never leaves the shell. */
@@ -19,13 +20,18 @@ const TABS: readonly { tab: Tab; label: () => string; icon: (color: string) => R
   { tab: "settings", label: () => t("common.settings"), icon: (color) => <SettingsGlyph size={24} color={color} /> },
 ];
 
-/** The translucent bottom tab bar; `badge` counts sessions waiting for an answer, on the Sessions tab. */
+/** The bottom tab bar, on the page's own colour; `badge` counts sessions waiting for an answer, on the Sessions tab. */
 export function TabBar({ current, badge, onSelect }: { current: Tab; badge: number; onSelect: (tab: Tab) => void }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.bar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
+      {/*
+        The lists under it scroll in screens that do not report their offset here: a constant fade, which
+        shows only where rows pass under the bar (it is the page's colour, so over empty page it is invisible).
+      */}
+      <EdgeFade chrome="below" opacity={0.85} style={styles.fade} />
       {TABS.map(({ tab, label, icon }) => {
         const on = tab === current;
         return (
@@ -81,10 +87,9 @@ function createStyles(c: Palette) {
       flexDirection: "row",
       justifyContent: "space-around",
       paddingTop: 8,
-      backgroundColor: c.chrome,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: c.separator,
+      backgroundColor: c.bg,
     },
+    fade: { bottom: "100%" },
     tab: { minWidth: 72, alignItems: "center", gap: 3 },
     text,
     textOn: { ...text, color: c.tint },
