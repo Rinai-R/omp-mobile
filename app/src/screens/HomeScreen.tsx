@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, StyleSheet, Text, TextInput, View, type LayoutChangeEvent } from "react-native";
 import Reanimated, { useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -6,7 +6,6 @@ import { FORK_FEATURE, answerRequest, createSession, daemonFeatures, deleteSessi
 import { ApprovalWidget } from "../components/ApprovalWidget";
 import { LiveDot, PulseDot } from "../components/brand";
 import { ChatGlyph, ChevronDownGlyph, CloseGlyph, ForkGlyph, PlusGlyph, SearchGlyph } from "../components/icons";
-import { GlassTarget, useBlurTarget } from "../components/Glass";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { SearchResults, SessionGroups, useMachineSessions, useSessionSearch, useTranscriptSync } from "../components/SessionList";
@@ -49,18 +48,15 @@ interface Props {
    * chat, so coming back to it (false → true) refreshes the list quietly.
    */
   active?: boolean;
-  /** What the tab bar blurs, and where this page reports how much of it runs on under the bar. */
-  blurTarget?: RefObject<View | null>;
+  /** Where this page reports how much of it runs on under the tab bar. */
   under?: SharedValue<number>;
 }
 
 /** The app's home: the sessions of the computer used last, grouped by what needs attention. */
-export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest, active = true, blurTarget, under }: Props): ReactNode {
+export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, onWaiting, onRetry, newRequest, active = true, under }: Props): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const ownTarget = useBlurTarget();
-  const target = blurTarget ?? ownTarget;
   const page = usePageScroll(under);
   const top = usePageTop();
   const { sessions, loading, error, refresh, setSessions } = useMachineSessions(machine);
@@ -226,7 +222,6 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
 
   return (
     <View style={styles.root}>
-      <GlassTarget target={target}>
       <Reanimated.ScrollView
         {...page.props}
         contentContainerStyle={[styles.content, { paddingTop: top, paddingBottom: 168 + insets.bottom }]}
@@ -354,8 +349,7 @@ export function HomeScreen({ machine, machines, probe, onOpen, onPickMachine, on
           <SessionGroups groups={groups} onPress={(session) => onOpen(machine, session)} onLongPress={longPress} />
         )}
       </Reanimated.ScrollView>
-      </GlassTarget>
-      <PageBar target={target} y={page.y} title={name} />
+      <PageBar y={page.y} title={name} />
 
       <PressableScale
         onPress={openCreate}

@@ -19,7 +19,6 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import appConfig from "./app.json";
 import * as Attention from "./modules/omp-attention/src";
 import { AttentionBanner } from "./src/components/AttentionBanner";
-import { useBlurTarget } from "./src/components/Glass";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { MachineSwitcher } from "./src/components/MachineSwitcher";
 import { ScreenStack, type Layer } from "./src/components/ScreenStack";
@@ -440,8 +439,7 @@ export default function App(): ReactNode {
     [settings, updateSettings],
   );
 
-  // Each tab's page is what the tab bar blurs while that tab is current, and how much of it runs on under the bar.
-  const tabTargets = { sessions: useBlurTarget(), computers: useBlurTarget(), settings: useBlurTarget() };
+  // How much of each tab's page runs on under the tab bar: its hairline while that tab is current.
   const tabUnder = { sessions: useSharedValue(0), computers: useSharedValue(0), settings: useSharedValue(0) };
 
   const fixBattery = useCallback(() => Attention.requestBatteryExemption(), []);
@@ -470,7 +468,6 @@ export default function App(): ReactNode {
         live={live}
         onAllowLive={() => void Attention.openPromotionSettings()}
         onBack={onBack}
-        blurTarget={onBack === undefined ? tabTargets.settings : undefined}
         under={onBack === undefined ? tabUnder.settings : undefined}
         version={appConfig.expo.version}
       />
@@ -490,7 +487,6 @@ export default function App(): ReactNode {
         onRename={renameMachine}
         onSettings={() => setRoute((current) => ({ ...current, top: { kind: "settings" } }))}
         tabbed={tabbed}
-        blurTarget={tabbed ? tabTargets.computers : undefined}
         under={tabbed ? tabUnder.computers : undefined}
         refreshing={refreshing}
         onRefresh={() => {
@@ -528,7 +524,6 @@ export default function App(): ReactNode {
             newRequest={home.create ?? 0}
             // Under a pushed chat it stays mounted; coming back to it refreshes the list quietly.
             active={route.top === null && tab === "sessions"}
-            blurTarget={tabTargets.sessions}
             under={tabUnder.sessions}
           />
         </View>
@@ -538,7 +533,6 @@ export default function App(): ReactNode {
           current={tab}
           badge={waiting}
           onSelect={(next) => setRoute({ base: { ...home, tab: next, create: undefined }, top: null })}
-          target={tabTargets[tab]}
           under={tabUnder[tab]}
         />
       </View>

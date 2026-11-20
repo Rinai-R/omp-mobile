@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from "react";
+import type { ReactNode } from "react";
 import { Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,26 +22,24 @@ const TABS: readonly { tab: Tab; label: () => string; icon: (color: string) => R
 
 /**
  * The bottom tab bar, glass over the current tab's page; `badge` counts sessions waiting for an answer, on the Sessions tab.
- * @param target - the current tab's `GlassTarget`; `under` - how much of its content runs on under the bar.
+ * @param under - how much of the current tab's content runs on under the bar.
  */
 export function TabBar({
   current,
   badge,
   onSelect,
-  target,
   under,
 }: {
   current: Tab;
   badge: number;
   onSelect: (tab: Tab) => void;
-  target: RefObject<View | null>;
   under: SharedValue<number>;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
-    <Glass target={target} edge="top" under={under} style={[styles.bar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
+    <Glass edge="top" under={under} style={[styles.bar, { paddingBottom: 8 + insets.bottom }]} accessibilityRole="tablist">
       {TABS.map(({ tab, label, icon }) => {
         const on = tab === current;
         return (

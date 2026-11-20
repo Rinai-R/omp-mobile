@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Header, composer and tab bar are solid again, in the page's own colour. The blurred bars of v0.8.0 came out grey and white, with bright bands at the screen edges, on some phones.
+
+### 中文
+
+- 顶栏、输入区和标签栏恢复为不透明、与页面同色。v0.8.0 的毛玻璃在部分手机上显示成灰白色，屏幕两侧还有亮边。
+
 ## v0.8.0
 
 The app moves and looks like a native one: screens slide and swipe back, sheets follow your finger, chrome is glass, and the moments that matter get a beat of their own.
