@@ -7,12 +7,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - Swiping on a command's output no longer scrolls the chat the wrong way. The output was a small box that scrolled on its own; inside the chat it passed the swipe on reversed. It now shows the last 12 lines, with the whole output one tap away.
 - Opening a chat, switching to another app and coming back no longer leaves the chat and the session list each half on screen. The animation library is updated past a bug where animated views showed a stale frame after the app was paused, and the screen stack settles itself whenever the app goes to the background or returns, also halfway through a swipe back. Sheets and the attention banner likewise always settle.
 - Back with the photo menu open closes the menu instead of leaving the chat.
+- A chat you scrolled up in reopens where you left it, also when OMP has written more since (the newer part waits below, behind the jump-to-newest button). A chat left at its newest message, a search hit, and the first open after starting the app still open at the newest message.
 
 ### 中文
 
 - 在命令输出上滑动，聊天不再往反方向滚。之前命令输出是一个能单独滚动的小框，嵌在聊天里会把滑动方向反着传出去；现在直接显示最后 12 行，完整输出点一下查看。
 - 打开聊天后切到别的应用再切回来，不会再出现聊天和会话列表各占半屏。动画库升级，修掉了应用暂停后动画视图停在旧画面的问题；页面栈在应用进入后台或回到前台时都会自动归位，右滑返回到一半时切走也一样。弹窗和顶部提醒同样总会归位。
 - 照片菜单打开时按返回，先关闭菜单，不再直接退出聊天。
+- 往上翻过历史的聊天，返回后再进入会停在原来的位置；期间有新内容也一样（新内容在下方，点"跳到最新"可到达）。停在最新处离开的聊天、从搜索结果打开、以及应用启动后第一次打开，仍从最新消息开始。
 
 ## v0.8.1
 
