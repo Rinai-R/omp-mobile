@@ -112,6 +112,7 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
     [insets.top, travel],
   );
 
+  const dragging = useSharedValue(false);
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -122,14 +123,19 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
           // Catch it mid-flight (even leaving): the drag continues from where the card is on screen.
           cancelAnimation(y);
           start.set(y.get());
+          dragging.set(true);
           scheduleOnRN(hold);
         })
         .onUpdate((event) => {
+          if (!dragging.get()) return;
           // 1:1 upward; downward resists, there is nowhere further for it to go.
           const next = start.get() + event.translationY;
           y.set(next <= 0 ? next : rubberband(next, PULL));
         })
-        .onEnd((event) => {
+        // Finalize, not end: a drag the system cancels still settles, never stuck mid-way.
+        .onFinalize((event) => {
+          if (!dragging.get()) return;
+          dragging.set(false);
           // The flick decides, not just the distance: a short fast swipe up dismisses.
           const projected = y.get() + project(event.velocityY);
           if (projected < -travel.get() / 2) {
@@ -139,7 +145,7 @@ export function AttentionBanner({ attention, onOpen, onDismiss }: Props): ReactN
             scheduleOnRN(arm);
           }
         }),
-    [arm, hold, leave, start, travel, y],
+    [arm, dragging, hold, leave, start, travel, y],
   );
 
   const motion = useAnimatedStyle(() => {

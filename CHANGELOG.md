@@ -4,6 +4,16 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Command output in a chat shows its last 12 lines in place, with the whole output one tap away. It was a small box that scrolled on its own inside the chat, and could send the chat scrolling the wrong way.
+- Leaving the app halfway through a swipe back (to recents, home, or a floating window) no longer leaves the chat and the session list each half on screen; sheets and the attention banner likewise always settle.
+- Back with the photo menu open closes the menu instead of leaving the chat.
+
+### 中文
+
+- 聊天里的命令输出改为直接显示最后 12 行，完整输出点一下查看。之前是聊天里一个能单独滚动的小框，滑动时可能带着整个聊天往反方向滚。
+- 右滑返回到一半时切到最近任务、桌面或小窗，回来后不会再出现聊天和会话列表各占半屏；弹窗和顶部提醒同样总会归位。
+- 照片菜单打开时按返回，先关闭菜单，不再直接退出聊天。
+
 ## v0.8.1
 
 - Header, composer and tab bar are solid again, in the page's own colour. The blurred bars of v0.8.0 came out grey and white, with bright bands at the screen edges, on some phones.

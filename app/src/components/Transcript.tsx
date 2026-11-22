@@ -17,7 +17,6 @@ import {
   Image,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -100,7 +99,8 @@ const INLINE_STEPS = 8;
 /** Lines a diff or a file shows in place; the step's sheet has the rest. */
 const DIFF_LINES = 9;
 const FILE_LINES = 8;
-/** Characters of command output kept in place (the tail, where the result is). */
+/** Command output kept in place: its last lines (where the result is), capped in characters for very long lines. */
+const TERMINAL_LINES = 12;
 const TERMINAL_CHARS = 6_000;
 
 /** Which turns are folded to their answer: the divider toggles its turn's work rows. */
@@ -1054,16 +1054,19 @@ function useCopy(text: string): [boolean, () => void] {
 
 /**
  * Command output: a soft panel with a status dot in its gutter, the command
- * as its header, then the output's tail in a capped box that scrolls.
+ * as its header, then the output's last lines; the whole output is one tap
+ * away. Not a scroll box: a vertical scroller nested in the inverted list
+ * hands its overscroll to the list flipped, so the chat ran the wrong way.
  */
 function Terminal({ tool, command, onDetails }: { tool: ToolItem; command: string; onDetails: () => void }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const output = (outputOf(tool) ?? "").replace(/\s+$/, "");
   const [copied, copy] = useCopy(command);
-  const shown = output.length > TERMINAL_CHARS ? `…${output.slice(-TERMINAL_CHARS)}` : output;
-  const lines = output === "" ? 0 : output.split("\n").length;
-  const scroll = useRef<ScrollView>(null);
+  const all = output === "" ? [] : output.split("\n");
+  const lines = all.length;
+  const tail = all.slice(-TERMINAL_LINES).join("\n");
+  const shown = tail.length > TERMINAL_CHARS ? `…${tail.slice(-TERMINAL_CHARS)}` : tail;
   const dot = tool.status === "running" ? null : tool.status === "error" ? colors.err : colors.ok;
   return (
     <View style={styles.cardWrap}>
@@ -1088,19 +1091,12 @@ function Terminal({ tool, command, onDetails }: { tool: ToolItem; command: strin
             {tool.status === "running" ? t("tool.running") : t("tool.noOutput")}
           </Text>
         ) : (
-          <ScrollView
-            ref={scroll}
-            style={styles.termScroll}
-            nestedScrollEnabled
-            onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}
-          >
-            <Text style={tool.isError === true ? styles.termOutErr : styles.termOut} selectable maxFontSizeMultiplier={SCALE.code}>
-              {shown}
-            </Text>
-          </ScrollView>
+          <Text style={tool.isError === true ? styles.termOutErr : styles.termOut} selectable maxFontSizeMultiplier={SCALE.code}>
+            {lines > TERMINAL_LINES ? `…\n${shown}` : shown}
+          </Text>
         )}
       </View>
-      {lines > 12 || output.length > TERMINAL_CHARS ? <DetailsLink label={t("tool.full")} onPress={onDetails} /> : null}
+      {lines > TERMINAL_LINES || tail.length > TERMINAL_CHARS ? <DetailsLink label={t("tool.full")} onPress={onDetails} /> : null}
     </View>
   );
 }
@@ -1376,7 +1372,6 @@ function createStyles(c: Palette) {
     termCopyText: { ...meta, lineHeight: 18, color: c.fgMuted },
     termCopied: { ...meta, lineHeight: 18, color: c.ok },
     termRule: { height: StyleSheet.hairlineWidth, backgroundColor: c.border },
-    termScroll: { maxHeight: 224 },
     termOut: { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.fgMuted, paddingTop: 10, paddingBottom: 12, paddingLeft: 28, paddingRight: 14 },
     termOutErr: { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.err, paddingTop: 10, paddingBottom: 12, paddingLeft: 28, paddingRight: 14 },
     termEmpty: { fontFamily: MONO, fontSize: 12, lineHeight: 18, color: c.fgFaint, paddingTop: 10, paddingBottom: 12, paddingLeft: 28 },

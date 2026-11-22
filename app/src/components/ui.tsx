@@ -618,6 +618,7 @@ export function useSheet(visible: boolean, onClose: () => void): SheetController
     return { toOpen, toClosed, release };
   }, [fade, height, landed, offset, open, reduced]);
 
+  const dragging = useSharedValue(false);
   const grab = useMemo(
     () =>
       Gesture.Pan()
@@ -626,13 +627,20 @@ export function useSheet(visible: boolean, onClose: () => void): SheetController
         .onStart(() => {
           cancelAnimation(offset);
           start.set(offset.get());
+          dragging.set(true);
         })
         .onUpdate((event) => {
+          if (!dragging.get()) return;
           const next = start.get() + event.translationY;
           offset.set(next >= 0 ? next : rubberband(next, height.get()));
         })
-        .onEnd((event) => motion.release(event.velocityY)),
-    [height, motion, offset, start],
+        // Finalize, not end: a drag the system cancels still lands open or closed, never halfway.
+        .onFinalize((event) => {
+          if (!dragging.get()) return;
+          dragging.set(false);
+          motion.release(event.velocityY);
+        }),
+    [dragging, height, motion, offset, start],
   );
 
   useEffect(() => {
@@ -803,8 +811,10 @@ export function SheetScrollView({ style, children, ...rest }: ScrollViewProps): 
           // While the sheet is down the content stays put: the finger moves one thing.
           if (next > 0) scrollTo(ref, 0, 0, false);
         })
-        .onEnd((event) => {
+        // Finalize, not end: a drag the system cancels still lands open or closed, never halfway.
+        .onFinalize((event) => {
           if (!holding.get()) return;
+          holding.set(false);
           // Back at rest before the release: the scroll has the velocity, not the sheet.
           if (offset.get() > 0) release(event.velocityY);
           else offset.set(withSpring(0, SPRING_SNAP));
