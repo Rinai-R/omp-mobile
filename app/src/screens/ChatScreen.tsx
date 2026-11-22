@@ -74,6 +74,21 @@ const ASK_AFTER = 3;
 const UNREACHABLE_AFTER_MS = 5_000;
 /** How far from the newest message (px) still counts as "at the bottom". */
 const NEAR_BOTTOM = 160;
+/** How long a reopened chat waits for enough of its transcript to put the reader back where they were. */
+const RESTORE_WITHIN_MS = 2_500;
+
+/**
+ * Where each chat was left, for this run of the app: the distance from its newest end (the
+ * inverted list's offset), which survives older history loading, and the newest and oldest
+ * row with the content height then, which say how much newer content arrived since.
+ */
+interface Place {
+  y: number;
+  newest: string | undefined;
+  oldest: string | undefined;
+  height: number;
+}
+const places = new Map<string, Place>();
 
 /** What the failure card says for the status the daemon answered with; the status line under it carries the detail. */
 function failureText(failure: OpenFailure): { title: string; body?: string } {
@@ -699,6 +714,42 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     },
     [scrollY],
   );
+  // Reopened where it was left, unless a search hit asks for a message: back from the history the
+  // reader was reading, not dropped at the newest message again.
+  const placeKey = `${machine.id}\n${initialSession.id}`;
+  const restore = useRef<Place | null>(focus === undefined ? (places.get(placeKey) ?? null) : null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const tryRestore = useCallback((force: boolean) => {
+    const place = restore.current;
+    const list = rowsRef.current;
+    if (place === null || list.length === 0) return;
+    let target = place.y;
+    // Newer rows arrived since: they sit below the place, which moved up by what they added. Countable
+    // only once the same history is loaded (the same oldest row); until then wait, or settle for the old offset.
+    if (list[0]?.id !== place.newest) {
+      if (list.at(-1)?.id === place.oldest) target += Math.max(0, contentH.current - place.height);
+      else if (!force) return;
+    }
+    if (!force && contentH.current < target + viewH.current) return;
+    restore.current = null;
+    scrollY.set(target);
+    listRef.current?.scrollToOffset({ offset: target, animated: false });
+  }, [scrollY]);
+  useEffect(() => {
+    if (restore.current === null) return undefined;
+    const timer = setTimeout(() => tryRestore(true), RESTORE_WITHIN_MS);
+    return () => clearTimeout(timer);
+  }, [tryRestore]);
+  useEffect(
+    () => () => {
+      const y = scrollY.get();
+      const list = rowsRef.current;
+      if (y <= NEAR_BOTTOM || list.length === 0) places.delete(placeKey);
+      else places.set(placeKey, { y, newest: list[0]?.id, oldest: list.at(-1)?.id, height: contentH.current });
+    },
+    [placeKey, scrollY],
+  );
   const setAwayJS = useCallback((isAway: boolean) => {
     setAway(isAway);
     if (!isAway) setUnseen(0);
@@ -839,6 +890,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             onContentSizeChange={(_, height) => {
               contentH.current = height;
               measureOldest();
+              tryRestore(false);
             }}
             contentContainerStyle={[styles.list, { paddingTop: 16 + bottomH, paddingBottom: 12 + topH }]}
             style={failure !== null ? styles.listDim : undefined}
