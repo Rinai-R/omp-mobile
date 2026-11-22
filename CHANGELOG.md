@@ -4,6 +4,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.2
+
 - Swiping on a command's output no longer scrolls the chat the wrong way. The output was a small box that scrolled on its own; inside the chat it passed the swipe on reversed. It now shows the last 12 lines, with the whole output one tap away.
 - Opening a chat, switching to another app and coming back no longer leaves the chat and the session list each half on screen. The animation library is updated past a bug where animated views showed a stale frame after the app was paused, and the screen stack settles itself whenever the app goes to the background or returns, also halfway through a swipe back. Sheets and the attention banner likewise always settle.
 - Back with the photo menu open closes the menu instead of leaving the chat.
