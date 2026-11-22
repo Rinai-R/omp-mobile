@@ -107,9 +107,11 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
   );
 
   // Leaving the app mid-swipe (recents, a floating window, the system's own back) may never deliver the
-  // gesture's end; and coming back, the stack must not rest half open. Settle it toward where it was going.
+  // gesture's end; and coming back, the stack must not rest half open. Settle it toward where it was going,
+  // and on return repaint it even at rest: after a pause the native views can show a stale mid-animation
+  // frame although the value is right (Reanimated #9527), which put the chat and the list each half on screen.
   useEffect(() => {
-    const subscription = AppState.addEventListener("change", () => {
+    const subscription = AppState.addEventListener("change", (state) => {
       const target = topKeyRef.current !== null ? 1 : 0;
       if (dragging.get()) {
         dragging.set(false);
@@ -119,9 +121,15 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
           return;
         }
       }
-      if (progress.get() === target) return;
-      cancelAnimation(progress);
-      progress.set(withTiming(target, FADE));
+      if (progress.get() !== target) {
+        cancelAnimation(progress);
+        progress.set(withTiming(target, FADE));
+        return;
+      }
+      if (state !== "active") return;
+      // A change too small to see, so the styles are written again from the current value.
+      progress.set(target === 1 ? 0.9999 : 0.0001);
+      progress.set(withTiming(target, { duration: 16 }));
     });
     return () => subscription.remove();
   }, [dragging, progress, swipedBack]);

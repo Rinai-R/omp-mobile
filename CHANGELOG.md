@@ -4,14 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
-- Command output in a chat shows its last 12 lines in place, with the whole output one tap away. It was a small box that scrolled on its own inside the chat, and could send the chat scrolling the wrong way.
-- Leaving the app halfway through a swipe back (to recents, home, or a floating window) no longer leaves the chat and the session list each half on screen; sheets and the attention banner likewise always settle.
+- Swiping on a command's output no longer scrolls the chat the wrong way. The output was a small box that scrolled on its own; inside the chat it passed the swipe on reversed. It now shows the last 12 lines, with the whole output one tap away.
+- Opening a chat, switching to another app and coming back no longer leaves the chat and the session list each half on screen. The animation library is updated past a bug where animated views showed a stale frame after the app was paused, and the screen stack settles itself whenever the app goes to the background or returns, also halfway through a swipe back. Sheets and the attention banner likewise always settle.
 - Back with the photo menu open closes the menu instead of leaving the chat.
 
 ### 中文
 
-- 聊天里的命令输出改为直接显示最后 12 行，完整输出点一下查看。之前是聊天里一个能单独滚动的小框，滑动时可能带着整个聊天往反方向滚。
-- 右滑返回到一半时切到最近任务、桌面或小窗，回来后不会再出现聊天和会话列表各占半屏；弹窗和顶部提醒同样总会归位。
+- 在命令输出上滑动，聊天不再往反方向滚。之前命令输出是一个能单独滚动的小框，嵌在聊天里会把滑动方向反着传出去；现在直接显示最后 12 行，完整输出点一下查看。
+- 打开聊天后切到别的应用再切回来，不会再出现聊天和会话列表各占半屏。动画库升级，修掉了应用暂停后动画视图停在旧画面的问题；页面栈在应用进入后台或回到前台时都会自动归位，右滑返回到一半时切走也一样。弹窗和顶部提醒同样总会归位。
 - 照片菜单打开时按返回，先关闭菜单，不再直接退出聊天。
 
 ## v0.8.1
