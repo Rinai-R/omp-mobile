@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode, type Ref } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
+import { BackHandler, Image, Pressable, StyleSheet, Text, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
 import Reanimated, { ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 import type { Attachment } from "../attachments";
@@ -74,6 +74,16 @@ export function Composer({
   // The menu grows out of the `+` it hangs over and shrinks back into it.
   const menuIn = useMemo(() => popIn(reduced), [reduced]);
   const menuOut = useMemo(() => popOut(reduced), [reduced]);
+  // Back closes the open menu first, as it would a popover; it must not leave the chat under it.
+  // Registered while open only: the newest handler runs first, ahead of the app's pop.
+  useEffect(() => {
+    if (!menu) return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      setMenu(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [menu]);
   const pick = (source: "library" | "camera") => {
     setMenu(false);
     onAttach(source);

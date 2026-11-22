@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { StyleSheet, useWindowDimensions, View } from "react-native";
+import { AppState, StyleSheet, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
@@ -49,6 +49,8 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
   const reduced = useReducedMotion();
   const progress = useSharedValue(top === null ? 0 : 1);
   const start = useSharedValue(0);
+  /** A finger is on the screen's swipe back (from its start until the gesture finalizes, however it ends). */
+  const dragging = useSharedValue(false);
 
   // The popped screen stays on screen until it has slid away; its latest render is kept for that.
   const topKey = top?.key ?? null;
@@ -104,6 +106,34 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
     },
   );
 
+  // Leaving the app mid-swipe (recents, a floating window, the system's own back) may never deliver the
+  // gesture's end; and coming back, the stack must not rest half open. Settle it toward where it was going,
+  // and on return repaint it even at rest: after a pause the native views can show a stale mid-animation
+  // frame although the value is right (Reanimated #9527), which put the chat and the list each half on screen.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      const target = topKeyRef.current !== null ? 1 : 0;
+      if (dragging.get()) {
+        dragging.set(false);
+        if (target === 1 && progress.get() < 1 - COMMIT) {
+          progress.set(withTiming(0, FADE));
+          swipedBack();
+          return;
+        }
+      }
+      if (progress.get() !== target) {
+        cancelAnimation(progress);
+        progress.set(withTiming(target, FADE));
+        return;
+      }
+      if (state !== "active") return;
+      // A change too small to see, so the styles are written again from the current value.
+      progress.set(target === 1 ? 0.9999 : 0.0001);
+      progress.set(withTiming(target, { duration: 16 }));
+    });
+    return () => subscription.remove();
+  }, [dragging, progress, swipedBack]);
+
   const pan = useMemo(
     () =>
       Gesture.Pan()
@@ -114,13 +144,19 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
         .onStart(() => {
           cancelAnimation(progress);
           start.set(progress.get());
+          dragging.set(true);
         })
         .onUpdate((e) => {
+          if (!dragging.get()) return;
           const offset = (1 - start.get()) * width + e.translationX;
           // Past fully open the screen resists instead of uncovering the shell on the right.
           progress.set(1 - (offset < 0 ? rubberband(offset, width) : offset) / width);
         })
-        .onEnd((e) => {
+        // Finalize, not end: it runs however the gesture stops (lifted, cancelled by the system), so a
+        // swipe never leaves the screen half open.
+        .onFinalize((e) => {
+          if (!dragging.get()) return;
+          dragging.set(false);
           const offset = (1 - progress.get()) * width;
           const velocity = -e.velocityX / width;
           if (offset + project(e.velocityX) > width * COMMIT) {
@@ -130,7 +166,7 @@ export function ScreenStack({ base, top, onSwipeBack }: Props): ReactNode {
             progress.set(reduced ? withTiming(1, FADE) : withSpring(1, { ...SPRING_SCREEN, velocity, overshootClamping: true }));
           }
         }),
-    [progress, pushed, reduced, start, swipedBack, width],
+    [dragging, progress, pushed, reduced, start, swipedBack, width],
   );
 
   const baseStyle = useAnimatedStyle(() => ({
