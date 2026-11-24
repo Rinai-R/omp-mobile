@@ -238,9 +238,14 @@ test("/transcript answers live sessions from memory, closed ones from disk witho
     assert.deepEqual(starts, []);
     assert.ok(daemon.registry.get("s1").updatedAt >= entry.updatedAt, "the registry knows when it was last active");
 
-    // A terminal omp writes the session: the saved copy is stale.
-    appendFileSync(file, '{"type":"message"}\n');
-    assert.equal((await get("/sessions/s1/transcript")).status, 404);
+    // A terminal omp writes the session: the saved copy is stale, so the file itself is served,
+    // with what the terminal wrote since (this is how a held session is read before takeover).
+    appendFileSync(file, `${JSON.stringify({ type: "message", message: { role: "user", timestamp: 10, content: "from the terminal" } })}\n`);
+    const fresh = await get("/sessions/s1/transcript");
+    assert.equal(fresh.status, 200);
+    const fromFile = await fresh.json();
+    assert.deepEqual([fromFile.from, fromFile.total, fromFile.messages.length], [0, 1, 1], "the file's own messages, not the stale copy's");
+    assert.equal(fromFile.messages.at(-1).content, "from the terminal");
 
     // A session closed from the phone is forgotten, saved copy included.
     const second = await addSession(daemon, dir, "s2", messages);

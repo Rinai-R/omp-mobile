@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, openSync, closeSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { listOmpSessions, parseLsof, sessionOwners } from "../src/omp-sessions.mjs";
+import { listOmpSessions, parseLsof, readSessionMessages, sessionOwners } from "../src/omp-sessions.mjs";
 import { Daemon, parseArgs } from "../src/server.mjs";
 
 const home = mkdtempSync(join(tmpdir(), "omp-home-"));
@@ -87,4 +87,36 @@ test("the daemon lists terminal sessions, marks one held elsewhere, and refuses 
     closeSync(fd);
     await daemon.close();
   }
+});
+
+test("a session file's messages come back for a session the daemon never opened", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-transcript-"));
+  const file = join(dir, "session.jsonl");
+  const entry = (message) => `${JSON.stringify({ type: "message", message })}\n`;
+  writeFileSync(file, [
+    '{"type":"title","title":"held in a terminal"}\n',
+    '{"type":"session","id":"s1","cwd":"/tmp"}\n',
+    entry({ role: "user", timestamp: 1, content: "first" }),
+    '{"type":"model_change"}\n',
+    entry({ role: "assistant", timestamp: 2, responseId: "r1", content: [] }),
+  ].join(""));
+  const whole = await readSessionMessages(file);
+  assert.deepEqual(whole.messages.map((message) => message.timestamp), [1, 2], "only message entries");
+  assert.equal(whole.base, 0);
+
+  // A tail read says where in the session it starts, so the phone's indices still line up.
+  // Cut at a line boundary, as a tail read of a long file starts mid-way through it.
+  const text = readFileSync(file, "utf8");
+  const second = text.slice(0, text.indexOf(entry({ role: "assistant", timestamp: 2, responseId: "r1", content: [] }))).length;
+  const tail = await readSessionMessages(file, { bytes: Buffer.byteLength(text) - second });
+  assert.deepEqual(tail.messages.map((message) => message.timestamp), [2]);
+  assert.equal(tail.base, 1, "base counts the messages cut from the front");
+
+  // Fewer messages than asked for: the last ones, with the count of the rest in base.
+  const two = await readSessionMessages(file, { messages: 1 });
+  assert.deepEqual(two.messages.map((message) => message.timestamp), [2]);
+  assert.equal(two.base, 1);
+
+  assert.equal(await readSessionMessages(join(dir, "missing.jsonl")), undefined);
+  rmSync(dir, { recursive: true, force: true });
 });
