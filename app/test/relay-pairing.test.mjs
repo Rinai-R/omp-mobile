@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { keyFingerprint, pairingProof, parsePairingTicket } from "../src/relay/pairing.ts";
+import { keyFingerprint, loginWithAccount, pairingProof, parsePairingTicket } from "../src/relay/pairing.ts";
 
 // The fixed vector ds-harness-remote publishes for every phone implementation.
 const vector = JSON.parse(readFileSync(new URL("./fixtures/relay-pairing-proof.json", import.meta.url), "utf8"));
@@ -40,4 +40,37 @@ test("a pairing code is read only in its exact form", () => {
 
 test("a fingerprint is the lowercase hex SHA-256 of the key", () => {
   assert.match(keyFingerprint(vector.devicePublicKey), /^[0-9a-f]{64}$/);
+});
+
+test("account login registers the phone with the account bearer token", async (t) => {
+  const account = "user@example.test";
+  const token = "account-token-123456";
+  const tokens = {
+    accessToken: "device-access-123456",
+    accessTokenExpiresAt: 1000,
+    refreshToken: "device-refresh-123456",
+    refreshTokenExpiresAt: 2000,
+  };
+  const phone = { deviceId: "phone", name: "Phone", publicKey: "public", privateKey: "private" };
+  const fetchMock = t.mock.method(globalThis, "fetch", async (url, options) => {
+    const body = JSON.parse(options.body);
+    if (url.endsWith("/api/v1/auth/login")) {
+      assert.deepEqual(body, { email: account, password: "test-password" });
+      return Response.json({ account, token });
+    }
+    assert.equal(url, "https://relay.example.test/api/v1/devices/register");
+    assert.equal(new Headers(options.headers).get("authorization"), `Bearer ${token}`);
+    assert.equal(new Headers(options.headers).get("x-dsh-pairing-proof"), null);
+    assert.deepEqual(body, {
+      v: 1,
+      device: { deviceId: "phone", name: "Phone", role: "client", platform: "android", identityKey: "public", clientVersion: "0.8.2" },
+    });
+    return Response.json({ tokens });
+  });
+
+  assert.deepEqual(
+    await loginWithAccount("https://relay.example.test", ` ${account} `, "test-password", phone, "0.8.2"),
+    { account, tokens },
+  );
+  assert.equal(fetchMock.mock.callCount(), 2);
 });

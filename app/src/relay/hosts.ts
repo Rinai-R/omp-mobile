@@ -52,6 +52,14 @@ export async function saveCredentials(serverUrl: string, phone: PhoneIdentity, c
   apis.delete(serverUrl);
 }
 
+/** Keep what an account login issued: same shape as a pairing's credentials. */
+export async function saveLogin(serverUrl: string, phone: PhoneIdentity, credentials: { account: string; tokens: PairingTokens }): Promise<void> {
+  await update((current) => {
+    current[serverUrl] = { phone, account: credentials.account, tokens: credentials.tokens };
+  });
+  apis.delete(serverUrl);
+}
+
 const apis = new Map<string, RemoteServerApi>();
 
 async function apiFor(serverUrl: string): Promise<{ api: RemoteServerApi; phone: PhoneIdentity }> {
@@ -68,6 +76,12 @@ async function apiFor(serverUrl: string): Promise<{ api: RemoteServerApi; phone:
     apis.set(serverUrl, api);
   }
   return { api, phone: credentials.phone };
+}
+
+/** List hosts using the saved credentials and the shared token refresh path. */
+export async function relayHosts(serverUrl: string): Promise<RemoteHostListing[]> {
+  const { api } = await apiFor(serverUrl);
+  return api.hosts();
 }
 
 /** The computer behind a link as the server lists it now (online state); undefined once unpaired. */

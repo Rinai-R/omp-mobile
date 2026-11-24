@@ -10,8 +10,8 @@ import { generateKeyPair } from "@dsh-remote/crypto";
 import appConfig from "../../app.json";
 import { t } from "../i18n/index.ts";
 import type { Hello, Machine, RelayLink } from "../types";
-import { phoneFor, saveCredentials } from "./hosts";
-import { PairingError, cancelPairing, claimPairing, keyFingerprint, pairingStatus, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
+import { phoneFor, relayHosts, saveCredentials, saveLogin } from "./hosts";
+import { PairingError, cancelPairing, claimPairing, keyFingerprint, loginWithAccount, pairingStatus, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
 import { relayFetch } from "./tunnel";
 
 const POLL_MS = 1_500;
@@ -97,4 +97,20 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
       void cancel?.().catch(() => undefined);
     },
   };
+}
+
+/**
+ * Sign in to a self-hosted relay with an account (`loginWithAccount`) and list
+ * its hosts: the password is used once, this phone keeps only its device token
+ * pair. The first online host connects; with none online the error says so.
+ */
+export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<Machine> {
+  const phone = await phoneFor(serverUrl, newPhone);
+  const credentials = await loginWithAccount(serverUrl, email, password, phone, appConfig.expo.version);
+  await saveLogin(serverUrl, phone, credentials);
+  const hosts = await relayHosts(serverUrl);
+  const host = hosts.find((item) => item.online) ?? hosts[0];
+  if (host === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
+  if (machines.some((item) => item.url === `${serverUrl}#${host.deviceId}`)) throw new Error(t("api.duplicate"));
+  return relayMachine({ serverUrl, hostDeviceId: host.deviceId });
 }
