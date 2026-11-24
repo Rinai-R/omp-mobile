@@ -4,6 +4,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.3
+
 A conversation held by a terminal on the computer can be read from the phone before taking it over.
 
 - Opening a session another omp process holds used to show only "this session is running in a terminal" and take-over, with the conversation blank unless the phone had it cached. The daemon now builds the transcript from the session file itself (its last 400 messages, with the count of the ones before so indices still line up), and the phone fetches it when the live connection is refused. The history reads normally; take-over is still offered, and the live transcript replaces the copy once it opens.
