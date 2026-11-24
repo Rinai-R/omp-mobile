@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { WebSocketServer } from "ws";
-import { RELAY_HEADER, createTunnelRouter } from "../src/relay.mjs";
+import { RELAY_HEADER, RelayHost, createTunnelRouter } from "../src/relay.mjs";
 
 const TOKEN = "t".repeat(48);
 let server;
@@ -97,4 +100,30 @@ test("a WebSocket carries the token in its query, splits large messages and echo
   await call("omp.ws.send", { id: "w", text: "hi" });
   await until(() => events.some((event) => event.text === "echo:hi"));
   router.closePeerStreams();
+});
+
+test("a relay login with no terminal and no password starts without the login instead of hanging", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-login-"));
+  const logs = [];
+  const host = new RelayHost({
+    // Nothing listens here: a login attempt would reject, so reaching the log proves none was made.
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: (line) => logs.push(line),
+    account: "user@example.com",
+    password: async () => {
+      throw Object.assign(new Error("--relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal"), {
+        code: "RELAY_PASSWORD_REQUIRED",
+      });
+    },
+  });
+  // Must resolve rather than wait for an answer that cannot come.
+  await host.start();
+  assert.deepEqual(logs, ["relay warn: --relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal; starting without relay login"]);
+  assert.equal((await host.status()).online, false);
+  await host.close();
 });
