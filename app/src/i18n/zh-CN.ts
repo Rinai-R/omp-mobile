@@ -43,6 +43,8 @@ export const zhCN: Record<Key, Message> = {
   "settings.updates.available": "OMP Mobile {version} 可用",
   "settings.updates.description": "在 OMP Mobile 内下载 APK，再通过 Android 安装。",
   "settings.updates.download": "下载更新",
+  "settings.updates.browser": "用浏览器下载",
+  "settings.updates.browserFailed": "无法打开下载链接。",
   "settings.updates.downloadStarted": "正在下载更新…",
   "settings.updates.downloading": "正在下载更新 · {percent}%",
   "settings.updates.downloadFailed": "APK 下载或校验失败，请重试。",

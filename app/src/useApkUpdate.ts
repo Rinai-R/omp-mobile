@@ -2,7 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { requireOptionalNativeModule, type NativeModule } from "expo";
 import * as FileSystem from "expo-file-system/legacy";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, AppState, Platform, ToastAndroid } from "react-native";
+import { Alert, AppState, Linking, Platform, ToastAndroid } from "react-native";
 import { t } from "./i18n/index.ts";
 import { findApkUpdate, LATEST_RELEASE_URL, type ApkUpdate } from "./releases";
 
@@ -58,6 +58,10 @@ export function useApkUpdate(ready: boolean, version: string) {
       { text: t("settings.updates.install"), onPress: () => void install() },
     ]);
   }, [install]);
+
+  const openInBrowser = useCallback((update: ApkUpdate) => {
+    void Linking.openURL(update.url).catch(() => Alert.alert(t("settings.updates.browserFailed")));
+  }, []);
 
   const download = useCallback(async (update: ApkUpdate) => {
     if (installer === null || FileSystem.cacheDirectory === null || downloading.current) return;
@@ -125,6 +129,7 @@ export function useApkUpdate(ready: boolean, version: string) {
       if (update) {
         Alert.alert(t("settings.updates.available", { version: update.version }), t("settings.updates.description"), [
           { text: t("settings.updates.later"), style: "cancel" },
+          { text: t("settings.updates.browser"), onPress: () => openInBrowser(update) },
           {
             text: t("settings.updates.download"),
             onPress: () => void download(update),
@@ -139,7 +144,7 @@ export function useApkUpdate(ready: boolean, version: string) {
       inFlight.current = false;
       setChecking(false);
     }
-  }, [download, downloaded, supported, version]);
+  }, [download, downloaded, openInBrowser, supported, version]);
 
   useEffect(() => {
     if (!ready || !supported) return;
