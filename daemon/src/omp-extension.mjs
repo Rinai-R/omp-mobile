@@ -344,7 +344,8 @@ export default function ompMobile(pi) {
     description: "Pair your phone with this computer (OMP Mobile)",
     getArgumentCompletions: (prefix) => SUBCOMMANDS.filter((item) => item.value.startsWith(prefix.trim())),
     handler: async (args, ctx) => {
-      const sub = args.trim();
+      // `/mobile start` is what people type after "not running": the same as `/mobile`.
+      const sub = args.trim() === "start" ? "" : args.trim();
       const state = readState();
       if (sub === "hide") {
         hide(ctx);
@@ -363,7 +364,7 @@ export default function ompMobile(pi) {
       if (sub === "status") {
         const now = state === undefined ? undefined : await status(state);
         if (state === undefined || now === undefined) {
-          ctx.ui.notify("OMP Mobile: the daemon is not running. /mobile starts it.", "info");
+          ctx.ui.notify("OMP Mobile: the daemon is not running. Run /mobile to start it.", "info");
           return;
         }
         const phone = now.lastPhone === null ? "no phone yet" : `last phone ${now.lastPhone.address}`;
@@ -390,7 +391,7 @@ export default function ompMobile(pi) {
       }
       if (sub === "login") {
         if (state === undefined) {
-          ctx.ui.notify("OMP Mobile: the daemon is not running. /mobile starts it.", "info");
+          ctx.ui.notify("OMP Mobile: the daemon is not running. Run /mobile to start it.", "info");
           return;
         }
         const account = (await ctx.ui.input("OMP Mobile: relay account email"))?.trim();
