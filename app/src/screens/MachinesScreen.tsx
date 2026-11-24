@@ -22,6 +22,7 @@ import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pai
 import { PairSuccess } from "../components/PairSuccess";
 import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
 import { parsePairingTicket } from "../relay/pairing";
+import { loginRelay } from "../relay/pair";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
@@ -86,6 +87,10 @@ export function MachinesScreen({
   const [busy, setBusy] = useState(false);
   /** The sheet was filled from a pairing link: one tap on Connect adds it. */
   const [fromLink, setFromLink] = useState(false);
+  /** Account login for a self-hosted relay: fields shown, credentials typed. */
+  const [relayLogin, setRelayLogin] = useState(false);
+  const [account, setAccount] = useState("");
+  const [password, setPassword] = useState("");
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
@@ -128,6 +133,9 @@ export function MachinesScreen({
     setAdding(false);
     setError(null);
     setBusy(false);
+    setRelayLogin(false);
+    setAccount("");
+    setPassword("");
     // A link's token is not left behind in a sheet the user dismissed.
     if (fromLink) {
       setUrl("");
@@ -170,6 +178,15 @@ export function MachinesScreen({
     setBusy(true);
     setError(null);
     try {
+      if (relayLogin) {
+        const base = normalizeUrl(url);
+        celebrate(await loginRelay(base, account, password, machines));
+        setUrl("");
+        setAccount("");
+        setPassword("");
+        setRelayLogin(false);
+        return;
+      }
       let base: string;
       let secret: string;
       if (isPairingLink(url)) {
@@ -190,7 +207,7 @@ export function MachinesScreen({
     } finally {
       setBusy(false);
     }
-  }, [celebrate, machines, relay.start, ticket, token, url]);
+  }, [account, celebrate, machines, password, relay.start, relayLogin, ticket, token, url]);
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
@@ -329,7 +346,15 @@ export function MachinesScreen({
               placeholder={t("machines.addSheet.addressPlaceholder")}
               autoFocus={!fromLink}
             />
-            {ticket === undefined ? (
+            {ticket === undefined && !relayLogin ? (
+              <Button label={t("machines.addSheet.relayLogin")} kind="plain" onPress={() => setRelayLogin(true)} />
+            ) : null}
+            {relayLogin ? (
+              <>
+                <Field label={t("machines.addSheet.account")} value={account} onChangeText={setAccount} keyboardType="email-address" />
+                <Field label={t("machines.addSheet.password")} value={password} onChangeText={setPassword} secure />
+              </>
+            ) : ticket === undefined ? (
               <Field label={t("machines.addSheet.token")} value={token} onChangeText={setToken} secure />
             ) : null}
             {(relay.error ?? error) !== null ? <Text style={styles.error}>{relay.error ?? error}</Text> : null}
@@ -337,7 +362,11 @@ export function MachinesScreen({
               label={t("machines.addSheet.connect")}
               onPress={() => void connect()}
               busy={busy}
-              disabled={url.trim() === "" || (token.trim() === "" && !isPairingLink(url) && ticket === undefined)}
+              disabled={
+                url.trim() === "" ||
+                (relayLogin && (account.trim() === "" || password === "")) ||
+                (!relayLogin && token.trim() === "" && !isPairingLink(url) && ticket === undefined)
+              }
             />
           </>
         )}
