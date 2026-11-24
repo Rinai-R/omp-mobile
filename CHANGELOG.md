@@ -4,6 +4,14 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.5
+
+- The launch screen follows the app's appearance setting. With the app set to dark on a phone in light mode (or the other way round), it used to open on the phone's scheme and then switch, a bright flash on every start; Android now keeps the app's choice and draws the launch screen in it (Android 12 and later).
+
+### 中文
+
+- 启动画面跟随应用里的外观设置。以前手机是浅色、应用设为深色（或反过来）时，启动先按手机配色显示再切换，每次打开都闪一下亮色；现在 Android 会记住应用的选择，启动画面直接用这套配色（Android 12 及以上）。
+
 ## v0.8.4
 
 Updates open in their own sheet, with what changed in every version the phone skipped.

@@ -1,4 +1,5 @@
 import { StatusBar } from "expo-status-bar";
+import { requireOptionalNativeModule } from "expo";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
@@ -94,9 +95,16 @@ function notificationState(enabled: boolean): NotificationState {
   return Attention.notificationsAllowed() ? "on" : "denied";
 }
 
-/** The scheme React Native is told to use: `unspecified` follows the phone. */
-function colorSchemeOf(preference: AppearancePreference): "light" | "dark" | "unspecified" {
-  return preference === "system" ? "unspecified" : preference;
+const systemAppearance = requireOptionalNativeModule<{ setNightMode(mode: AppearancePreference): void }>("OmpAppearance");
+
+/**
+ * The app's light/dark choice, for React Native (`unspecified` follows the phone) and for
+ * Android, which keeps it for the app: the launch screen the system draws before the app
+ * runs then opens in the same scheme instead of flashing the phone's.
+ */
+function applyAppearance(preference: AppearancePreference): void {
+  Appearance.setColorScheme(preference === "system" ? "unspecified" : preference);
+  systemAppearance?.setNightMode(preference);
 }
 
 /** Whether the live activity is a Live Update here: Android 16 QPR1+ promotes it once the user allows it. */
@@ -151,7 +159,7 @@ export default function App(): ReactNode {
       setMachines(stored);
       setSettings(storedSettings);
       setLanguage(resolveLanguage(storedSettings.language, systemLocale()));
-      Appearance.setColorScheme(colorSchemeOf(storedSettings.appearance));
+      applyAppearance(storedSettings.appearance);
       // The app opens on the computer used last; with none paired, on the computers screen.
       const last = stored.find((item) => item.id === storedSettings.lastMachineId) ?? stored[0];
       if (last !== undefined) setRoute({ base: { kind: "home", machine: last, tab: "sessions" }, top: null });
@@ -400,7 +408,7 @@ export default function App(): ReactNode {
   /** Switch light/dark now: every screen re-renders under the new palette. */
   const chooseAppearance = useCallback(
     (preference: AppearancePreference) => {
-      Appearance.setColorScheme(colorSchemeOf(preference));
+      applyAppearance(preference);
       updateSettings({ ...settingsRef.current, appearance: preference });
     },
     [updateSettings],
