@@ -4,6 +4,18 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+Updates open in their own sheet, with what changed in every version the phone skipped.
+
+- A newer release is checked for on launch and each return to the app, and shown in a sheet: the new version, every release since the installed one newest first with its date and notes (in the app's language; GitHub's generated pull-request list is left out), and the download size on the button. The download runs as a progress bar in the button's place; a re-check while it runs or after it finished keeps it.
+- After allowing installs in Android's settings, coming back continues the install by itself. An APK already downloaded and verified is not fetched again after the app restarts.
+- A release whose APK is still being uploaded is not listed yet. Settings shows "Update to …" with a dot while an update waits, and opens the sheet.
+
+### 中文
+
+- 有新版本时会弹出更新面板：新版本号、从当前版本起每个跳过的版本（最新在前，带日期和说明，按应用语言显示，不含 GitHub 自动生成的 PR 列表），下载按钮上标出大小。下载时按钮原位变成进度条；下载中或下载完再检查一次也不会丢掉进度。
+- 在 Android 设置里允许安装后返回，安装会自动继续。已下载并校验过的 APK 在应用重启后不会重复下载。
+- APK 还在上传中的版本暂不列出。有更新等待时，设置页显示「更新到 …」和小圆点，点按打开面板。
+
 ## v0.8.3
 
 A conversation held by a terminal on the computer can be read from the phone before taking it over.

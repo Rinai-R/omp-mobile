@@ -24,6 +24,7 @@ import { MachineSwitcher } from "./src/components/MachineSwitcher";
 import { ScreenStack, type Layer } from "./src/components/ScreenStack";
 import { SessionSwitcher } from "./src/components/SessionSwitcher";
 import { TabBar, type Tab } from "./src/components/TabBar";
+import { UpdateSheet } from "./src/components/UpdateSheet";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { MachinesScreen, type AddRequest } from "./src/screens/MachinesScreen";
 import { PairScanner } from "./src/screens/PairScanner";
@@ -634,6 +635,7 @@ export default function App(): ReactNode {
             onManage={() => setRoute({ base: { kind: "home", machine: homeMachine, tab: "computers" }, top: null })}
           />
         ) : null}
+        <UpdateSheet sheet={apkUpdate.sheet} installed={appConfig.expo.version} />
       </Fragment>
     </SafeAreaProvider>
     </KeyboardProvider>

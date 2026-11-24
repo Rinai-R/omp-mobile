@@ -2,11 +2,13 @@ import type { ReactNode } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, Linking, Switch, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
+import { Spinner } from "../components/brand";
 import { BackGlyph, CheckGlyph } from "../components/icons";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { Button, Group, IconButton, Row, SectionHeader } from "../components/ui";
 import { t, type LanguagePreference } from "../i18n/index.ts";
+import { RELEASES_PAGE } from "../releases";
 import type { AppearancePreference } from "../storage";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 
@@ -35,7 +37,7 @@ interface Props {
   /** Back to the computers screen: only before any computer is paired, when there is no tab bar. */
   onBack?: () => void;
   version: string;
-  apkUpdate: { label: string; busy: boolean; action?: () => void };
+  apkUpdate: { label: string; busy: boolean; waiting: boolean; action?: () => void };
   /** Where this page reports how much of it runs on under the tab bar; only as a tab. */
   under?: SharedValue<number>;
 }
@@ -164,14 +166,21 @@ export function SettingsScreen({
           {apkUpdate.action !== undefined ? (
             <Row
               title={apkUpdate.label}
-              onPress={apkUpdate.busy ? undefined : apkUpdate.action}
+              trailing={
+                apkUpdate.busy ? (
+                  <Spinner size={12} color={colors.fgFaint} />
+                ) : apkUpdate.waiting ? (
+                  <View style={styles.updateBadge} />
+                ) : undefined
+              }
+              chevron={apkUpdate.waiting}
+              onPress={apkUpdate.busy && !apkUpdate.waiting ? undefined : apkUpdate.action}
             />
           ) : null}
           <Row
             title={t("settings.updates.releases")}
             onPress={() => {
-              void Linking.openURL("https://github.com/Rinai-R/omp-mobile/releases")
-                .catch(() => Alert.alert(t("settings.updates.openFailed")));
+              void Linking.openURL(RELEASES_PAGE).catch(() => Alert.alert(t("settings.updates.openFailed")));
             }}
             last
           />
@@ -198,6 +207,8 @@ function createStyles(c: Palette) {
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16 },
     action: { paddingHorizontal: 12, paddingBottom: 12 },
     gap: { height: 24 },
+    // A newer release waits: the brand's cyan, the size of an unread dot.
+    updateBadge: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.accentB },
     // The large title keeps the home's 20 px inset inside this 16 px-padded list.
     bleed: { marginHorizontal: -16 },
     version: { fontFamily: MONO, fontSize: 12, lineHeight: 16, color: c.fgFaint },
