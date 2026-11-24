@@ -10,8 +10,12 @@ import { generateKeyPair } from "@dsh-remote/crypto";
 import appConfig from "../../app.json";
 import { t } from "../i18n/index.ts";
 import type { Hello, Machine, RelayLink } from "../types";
-import { phoneFor, saveCredentials } from "./hosts";
-import { PairingError, cancelPairing, claimPairing, keyFingerprint, pairingStatus, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
+import { relaySelection, type RelayCandidate } from "./selection";
+
+export { relaySelection, type RelayCandidate };
+import { phoneFor, relayHosts, saveCredentials, saveLogin, savedRelayAccount } from "./hosts";
+import { PairingError, authenticateRelayAccount, cancelPairing, claimPairing, keyFingerprint, pairingStatus, registerAccountPhone, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
+import { RemoteServerError, type RemoteHostListing } from "./server";
 import { relayFetch } from "./tunnel";
 
 const POLL_MS = 1_500;
@@ -96,5 +100,82 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
       cancelled = true;
       void cancel?.().catch(() => undefined);
     },
+  };
+}
+
+/** What an account sign-in found: the computers to choose among. */
+export interface RelayLoginResult {
+  serverUrl: string;
+  account: string;
+  candidates: RelayCandidate[];
+}
+
+/**
+ * Sign in to a self-hosted relay with an account and list its computers.
+ *
+ * The password is used once; this phone then keeps only its device token pair.
+ * Every computer the account has is returned so the phone can offer the ones not
+ * added yet — with one computer (`pickRelay`) connects straight away, with
+ * several the user chooses.
+ */
+export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
+  const login = await authenticateRelayAccount(serverUrl, email, password);
+  let hosts: RemoteHostListing[] | undefined;
+  if (await savedRelayAccount(serverUrl) === login.account) {
+    try {
+      hosts = await relayHosts(serverUrl);
+    } catch (error) {
+      if (!(error instanceof RemoteServerError) || (error.status !== 401 && error.status !== 403)) throw error;
+    }
+  }
+  // Registering an existing device invalidates its live connection. Reuse valid credentials
+  // when the user signs in again to discover another computer on the same account.
+  if (hosts === undefined) {
+    const phone = await phoneFor(serverUrl, newPhone);
+    await saveLogin(serverUrl, phone, await registerAccountPhone(serverUrl, login, phone, appConfig.expo.version));
+    hosts = await relayHosts(serverUrl);
+  }
+  return accountComputers(serverUrl, login.account, hosts, machines);
+}
+
+/** Discover more computers using the phone's saved, refreshable device credentials. */
+export async function resumeRelay(serverUrl: string, account: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
+  return accountComputers(serverUrl, account, await relayHosts(serverUrl), machines);
+}
+
+function accountComputers(serverUrl: string, account: string, hosts: RemoteHostListing[], machines: readonly Machine[]): RelayLoginResult {
+  if (hosts.length === 0) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
+  const added = new Set(machines.map((item) => item.url));
+  return {
+    serverUrl,
+    account,
+    candidates: hosts.map((host) => ({
+      deviceId: host.deviceId,
+      name: host.name,
+      platform: host.platform,
+      online: host.online === true,
+      added: added.has(`${serverUrl}#${host.deviceId}`),
+    })),
+  };
+}
+
+/**
+ * Save the chosen computer from the relay listing. Its sessions screen opens
+ * the tunnel after selection, so adding it cannot replace an active connection.
+ */
+export async function pickRelay(result: RelayLoginResult, deviceId: string, machines: readonly Machine[]): Promise<Machine> {
+  const url = `${result.serverUrl}#${deviceId}`;
+  if (machines.some((item) => item.url === url)) throw new Error(t("api.duplicate"));
+  const candidate = result.candidates.find((item) => item.deviceId === deviceId);
+  if (candidate === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
+  return {
+    id: `relay:${url}`,
+    url,
+    token: "",
+    name: candidate.name,
+    os: candidate.platform,
+    version: "",
+    cwd: "",
+    relay: { serverUrl: result.serverUrl, hostDeviceId: deviceId, account: result.account },
   };
 }

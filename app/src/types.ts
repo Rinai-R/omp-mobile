@@ -26,6 +26,8 @@ export interface Machine {
 export interface RelayLink {
   serverUrl: string;
   hostDeviceId: string;
+  /** Account sign-in on a self-hosted relay. Anonymous pairings omit this. */
+  account?: string;
 }
 
 export interface SessionSummary {

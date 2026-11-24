@@ -20,6 +20,7 @@ interface ServerCredentials {
   phone: PhoneIdentity;
   account: string;
   tokens: PairingTokens;
+  authorizationMethod?: "account";
 }
 
 type Store = Record<string, ServerCredentials>;
@@ -52,6 +53,37 @@ export async function saveCredentials(serverUrl: string, phone: PhoneIdentity, c
   apis.delete(serverUrl);
 }
 
+/** Keep what an account login issued: same shape as a pairing's credentials. */
+export async function saveLogin(serverUrl: string, phone: PhoneIdentity, credentials: { account: string; tokens: PairingTokens }): Promise<void> {
+  await update((current) => {
+    current[serverUrl] = { phone, account: credentials.account, tokens: credentials.tokens, authorizationMethod: "account" };
+  });
+  apis.delete(serverUrl);
+}
+
+export async function savedRelayAccount(serverUrl: string): Promise<string | undefined> {
+  return (await loadStore())[serverUrl]?.account;
+}
+
+/** Account entries only. Older builds can be identified by their saved machine account label. */
+export async function savedAccountRelays(machines: readonly Machine[]): Promise<{ serverUrl: string; account: string }[]> {
+  const current = await loadStore();
+  const migrated = machines.filter((machine) => machine.relay?.account !== undefined)
+    .map((machine) => machine.relay!);
+  let changed = false;
+  for (const link of migrated) {
+    const entry = current[link.serverUrl];
+    if (entry !== undefined && entry.account === link.account && entry.authorizationMethod === undefined) {
+      entry.authorizationMethod = "account";
+      changed = true;
+    }
+  }
+  if (changed) await AsyncStorage.setItem(KEY, JSON.stringify(current));
+  return Object.entries(current)
+    .filter(([, entry]) => entry.authorizationMethod === "account")
+    .map(([serverUrl, entry]) => ({ serverUrl, account: entry.account }));
+}
+
 const apis = new Map<string, RemoteServerApi>();
 
 async function apiFor(serverUrl: string): Promise<{ api: RemoteServerApi; phone: PhoneIdentity }> {
@@ -70,10 +102,22 @@ async function apiFor(serverUrl: string): Promise<{ api: RemoteServerApi; phone:
   return { api, phone: credentials.phone };
 }
 
-/** The computer behind a link as the server lists it now (online state); undefined once unpaired. */
+/** List hosts using the saved credentials and the shared token refresh path. */
+export async function relayHosts(serverUrl: string): Promise<RemoteHostListing[]> {
+  const { api } = await apiFor(serverUrl);
+  return api.hosts();
+}
+
+const hostLists = new Map<string, Promise<RemoteHostListing[]>>();
+
+/** Share one relay presence request across the computers in a refresh round. */
 export async function relayHost(link: RelayLink): Promise<RemoteHostListing | undefined> {
-  const { api } = await apiFor(link.serverUrl);
-  return (await api.hosts()).find((host) => host.deviceId === link.hostDeviceId);
+  let listing = hostLists.get(link.serverUrl);
+  if (listing === undefined) {
+    listing = relayHosts(link.serverUrl).finally(() => hostLists.delete(link.serverUrl));
+    hostLists.set(link.serverUrl, listing);
+  }
+  return (await listing).find((host) => host.deviceId === link.hostDeviceId);
 }
 
 const connections = new Map<string, Promise<RelayConnection>>();
@@ -83,17 +127,46 @@ function keyOf(link: RelayLink): string {
   return `${link.serverUrl}#${link.hostDeviceId}`;
 }
 
+let selectedAccountHost: string | undefined;
+let accountSelectionVersion = 0;
+let closingAccountHost = Promise.resolve();
+
+/** Deselect synchronously so old streams and retry timers cannot open the old host again. */
+export function selectAccountRelay(link: RelayLink | undefined): void {
+  const next = link?.account === undefined ? undefined : keyOf(link);
+  const previous = selectedAccountHost;
+  if (previous === next) return;
+  selectedAccountHost = next;
+  accountSelectionVersion += 1;
+  if (previous === undefined) return;
+  const opening = connections.get(previous);
+  if (opening === undefined) return;
+  connections.delete(previous);
+  closingAccountHost = closingAccountHost.then(async () => {
+    const connection = await opening.catch(() => undefined);
+    await connection?.close();
+  }).catch(() => undefined);
+}
+
 /**
  * The computer's connection, opened on first use and shared by every screen;
  * a closed or failed one is dropped so the next call opens anew.
  */
 export function relayConnection(link: RelayLink): Promise<RelayConnection> {
   const key = keyOf(link);
+  const accountRelay = link.account !== undefined;
+  if (accountRelay && selectedAccountHost !== key) return Promise.reject(new Error(t("relay.selectComputer")));
   const existing = connections.get(key);
   if (existing !== undefined) return existing;
+  const selectionVersion = accountSelectionVersion;
   const opening = (async () => {
+    if (accountRelay) await closingAccountHost;
     const { api, phone } = await apiFor(link.serverUrl);
-    return RelayConnection.open(api, phone, await api.host(link.hostDeviceId), () => {
+    const host = await api.host(link.hostDeviceId);
+    if (accountRelay && (accountSelectionVersion !== selectionVersion)) {
+      throw new Error(t("relay.selectComputer"));
+    }
+    return RelayConnection.open(api, phone, host, () => {
       if (connections.get(key) === opening) connections.delete(key);
       for (const listener of closeListeners.get(key) ?? []) listener();
     });
@@ -124,9 +197,13 @@ export function onRelayClose(link: RelayLink, listener: () => void): () => void 
  */
 export async function forgetRelay(link: RelayLink, remaining: readonly Machine[]): Promise<void> {
   const key = keyOf(link);
-  const existing = connections.get(key);
-  connections.delete(key);
-  void existing?.then((connection) => connection.close()).catch(() => undefined);
+  if (link.account !== undefined && selectedAccountHost === key) {
+    selectAccountRelay(undefined);
+  } else {
+    const existing = connections.get(key);
+    connections.delete(key);
+    void existing?.then((connection) => connection.close()).catch(() => undefined);
+  }
   const { api } = await apiFor(link.serverUrl);
   await api.revoke(link.hostDeviceId).catch(() => undefined);
   if (remaining.some((machine) => machine.relay?.serverUrl === link.serverUrl)) return;
