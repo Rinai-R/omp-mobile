@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,5 +125,66 @@ test("a relay login with no terminal and no password starts without the login in
   await host.start();
   assert.deepEqual(logs, ["relay warn: --relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal; starting without relay login"]);
   assert.equal((await host.status()).online, false);
+  await host.close();
+});
+
+
+test("logout clears an account login and its stored tokens", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-logout-"));
+  const host = new RelayHost({
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: () => undefined,
+  });
+  await host.start();
+  const before = await host.status();
+  assert.equal(before.paired, false);
+  assert.equal(before.account, undefined);
+
+  // A stored account login, as `authorizeWithAccount` would have written it.
+  writeFileSync(join(dir, "server-credentials.json"), JSON.stringify({
+    schemaVersion: 1,
+    serverUrl: "http://127.0.0.1:9",
+    deviceId: before.deviceId,
+    authorizationMethod: "account",
+    account: "user@example.com",
+    accessToken: "a".repeat(24),
+    accessTokenExpiresAt: Date.now() + 3_600_000,
+    refreshToken: "r".repeat(24),
+    refreshTokenExpiresAt: Date.now() + 3_600_000,
+  }), { mode: 0o600 });
+
+  const signedIn = await host.status();
+  assert.equal(signedIn.paired, true);
+  assert.equal(signedIn.account, "user@example.com");
+
+  // The server is unreachable here, so the revoke fails; the local tokens still go.
+  await host.logout();
+  const after = await host.status();
+  assert.equal(after.paired, false);
+  assert.equal(after.account, undefined);
+  await host.close();
+});
+
+test("an unreadable credential file does not take /status down", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-badcreds-"));
+  const host = new RelayHost({
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: () => undefined,
+  });
+  await host.start();
+  // World-readable: the credential store refuses to load it.
+  writeFileSync(join(dir, "server-credentials.json"), JSON.stringify({ schemaVersion: 1 }), { mode: 0o644 });
+  const status = await host.status();
+  assert.equal(status.paired, false);
   await host.close();
 });

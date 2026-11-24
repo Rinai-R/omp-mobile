@@ -76,7 +76,17 @@ export async function runRelayCli(args) {
       console.log("Revoked: that phone can no longer reach this computer.");
       process.exit(0);
     }
-    if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, status, revoke)`);
+    if (command === "logout") {
+      const before = await relayCall(state, "GET", "/relay");
+      if (before.account === undefined) {
+        throw new Error("this computer is not signed in to a relay account (anonymous pairing has no login to end)");
+      }
+      const done = await relayCall(state, "POST", "/relay/logout");
+      console.log(`Signed out of ${done.server}${done.paired ? " (the server still lists this computer)" : ""}.`);
+      console.log("Start with --relay-login to sign in again, or pair a phone with: omp-mobile relay pair");
+      process.exit(0);
+    }
+    if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, logout, status, revoke)`);
     const view = await relayCall(state, "POST", "/relay/pair");
     let cancelled = false;
     process.on("SIGINT", () => {

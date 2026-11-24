@@ -378,13 +378,42 @@ export class RelayHost {
 
   async status() {
     // Before `start` finished there is no identity yet: not paired, not online.
+    // An unreadable credential file must not take `/status` down: report unpaired
+    // and leave the error to the paths that act on it.
+    const stored = this.api === undefined || this.identity === undefined
+      ? undefined
+      : await this.api.store.load(this.api.baseUrl, this.identity.deviceId).catch(() => undefined);
     return {
       server: this.serverUrl,
       deviceId: this.identity?.deviceId ?? null,
-      paired: (await this.api?.hasStoredAuthorization()) ?? false,
+      paired: stored !== undefined,
       online: this.connection?.isOnline() ?? false,
       connected: this.connections?.connectionCount() ?? 0,
+      // Only an account login is something `relay logout` can end; anonymous pairing is not.
+      account: stored?.authorizationMethod === "account" ? stored.account : undefined,
     };
+  }
+
+  /**
+   * Sign this computer out of an account login: end the connection, revoke the
+   * device on the server, and drop the stored tokens. Without it a wrong account,
+   * or a device the server no longer knows, has no way back: startup only logs in
+   * while nothing is stored, so it would reuse those tokens forever.
+   */
+  async logout() {
+    await this.connection?.stop().catch(() => undefined);
+    this.connection = undefined;
+    const api = this.api;
+    if (api !== undefined && this.identity !== undefined) {
+      try {
+        await api.revokeCurrentDevice();
+      } catch {
+        // Offline, or the server no longer knows this device: the local tokens still go.
+        await api.clearAuthorization().catch(() => undefined);
+      }
+    }
+    this.pairing?.close();
+    this.pairing = undefined;
   }
 
   async close() {

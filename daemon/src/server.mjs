@@ -388,6 +388,7 @@ Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
 
 Relay commands (talk to the running daemon; same --state-file):
   omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
+  omp-mobile relay logout     Sign out of an account login: revoke this computer, drop its tokens
   omp-mobile relay status     Relay server, connection and paired phones
   omp-mobile relay revoke <phone device id>
 `);
@@ -1746,6 +1747,12 @@ class Daemon {
       if (phone !== null && req.method === "DELETE") {
         await this.relay.revoke(decodeURIComponent(phone[1]));
         sendJson(res, 200, { ok: true });
+        return;
+      }
+      // Sign out of an account login; anonymous pairing has nothing to end here.
+      if (url.pathname === "/relay/logout" && req.method === "POST") {
+        await this.relay.logout();
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
         return;
       }
       sendJson(res, 404, { error: "not found" });
