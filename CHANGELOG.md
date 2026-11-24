@@ -4,6 +4,10 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+A conversation held by a terminal on the computer can be read from the phone before taking it over.
+
+- Opening a session another omp process holds used to show only "this session is running in a terminal" and take-over, with the conversation blank unless the phone had it cached. The daemon now builds the transcript from the session file itself (its last 400 messages, with the count of the ones before so indices still line up), and the phone fetches it when the live connection is refused. The history reads normally; take-over is still offered, and the live transcript replaces the copy once it opens.
+
 OMP Mobile can now update itself from its GitHub releases (thanks @tingQian).
 
 - Settings checks once a day, and on demand, for a newer release; a newer version offers its APK, downloaded in the app and checked against the SHA-256 GitHub publishes before Android's installer sees it. Release history is one tap away.
@@ -15,6 +19,8 @@ OMP Mobile 现在可以从 GitHub 发布页更新自己（感谢 @tingQian）。
 
 - 设置页每天自动检查一次，也可以手动检查；有新版本时提示下载 APK，在应用内下载，并用 GitHub 公布的 SHA-256 校验后才交给 Android 安装器。发布记录一键打开。
 - Android 会询问一次"允许 OMP Mobile 安装应用"；每次安装仍由系统安装器确认并校验签名。
+
+- 被电脑上终端占用的会话，现在能在手机上先读再决定是否接管。以前点开只显示"会话正在终端中运行"和接管按钮，手机没缓存过时对话是空的；现在 daemon 直接从会话文件生成记录（最后 400 条，并带上前面被略过的条数，保证序号仍对得上），手机在实时连接被拒时取这份记录。历史照常阅读，接管按钮仍在，接管成功后实时记录会覆盖这份副本。
 
 ## v0.8.2
 

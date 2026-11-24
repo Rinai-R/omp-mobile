@@ -17,7 +17,7 @@ import Reanimated, { useAnimatedScrollHandler, useReducedMotion, useSharedValue 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import * as Attention from "../../modules/omp-attention/src";
-import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
+import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, fetchTranscript, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
@@ -643,6 +643,25 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       .finally(() => setTaking(false));
   }, [initialSession.id]);
 
+  /**
+   * A session the socket cannot open (held by a terminal omp, or still starting) still has its
+   * conversation: fetch it over HTTP, so the reader sees what was said before deciding to take
+   * it over. Read-only: a snapshot replaces these rows once the session opens.
+   */
+  const historyFetched = useRef(false);
+  useEffect(() => {
+    if (failure === null || historyFetched.current || live.current) return;
+    if (failure.status === 401 || failure.status === 403) return;
+    historyFetched.current = true;
+    void fetchTranscript(machine, initialSession.id, undefined)
+      .then((transcript) => {
+        if (transcript === null || transcript === undefined || live.current || transcript.messages.length === 0) return;
+        quietRef.current = true;
+        show({ offset: transcript.from ?? 0, messages: transcript.messages });
+      })
+      .catch(() => undefined);
+  }, [failure, initialSession.id, machine, show]);
+
   // Rows newest first: the list is inverted, so it rests on the newest message and grows upward.
   const queued = useMemo(
     () => [...(state?.queuedMessages?.steering ?? []), ...(state?.queuedMessages?.followUp ?? [])],
@@ -893,7 +912,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
               tryRestore(false);
             }}
             contentContainerStyle={[styles.list, { paddingTop: 16 + bottomH, paddingBottom: 12 + topH }]}
-            style={failure !== null ? styles.listDim : undefined}
+            // Dimmed when the screen says why there is nothing; a history read over HTTP stays legible.
+            style={failure !== null && rows.length === 0 ? styles.listDim : undefined}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             // At the bottom the inverted list keeps the newest row pinned while it streams and grows.

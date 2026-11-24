@@ -193,6 +193,89 @@ export function sessionOwners(ownersDir, { lsof = "lsof" } = {}) {
   });
 }
 
+/** How much of a session file a transcript read looks at: enough for the last turns of a long one. */
+const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+/** Messages kept from that tail; older ones are dropped from the front and counted in `base`. */
+const TRANSCRIPT_TAIL_MESSAGES = 400;
+
+/**
+ * The messages OMP wrote into a session file, for a session this daemon never
+ * opened: a phone can read a conversation that a terminal omp holds, before
+ * taking it over. Only its tail is read (a long session's file grows to
+ * megabytes), and only its `message` entries are taken; everything else in
+ * the file (title, model changes, custom frames) is not a message.
+ * @param {string} file
+ * @param {{bytes?: number, messages?: number}} [options]
+ * @returns {Promise<{messages: any[], base: number}|undefined>} undefined when the file is not readable
+ */
+export async function readSessionMessages(file, options = {}) {
+  const bytes = options.bytes ?? TRANSCRIPT_TAIL_BYTES;
+  const limit = options.messages ?? TRANSCRIPT_TAIL_MESSAGES;
+  let handle;
+  try {
+    handle = await open(file, "r");
+    const info = await handle.stat();
+    const from = Math.max(0, info.size - bytes);
+    // Messages in the part not read, so the indices the phone gets still count from the
+    // session's first message: a truncated transcript says where in the session it starts.
+    const skipped = from === 0 ? 0 : await countMessages(handle, from);
+    // One byte before the cut says whether it falls on a line start or inside a line.
+    const lead = from > 0 ? 1 : 0;
+    const buffer = Buffer.alloc(info.size - from + lead);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, from - lead);
+    let text = buffer.toString("utf8", 0, bytesRead);
+    if (lead === 1 && buffer[0] !== 0x0a) {
+      // Starting mid-line: the first line is the fragment of a message already cut.
+      text = text.slice(text.indexOf("\n") + 1);
+    } else if (lead === 1) {
+      text = text.slice(1);
+    }
+    const messages = [];
+    for (const line of text.split("\n")) {
+      if (line === "") continue;
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (entry?.type === "message" && entry.message !== null && typeof entry.message === "object") messages.push(entry.message);
+    }
+    const kept = messages.slice(-limit);
+    return { messages: kept, base: skipped + messages.length - kept.length };
+  } catch {
+    return undefined;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+/** How many `message` entries the first `end` bytes of a session file hold, counted by their marker. */
+async function countMessages(handle, end) {
+  const marker = Buffer.from('{"type":"message"');
+  const size = 1024 * 1024;
+  const buffer = Buffer.alloc(size + marker.length);
+  let count = 0;
+  let carry = 0;
+  let offset = 0;
+  while (offset < end) {
+    const want = Math.min(size, end - offset);
+    const { bytesRead } = await handle.read(buffer, carry, want, offset);
+    if (bytesRead === 0) break;
+    const view = buffer.subarray(0, carry + bytesRead);
+    let at = view.indexOf(marker);
+    while (at !== -1) {
+      count += 1;
+      at = view.indexOf(marker, at + marker.length);
+    }
+    // A marker split across two reads is counted once, when its start is in the next view.
+    carry = Math.min(marker.length - 1, view.length);
+    view.copy(buffer, 0, view.length - carry);
+    offset += bytesRead;
+  }
+  return count;
+}
+
 /** @param {string} output `lsof -F pn` output */
 export function parseLsof(output) {
   const owners = new Map();

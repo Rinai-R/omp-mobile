@@ -18,7 +18,7 @@ import { renderQr } from "./qr.mjs";
 import { RpcSession } from "./rpc-session.mjs";
 import { Admission, Tailscale, isLoopbackHost } from "./admission.mjs";
 import { AttentionTracker, serveEvents } from "./attention.mjs";
-import { listOmpSessions, oneLine, promptTitle, sessionOwners } from "./omp-sessions.mjs";
+import { listOmpSessions, oneLine, promptTitle, readSessionMessages, sessionOwners } from "./omp-sessions.mjs";
 import { askOwnerToLeave, forksOf, isOmpCommand, processInfo, sessionBusy, takeoverFarewell, tellTerminal } from "./takeover.mjs";
 import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
 import { SessionSearchIndex, matchOf, rankRecords, searchTokens, sessionFilesUnder } from "./session-search.mjs";
@@ -882,6 +882,8 @@ class Daemon {
     this.blobDir = options.blobDir ?? join(dirname(options.registryFile ?? DEFAULT_REGISTRY_FILE), "blobs");
     /** Transcripts of sessions whose omp exited, served by `/transcript` without starting one. */
     this.transcripts = new TranscriptStore(options.transcriptDir ?? join(dirname(options.registryFile ?? DEFAULT_REGISTRY_FILE), "transcripts"));
+    /** Session files read for a transcript the daemon has not cached, kept while the file is unchanged. */
+    this.files = new Map();
     this.server = createServer((req, res) => void this.admitHttp(req, res));
     // Compressed frames: a snapshot is JSON text, several times smaller deflated, and
     // the phone's WebSocket client (OkHttp) asks for permessage-deflate on its own.
@@ -1053,7 +1055,7 @@ class Daemon {
       }
       const transcript = /^\/sessions\/([^/]+)\/transcript$/.exec(url.pathname);
       if (transcript !== null && req.method === "GET") {
-        sendJson(res, 200, this.transcript(decodeURIComponent(transcript[1]), deltaQuery(url.searchParams)));
+        sendJson(res, 200, await this.transcript(decodeURIComponent(transcript[1]), deltaQuery(url.searchParams)));
         return;
       }
       const subagents = /^\/sessions\/([^/]+)\/subagents$/.exec(url.pathname);
@@ -1198,17 +1200,37 @@ class Daemon {
   /**
    * A session's transcript without starting an omp: a live session's from
    * memory, a closed one's from its saved copy while its session file is
-   * unchanged; otherwise a 404 the phone skips.
+   * unchanged; a session this daemon never opened (one a terminal omp holds)
+   * from the session file itself, so the phone can read it before taking it
+   * over. Otherwise a 404 the phone skips.
    * @param {string} id
    * @param {{since: number, last: string}} held
    */
-  transcript(id, held) {
+  async transcript(id, held) {
     const live = this.sessions.get(id);
     if (live !== undefined && !live.closed) return live.snapshot(held);
-    const known = this.known(id)?.sessionFile;
-    const saved = this.transcripts.read(id, typeof known === "string" ? known : undefined);
-    if (saved === undefined) throw httpError(404, "not cached");
-    return deltaBody(saved, held);
+    const known = this.known(id);
+    const file = known?.sessionFile;
+    const saved = this.transcripts.read(id, typeof file === "string" ? file : undefined);
+    if (saved !== undefined) return deltaBody(saved, held);
+    if (typeof file !== "string") throw httpError(404, "not cached");
+    const read = await this.fileTranscript(file);
+    if (read === undefined) throw httpError(404, "not cached");
+    return deltaBody({ session: known, state: undefined, messages: read.messages, base: read.base }, held);
+  }
+
+  /**
+   * The messages of a session file, kept for as long as the file is unchanged:
+   * reading a long session costs a scan, and the phone asks again on every open.
+   * @param {string} file
+   */
+  async fileTranscript(file) {
+    const info = fileState(file);
+    const cached = this.files.get(file);
+    if (cached !== undefined && info !== undefined && cached.mtimeMs === info.mtimeMs && cached.size === info.size) return cached.read;
+    const read = await readSessionMessages(file);
+    if (read !== undefined && info !== undefined) this.files.set(file, { mtimeMs: info.mtimeMs, size: info.size, read });
+    return read;
   }
 
   /**
