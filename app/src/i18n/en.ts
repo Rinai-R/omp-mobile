@@ -163,6 +163,8 @@ export const en = {
   // OMP's questions
   "approval.no": "No",
   "approval.yes": "Yes",
+  "approval.request": "Input requested",
+  "approval.unsupported": "This request type can’t be answered in the app.",
   "approval.submit": "Submit",
   "approval.option.approve": "Allow",
   "approval.option.approveOnce": "Allow once",

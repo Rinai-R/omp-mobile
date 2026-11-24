@@ -37,6 +37,21 @@ test("an agent's own question is left as asked", () => {
   });
 });
 
+test("title-less approval requests keep their message and have a heading", () => {
+  for (const title of [undefined, "", "   "]) {
+    assert.deepEqual(approvalText(title), {
+      tool: undefined,
+      heading: "Input requested",
+      details: [],
+    });
+  }
+  assert.deepEqual(approvalText("", "Choose how to proceed"), {
+    tool: undefined,
+    heading: "Input requested",
+    details: [{ command: false, value: "Choose how to proceed" }],
+  });
+});
+
 test("OMP's answers and levels are translated; unknown ones are shown as OMP named them", () => {
   setLanguage("zh-CN");
   try {

@@ -77,6 +77,7 @@ export function ApprovalSheet({
     [styles],
   );
   const input = request.method === "input" || request.method === "editor";
+  const supported = input || request.method === "select" || request.method === "confirm";
   const options = request.options ?? [];
   const text = approvalText(request.title, request.message);
   return (
@@ -110,6 +111,7 @@ export function ApprovalSheet({
                 )}
               </View>
             ) : null}
+            {!supported ? <Text style={styles.unsupported}>{t("approval.unsupported")}</Text> : null}
             {input ? (
               <View style={[focused ? styles.haloOn : styles.halo, styles.inputWrap]}>
                 <TextInput
@@ -189,6 +191,7 @@ function createStyles(c: Palette) {
     head: { alignItems: "center", paddingHorizontal: 18, paddingTop: 20, paddingBottom: 16, gap: 10 },
     icon: { width: 52, height: 52, borderRadius: 26, overflow: "hidden", alignItems: "center", justifyContent: "center" },
     title: { fontFamily: SANS, fontSize: 17, lineHeight: 22, fontWeight: "600", letterSpacing: -0.3, color: c.fg, textAlign: "center" },
+    unsupported: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fgMuted, textAlign: "center" },
     cmd: { alignSelf: "stretch", padding: 12, gap: 4, borderRadius: 12, backgroundColor: c.term },
     cmdText: { fontFamily: MONO, fontSize: 12.5, lineHeight: 19, color: c.termFg },
     cmdPrompt: { color: c.cyan },

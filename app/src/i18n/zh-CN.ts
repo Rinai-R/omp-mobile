@@ -162,6 +162,8 @@ export const zhCN: Record<Key, Message> = {
   // OMP's questions
   "approval.no": "否",
   "approval.yes": "是",
+  "approval.request": "等待你的输入",
+  "approval.unsupported": "此类请求暂时无法在手机上回答。",
   "approval.submit": "提交",
   "approval.option.approve": "允许",
   "approval.option.approveOnce": "允许一次",

@@ -41,7 +41,7 @@ export interface ApprovalDetail {
 export interface ApprovalText {
   /** The tool being asked about (`bash`), or undefined when this is not a tool approval. */
   tool?: string;
-  /** "Allow bash?" for a tool approval; otherwise the title's first line as OMP sent it. */
+  /** "Allow bash?" for a tool approval; otherwise the question title or a fallback. */
   heading: string;
   details: ApprovalDetail[];
 }
@@ -60,8 +60,11 @@ function detailOf(line: string): ApprovalDetail {
  * one detail per line, except that a label with nothing after it (`Content:`,
  * `Code:`) takes the lines that follow, up to the next known label.
  */
-export function approvalText(title: string, message?: string): ApprovalText {
-  const lines = [...title.split("\n"), ...(message === undefined ? [] : message.split("\n"))];
+export function approvalText(title?: string, message?: string): ApprovalText {
+  const lines = [
+    ...(typeof title === "string" ? title.split("\n") : [""]),
+    ...(typeof message === "string" ? message.split("\n") : []),
+  ];
   const first = lines.shift() ?? "";
   const tool = first.startsWith(TOOL_APPROVAL_PREFIX) ? first.slice(TOOL_APPROVAL_PREFIX.length).trim() : undefined;
   const blocks: string[] = [];
@@ -78,7 +81,7 @@ export function approvalText(title: string, message?: string): ApprovalText {
   }
   return {
     tool,
-    heading: tool === undefined ? first : t("omp.allowTool", { tool }),
+    heading: tool === undefined ? (first.trim() ? first : t("approval.request")) : t("omp.allowTool", { tool }),
     details: blocks.map((block) => detailOf(block.trim())).filter((detail) => detail.value !== ""),
   };
 }
