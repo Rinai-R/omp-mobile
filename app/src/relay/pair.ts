@@ -135,11 +135,20 @@ export async function loginRelay(serverUrl: string, email: string, password: str
     await saveLogin(serverUrl, phone, await registerAccountPhone(serverUrl, login, phone, appConfig.expo.version));
     hosts = await relayHosts(serverUrl);
   }
+  return accountComputers(serverUrl, login.account, hosts, machines);
+}
+
+/** Discover more computers using the phone's saved, refreshable device credentials. */
+export async function resumeRelay(serverUrl: string, account: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
+  return accountComputers(serverUrl, account, await relayHosts(serverUrl), machines);
+}
+
+function accountComputers(serverUrl: string, account: string, hosts: RemoteHostListing[], machines: readonly Machine[]): RelayLoginResult {
   if (hosts.length === 0) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
   const added = new Set(machines.map((item) => item.url));
   return {
     serverUrl,
-    account: login.account,
+    account,
     candidates: hosts.map((host) => ({
       deviceId: host.deviceId,
       name: host.name,

@@ -240,6 +240,7 @@ export const en = {
   "machines.addSheet.token": "Token",
   "machines.addSheet.connect": "Connect",
   "machines.addSheet.relayLogin": "Sign in to a self-hosted relay with an account",
+  "machines.addSheet.signInAgain": "Your relay credentials expired. Sign in again.",
   "machines.addSheet.account": "Account email",
   "machines.addSheet.password": "Password",
   "machines.addSheet.choose": "Choose a computer ({count} to add)",

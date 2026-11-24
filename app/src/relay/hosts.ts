@@ -20,6 +20,7 @@ interface ServerCredentials {
   phone: PhoneIdentity;
   account: string;
   tokens: PairingTokens;
+  authorizationMethod?: "account";
 }
 
 type Store = Record<string, ServerCredentials>;
@@ -55,13 +56,32 @@ export async function saveCredentials(serverUrl: string, phone: PhoneIdentity, c
 /** Keep what an account login issued: same shape as a pairing's credentials. */
 export async function saveLogin(serverUrl: string, phone: PhoneIdentity, credentials: { account: string; tokens: PairingTokens }): Promise<void> {
   await update((current) => {
-    current[serverUrl] = { phone, account: credentials.account, tokens: credentials.tokens };
+    current[serverUrl] = { phone, account: credentials.account, tokens: credentials.tokens, authorizationMethod: "account" };
   });
   apis.delete(serverUrl);
 }
 
 export async function savedRelayAccount(serverUrl: string): Promise<string | undefined> {
   return (await loadStore())[serverUrl]?.account;
+}
+
+/** Account entries only. Older builds can be identified by their saved machine account label. */
+export async function savedAccountRelays(machines: readonly Machine[]): Promise<{ serverUrl: string; account: string }[]> {
+  const current = await loadStore();
+  const migrated = machines.filter((machine) => machine.relay?.account !== undefined)
+    .map((machine) => machine.relay!);
+  let changed = false;
+  for (const link of migrated) {
+    const entry = current[link.serverUrl];
+    if (entry !== undefined && entry.account === link.account && entry.authorizationMethod === undefined) {
+      entry.authorizationMethod = "account";
+      changed = true;
+    }
+  }
+  if (changed) await AsyncStorage.setItem(KEY, JSON.stringify(current));
+  return Object.entries(current)
+    .filter(([, entry]) => entry.authorizationMethod === "account")
+    .map(([serverUrl, entry]) => ({ serverUrl, account: entry.account }));
 }
 
 const apis = new Map<string, RemoteServerApi>();

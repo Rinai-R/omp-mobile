@@ -22,7 +22,9 @@ import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pai
 import { PairSuccess } from "../components/PairSuccess";
 import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
 import { parsePairingTicket } from "../relay/pairing";
-import { loginRelay, pickRelay, relaySelection, type RelayLoginResult } from "../relay/pair";
+import { savedAccountRelays } from "../relay/hosts";
+import { RemoteServerError } from "../relay/server";
+import { loginRelay, resumeRelay, pickRelay, relaySelection, type RelayLoginResult } from "../relay/pair";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
@@ -96,6 +98,18 @@ export function MachinesScreen({
    * sheet lists them and waits for a choice instead of picking silently.
    */
   const [relayChoice, setRelayChoice] = useState<RelayLoginResult | null>(null);
+  const [savedRelays, setSavedRelays] = useState<{ serverUrl: string; account: string }[]>([]);
+  useEffect(() => {
+    if (!adding) return;
+    let cancelled = false;
+    void savedAccountRelays(machines).then((items) => {
+      if (!cancelled) setSavedRelays(items);
+    }).catch((cause: unknown) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    return () => { cancelled = true; };
+  }, [adding, machines]);
+
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
@@ -111,6 +125,13 @@ export function MachinesScreen({
     pending.current = machine;
     setPaired(machine);
   }, []);
+  const offerComputers = useCallback(async (found: RelayLoginResult) => {
+    const { pick, multiple } = relaySelection(found.candidates);
+    if (pick === undefined && !multiple) throw new Error(t("api.duplicate"));
+    if (pick !== undefined) celebrate(await pickRelay(found, pick.deviceId, machines));
+    else setRelayChoice(found);
+  }, [machines, celebrate]);
+
   const handOn = useCallback(() => {
     const machine = pending.current;
     if (machine === null) return;
@@ -187,14 +208,7 @@ export function MachinesScreen({
       if (relayLogin) {
         const base = normalizeUrl(url);
         const found = await loginRelay(base, account, password, machines);
-        const { pick, multiple } = relaySelection(found.candidates);
-        if (pick === undefined && !multiple) throw new Error(t("api.duplicate"));
-        // One computer: no question to ask. Several: let the user pick.
-        if (pick !== undefined) {
-          celebrate(await pickRelay(found, pick.deviceId, machines));
-        } else {
-          setRelayChoice(found);
-        }
+        await offerComputers(found);
         setUrl("");
         setAccount("");
         setPassword("");
@@ -221,7 +235,27 @@ export function MachinesScreen({
     } finally {
       setBusy(false);
     }
-  }, [account, celebrate, machines, password, relay.start, relayLogin, ticket, token, url]);
+  }, [account, celebrate, machines, offerComputers, password, relay.start, relayLogin, ticket, token, url]);
+
+  const resumeAccount = async (saved: { serverUrl: string; account: string }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await offerComputers(await resumeRelay(saved.serverUrl, saved.account, machines));
+    } catch (cause) {
+      if (cause instanceof RemoteServerError && (cause.status === 401 || cause.status === 403)) {
+        setUrl(saved.serverUrl);
+        setAccount(saved.account);
+        setPassword("");
+        setRelayLogin(true);
+        setError(t("machines.addSheet.signInAgain"));
+      } else {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
@@ -378,6 +412,15 @@ export function MachinesScreen({
           />
         ) : (
           <>
+            {!relayLogin && !fromLink && ticket === undefined ? savedRelays.map((saved) => (
+              <Button
+                key={saved.serverUrl}
+                label={`${saved.serverUrl} · ${saved.account}`}
+                kind="plain"
+                disabled={busy}
+                onPress={() => void resumeAccount(saved)}
+              />
+            )) : null}
             <Field
               label={t("machines.addSheet.address")}
               value={url}

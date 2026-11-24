@@ -239,6 +239,7 @@ export const zhCN: Record<Key, Message> = {
   "machines.addSheet.token": "Token",
   "machines.addSheet.connect": "连接",
   "machines.addSheet.relayLogin": "使用账号登录自建中继",
+  "machines.addSheet.signInAgain": "中转凭据已失效，请重新登录。",
   "machines.addSheet.account": "账号邮箱",
   "machines.addSheet.password": "密码",
   "machines.addSheet.choose": "选择一台电脑（可添加 {count} 台）",
