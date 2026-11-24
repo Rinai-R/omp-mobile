@@ -19,10 +19,14 @@ type Answer = { value?: string; confirmed?: boolean };
  */
 export function quickAnswer(request: Request): Answer | undefined {
   if (request.method === "confirm") return { confirmed: true };
-  if (request.method !== "select" || !request.title.startsWith(TOOL_APPROVAL_PREFIX)) return undefined;
+  if (!isToolApproval(request)) return undefined;
   const options = request.options ?? [];
   const once = options.find((option) => option === "Approve Once" || option === "Approve" || option === "Approve File");
   return once === undefined ? undefined : { value: once };
+}
+
+function isToolApproval(request: Request): boolean {
+  return request.method === "select" && typeof request.title === "string" && request.title.startsWith(TOOL_APPROVAL_PREFIX);
 }
 
 /** What the card says the question is about: the tool and its first detail (`bash · ls -la`), or the question itself. */
@@ -51,7 +55,7 @@ export function ApprovalWidget({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const answer = quickAnswer(session.request);
-  const tool = session.request.title.startsWith(TOOL_APPROVAL_PREFIX);
+  const tool = isToolApproval(session.request);
   return (
     <View style={styles.widget}>
       <GradientFill colors={[c.widgetA, c.widgetB, c.widgetC]} radius={24} />

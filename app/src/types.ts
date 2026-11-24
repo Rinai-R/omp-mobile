@@ -176,8 +176,8 @@ export type ChatItem = MessageItem | ToolItem | NoticeItem;
 
 export interface ApprovalRequest {
   id: string;
-  method: "select" | "confirm" | "input" | "editor";
-  title: string;
+  method: string;
+  title?: string;
   message?: string;
   options?: string[];
   optionDetails?: { description?: string }[];
