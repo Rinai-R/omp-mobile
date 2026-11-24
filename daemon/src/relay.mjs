@@ -229,7 +229,7 @@ export function createTunnelRouter(target, send) {
 export class RelayHost {
   /**
    * @param {{serverUrl: string, dir: string, name: string, version: string, port: () => number, token: string, log: (line: string) => void,
-   *          account?: string, password?: string}} options
+   *          account?: string, password?: () => Promise<string>}} options
    *   `account` + `password` opt in to account authorization instead of anonymous
    *   pairing (a self-hosted relay that supports `auth/login`); the password is
    *   used once to exchange for device tokens and never stored.
@@ -256,8 +256,11 @@ export class RelayHost {
     );
     if (await this.api.hasStoredAuthorization()) this.connect();
     else if (this.options.account !== undefined && this.options.password !== undefined) {
-      await this.login(this.options.account, this.options.password);
-      this.options.password = undefined;
+      try {
+        await this.login(this.options.account, await this.options.password());
+      } finally {
+        this.options.password = undefined;
+      }
     }
   }
 

@@ -9,6 +9,7 @@
  */
 import { STATUS_CODES, createServer } from "node:http";
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
@@ -43,11 +44,18 @@ const DEFAULT_RELAY_DIR = join(homedir(), ".omp-mobile", "relay");
  */
 async function relayPassword(options) {
   const fromEnv = process.env.OMP_MOBILE_RELAY_PASSWORD;
+  delete process.env.OMP_MOBILE_RELAY_PASSWORD;
   if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
-  const prompt = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
-  const password = (await prompt.question(`Relay account password for ${options.relayAccount}: `)).trim();
-  prompt.close();
-  return password;
+  const output = new Writable({ write(_chunk, _encoding, done) { done(); } });
+  const prompt = createInterface({ input: process.stdin, output, terminal: process.stdin.isTTY === true });
+  process.stderr.write(`Relay account password for ${options.relayAccount}: `);
+  try {
+    return await prompt.question("");
+  } finally {
+    prompt.close();
+    output.end();
+    process.stderr.write("\n");
+  }
 }
 const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
@@ -1745,7 +1753,7 @@ class Daemon {
     if (this.options.relay) {
       // `relayLogin !== undefined` opts in to account authorization instead of
       // anonymous pairing; the password is used once and then dropped.
-      const login = this.relayLogin !== undefined ? { account: this.relayLogin, password: await relayPassword(this.options) } : undefined;
+      const account = this.relayLogin;
       this.relayLogin = undefined;
       this.relay = new RelayHost({
         serverUrl: this.options.relay,
@@ -1755,8 +1763,8 @@ class Daemon {
         port: () => this.tunnelServer.address().port,
         token: this.token,
         log: (line) => this.log(line),
-        account: login?.account,
-        password: login?.password,
+        account,
+        password: account === undefined ? undefined : () => relayPassword(this.options),
       });
     }
     if (this.relay !== undefined) {

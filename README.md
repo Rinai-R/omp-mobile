@@ -58,13 +58,15 @@ A device on your Tailscale account that has the token can run anything OMP can o
 
 #### Self-hosted relay with account login
 
-A self-hosted [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) server (`apps/server`) has no anonymous pairing, but it does have account sign-in. Opt in on the computer with `--relay-login`:
+Run the [ds-harness-remote self-hosted server](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server) using its setup guide. Configure `DSH_SERVER_ACCOUNT` with an email address, `DSH_SERVER_PASSWORD`, and `DSH_SERVER_PUBLIC_URL` with the HTTPS origin both the computer and phone will use. Your reverse proxy must forward WebSocket upgrades to the server. The server keeps its device state in its persistent data volume.
+
+On the computer, opt in to account sign-in with `--relay-login`:
 
 ```bash
-OMP_MOBILE_RELAY_PASSWORD=... omp-mobile --relay https://your-server --relay-login --relay-account you@example.com
+omp-mobile --relay https://your-server --relay-login --relay-account you@example.com
 ```
 
-The password is used once to register this computer with the account and is not kept; the device tokens are stored owner-only (`~/.omp-mobile/relay/server-credentials.json`, mode 0600). A later start needs `--relay <url>` only. The password must not sit in argv (shell history, launchd plists): pass it through the environment or type it at the prompt. On the phone, use **Add computer → Sign in to a self-hosted relay with an account**: server address, account email, password — the phone registers with the same account and lists its computers. A custom `--relay <url>` needs a server that supports the matching authorization method (account sign-in for `--relay-login`, anonymous pairing otherwise).
+Enter the password at the hidden prompt, or set `OMP_MOBILE_RELAY_PASSWORD` for a non-interactive first login. The password is used once to register this computer with the account and is not kept; the device tokens are stored owner-only (`~/.omp-mobile/relay/server-credentials.json`, mode 0600). A later start needs `--relay <url>` only. The password must not sit in argv (shell history, launchd plists): pass it through the environment or type it at the prompt. On the phone, use **Add computer → Sign in to a self-hosted relay with an account**: server address, account email, password — the phone registers with the same account and lists its computers. A custom `--relay <url>` needs a server that supports the matching authorization method (account sign-in for `--relay-login`, anonymous pairing otherwise).
 
 ## Development
 
