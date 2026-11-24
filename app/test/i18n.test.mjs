@@ -45,6 +45,7 @@ test("the Chinese catalog is translated, not copied", () => {
     "machine.daemon",
     "machines.addSheet.token",
     "machines.addSheet.tokenPlaceholder",
+    "settings.updates.span",
   ]);
   const same = Object.keys(en).filter((key) => JSON.stringify(en[key]) === JSON.stringify(zh[key]) && /[A-Za-z]{2,}/.test(JSON.stringify(en[key])));
   assert.deepEqual(same.filter((key) => !allowed.has(key)), []);
