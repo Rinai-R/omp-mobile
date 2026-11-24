@@ -4,6 +4,8 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.4
+
 Updates open in their own sheet, with what changed in every version the phone skipped.
 
 - A newer release is checked for on launch and each return to the app, and shown in a sheet: the new version, every release since the installed one newest first with its date and notes (in the app's language; GitHub's generated pull-request list is left out), and the download size on the button. The download runs as a progress bar in the button's place; a re-check while it runs or after it finished keeps it.
