@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { keyFingerprint, loginWithAccount, pairingProof, parsePairingTicket } from "../src/relay/pairing.ts";
+import { relaySelection } from "../src/relay/selection.ts";
 
 // The fixed vector ds-harness-remote publishes for every phone implementation.
 const vector = JSON.parse(readFileSync(new URL("./fixtures/relay-pairing-proof.json", import.meta.url), "utf8"));
@@ -74,4 +75,30 @@ test("account login registers the phone with the account bearer token", async (t
     { account, tokens },
   );
   assert.equal(fetchMock.mock.callCount(), 2);
+});
+
+test("one computer is picked without asking; several ask; added ones stay visible but out of play", () => {
+  const host = (deviceId, online, added = false) => ({ deviceId, name: deviceId, platform: "linux", online, added });
+
+  // A single computer: nothing to choose, so the sign-in connects straight away.
+  assert.equal(relaySelection([host("a", true)]).pick?.deviceId, "a");
+  assert.equal(relaySelection([host("a", true)]).multiple, false);
+
+  // Two to add: the sheet must ask rather than silently take the first.
+  const two = relaySelection([host("a", true), host("b", false)]);
+  assert.equal(two.pick, undefined);
+  assert.equal(two.multiple, true);
+
+  // One already added: only the other is offered, and since it is alone, picked.
+  const partial = relaySelection([host("a", true, true), host("b", false)]);
+  assert.equal(partial.pick?.deviceId, "b");
+  assert.equal(partial.multiple, false);
+
+  // Everything added: nothing to pick and nothing to ask, so the caller reports duplicate.
+  const none = relaySelection([host("a", true, true), host("b", true, true)]);
+  assert.equal(none.pick, undefined);
+  assert.equal(none.multiple, false);
+
+  // Prefers an online computer when it is the only one to add.
+  assert.equal(relaySelection([host("a", false), host("b", true, true)]).pick?.deviceId, "a");
 });

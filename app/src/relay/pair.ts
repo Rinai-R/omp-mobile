@@ -10,6 +10,9 @@ import { generateKeyPair } from "@dsh-remote/crypto";
 import appConfig from "../../app.json";
 import { t } from "../i18n/index.ts";
 import type { Hello, Machine, RelayLink } from "../types";
+import { relaySelection, type RelayCandidate } from "./selection";
+
+export { relaySelection, type RelayCandidate };
 import { phoneFor, relayHosts, saveCredentials, saveLogin } from "./hosts";
 import { PairingError, cancelPairing, claimPairing, keyFingerprint, loginWithAccount, pairingStatus, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
 import { relayFetch } from "./tunnel";
@@ -99,26 +102,45 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
   };
 }
 
+/** What an account sign-in found: the computers to choose among. */
+export interface RelayLoginResult {
+  serverUrl: string;
+  candidates: RelayCandidate[];
+}
+
 /**
- * Sign in to a self-hosted relay with an account (`loginWithAccount`) and list
- * its hosts: the password is used once, this phone keeps only its device token
- * pair.
+ * Sign in to a self-hosted relay with an account and list its computers.
  *
- * Hosts already in `machines` are skipped, so an account with several computers
- * still adds the next one instead of stopping at "already added". Online ones
- * come first; with every host already added or none at all, the error says which.
+ * The password is used once; this phone then keeps only its device token pair.
+ * Every computer the account has is returned so the phone can offer the ones not
+ * added yet — with one computer (`pickRelay`) connects straight away, with
+ * several the user chooses.
  */
-export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<Machine> {
+export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
   const phone = await phoneFor(serverUrl, newPhone);
   const credentials = await loginWithAccount(serverUrl, email, password, phone, appConfig.expo.version);
   await saveLogin(serverUrl, phone, credentials);
   const hosts = await relayHosts(serverUrl);
+  if (hosts.length === 0) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
   const added = new Set(machines.map((item) => item.url));
-  const candidates = hosts
-    .map((item) => ({ item, url: `${serverUrl}#${item.deviceId}` }))
-    .filter(({ url }) => !added.has(url));
-  if (hosts.length > 0 && candidates.length === 0) throw new Error(t("api.duplicate"));
-  const chosen = candidates.find(({ item }) => item.online) ?? candidates[0];
-  if (chosen === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
-  return relayMachine({ serverUrl, hostDeviceId: chosen.item.deviceId });
+  return {
+    serverUrl,
+    candidates: hosts.map((host) => ({
+      deviceId: host.deviceId,
+      name: host.name,
+      platform: host.platform,
+      online: host.online === true,
+      added: added.has(`${serverUrl}#${host.deviceId}`),
+    })),
+  };
+}
+
+/**
+ * Connect to the chosen computer. `machines` is checked again because the list
+ * may have changed while the choice was on screen.
+ */
+export async function pickRelay(result: RelayLoginResult, deviceId: string, machines: readonly Machine[]): Promise<Machine> {
+  const url = `${result.serverUrl}#${deviceId}`;
+  if (machines.some((item) => item.url === url)) throw new Error(t("api.duplicate"));
+  return relayMachine({ serverUrl: result.serverUrl, hostDeviceId: deviceId });
 }

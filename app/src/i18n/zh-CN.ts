@@ -241,6 +241,8 @@ export const zhCN: Record<Key, Message> = {
   "machines.addSheet.relayLogin": "使用账号登录自建中继",
   "machines.addSheet.account": "账号邮箱",
   "machines.addSheet.password": "密码",
+  "machines.addSheet.choose": "选择一台电脑（可添加 {count} 台）",
+  "machines.addSheet.alreadyAdded": "已添加",
   "machine.linkA11y": "{via}，{link}",
   "link.lan": "局域网",
   "link.relay": "中继",

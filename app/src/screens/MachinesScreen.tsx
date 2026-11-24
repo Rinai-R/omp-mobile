@@ -22,7 +22,7 @@ import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pai
 import { PairSuccess } from "../components/PairSuccess";
 import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
 import { parsePairingTicket } from "../relay/pairing";
-import { loginRelay } from "../relay/pair";
+import { loginRelay, pickRelay, relaySelection, type RelayLoginResult } from "../relay/pair";
 import { summaryOf, type Probe } from "../probe";
 import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
@@ -91,6 +91,11 @@ export function MachinesScreen({
   const [relayLogin, setRelayLogin] = useState(false);
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
+  /**
+   * The account's computers, when the sign-in found more than one to add: the
+   * sheet lists them and waits for a choice instead of picking silently.
+   */
+  const [relayChoice, setRelayChoice] = useState<RelayLoginResult | null>(null);
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
@@ -136,6 +141,7 @@ export function MachinesScreen({
     setRelayLogin(false);
     setAccount("");
     setPassword("");
+    setRelayChoice(null);
     // A link's token is not left behind in a sheet the user dismissed.
     if (fromLink) {
       setUrl("");
@@ -180,7 +186,15 @@ export function MachinesScreen({
     try {
       if (relayLogin) {
         const base = normalizeUrl(url);
-        celebrate(await loginRelay(base, account, password, machines));
+        const found = await loginRelay(base, account, password, machines);
+        const { pick, multiple } = relaySelection(found.candidates);
+        if (pick === undefined && !multiple) throw new Error(t("api.duplicate"));
+        // One computer: no question to ask. Several: let the user pick.
+        if (pick !== undefined) {
+          celebrate(await pickRelay(found, pick.deviceId, machines));
+        } else {
+          setRelayChoice(found);
+        }
         setUrl("");
         setAccount("");
         setPassword("");
@@ -337,6 +351,21 @@ export function MachinesScreen({
           <PairSuccess name={displayName(paired)} c={colors} onDone={handOn} />
         ) : relay.busy ? (
           <RelayPairingCard code={relay.code} c={colors} onCancel={relay.cancel} />
+        ) : relayChoice !== null ? (
+          <RelayChoice
+            result={relayChoice}
+            machines={machines}
+            onPick={(deviceId) => {
+              const choice = relayChoice;
+              setRelayChoice(null);
+              setBusy(true);
+              setError(null);
+              void pickRelay(choice, deviceId, machines)
+                .then((machine) => celebrate(machine))
+                .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+                .finally(() => setBusy(false));
+            }}
+          />
         ) : (
           <>
             <Field
@@ -375,6 +404,52 @@ export function MachinesScreen({
   );
 }
 
+/**
+ * The computers an account sign-in found. Every one is listed — the added ones
+ * dimmed — so the sheet shows what the account has and asks which to connect to
+ * instead of silently taking the first.
+ */
+function RelayChoice({
+  result,
+  machines,
+  onPick,
+}: {
+  result: RelayLoginResult;
+  machines: readonly Machine[];
+  onPick: (deviceId: string) => void;
+}): ReactNode {
+  const colors = useColors();
+  const styles = useStyles(createStyles);
+  const open = result.candidates.filter((item) => !item.added);
+  return (
+    <>
+      <Text style={styles.choiceHint}>{t("machines.addSheet.choose", { count: open.length })}</Text>
+      <Group>
+        {result.candidates.map((item, index) => (
+          <Row
+            key={item.deviceId}
+            title={item.name}
+            dim={item.added}
+            detail={
+              <View style={styles.state}>
+                <StateDot dot={item.online ? "online" : "down"} />
+                <Text style={styles.detail} numberOfLines={1}>
+                  {item.added ? t("machines.addSheet.alreadyAdded") : item.platform}
+                </Text>
+              </View>
+            }
+            leading={<ComputerGlyph size={17} color={item.added ? colors.fgFaint : colors.tileFg} />}
+            chevron={!item.added}
+            last={index === result.candidates.length - 1}
+            onPress={item.added ? undefined : () => onPick(item.deviceId)}
+            accessibilityLabel={item.name}
+          />
+        ))}
+      </Group>
+    </>
+  );
+}
+
 function createStyles(c: Palette) {
   return {
     root: { flex: 1, backgroundColor: c.bg },
@@ -384,6 +459,7 @@ function createStyles(c: Palette) {
     emptyContent: { flexGrow: 1 },
     emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
+    choiceHint: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.fgMuted, marginBottom: 10, marginHorizontal: 2 },
     state: { flexDirection: "row", alignItems: "center", gap: 5 },
     error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;

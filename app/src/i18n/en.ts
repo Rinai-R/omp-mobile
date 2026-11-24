@@ -242,6 +242,8 @@ export const en = {
   "machines.addSheet.relayLogin": "Sign in to a self-hosted relay with an account",
   "machines.addSheet.account": "Account email",
   "machines.addSheet.password": "Password",
+  "machines.addSheet.choose": "Choose a computer ({count} to add)",
+  "machines.addSheet.alreadyAdded": "Already added",
   "machine.linkA11y": "{via}, {link}",
   "link.lan": "LAN",
   "link.relay": "Relay",
