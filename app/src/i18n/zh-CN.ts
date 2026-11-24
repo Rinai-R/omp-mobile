@@ -38,6 +38,8 @@ export const zhCN: Record<Key, Message> = {
   "settings.appearance.dark": "深色",
   "settings.appearance.light": "浅色",
   "settings.about.app": "OMP mobile",
+  "settings.updates.releases": "发布记录",
+  "settings.updates.openFailed": "无法打开发布页面。",
   "settings.updates.check": "检查更新",
   "settings.updates.checking": "正在检查更新…",
   "settings.updates.available": "OMP Mobile {version} 可用",

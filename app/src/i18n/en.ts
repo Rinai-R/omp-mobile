@@ -39,6 +39,8 @@ export const en = {
   "settings.appearance.dark": "Dark",
   "settings.appearance.light": "Light",
   "settings.about.app": "OMP mobile",
+  "settings.updates.releases": "Release history",
+  "settings.updates.openFailed": "Could not open the releases page.",
   "settings.updates.check": "Check for updates",
   "settings.updates.checking": "Checking for updates…",
   "settings.updates.available": "OMP Mobile {version} is available",

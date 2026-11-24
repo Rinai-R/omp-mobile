@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Switch, Text, View } from "react-native";
+import { Alert, Linking, Switch, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { BackGlyph, CheckGlyph } from "../components/icons";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
@@ -160,14 +160,21 @@ export function SettingsScreen({
 
         <View style={styles.gap} />
         <Group>
-          <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last={apkUpdate.action === undefined} />
+          <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last={false} />
           {apkUpdate.action !== undefined ? (
             <Row
               title={apkUpdate.label}
               onPress={apkUpdate.busy ? undefined : apkUpdate.action}
-              last
             />
           ) : null}
+          <Row
+            title={t("settings.updates.releases")}
+            onPress={() => {
+              void Linking.openURL("https://github.com/Rinai-R/omp-mobile/releases")
+                .catch(() => Alert.alert(t("settings.updates.openFailed")));
+            }}
+            last
+          />
         </Group>
       </Reanimated.ScrollView>
       <PageBar
