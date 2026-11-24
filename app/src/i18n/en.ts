@@ -266,6 +266,8 @@ export const en = {
   "probe.sessions": { one: "{count} session", other: "{count} sessions" },
   "probe.seen": "{reason} · seen {ago}",
   "probe.online": "Online · {ms} ms",
+  "probe.relayOnline": "Online at relay",
+  "relay.selectComputer": "Select this computer to connect.",
   "probe.unreachable": "Unreachable: {reason}",
   "ago.now": "just now",
   "ago.minutes": "{count} min ago",

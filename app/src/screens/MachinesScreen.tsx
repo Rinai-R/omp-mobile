@@ -278,11 +278,17 @@ export function MachinesScreen({
                     title={machineLabel(machine, machines)}
                     dim={summary.dot === "down"}
                     detail={
-                      <View style={styles.state}>
-                        <StateDot dot={summary.dot} />
-                        <Text style={styles.detail} numberOfLines={1}>
-                          {summary.text}
-                        </Text>
+                      <View>
+                        <View style={styles.state}>
+                          <StateDot dot={summary.dot} />
+                          <Text style={styles.detail} numberOfLines={1}>{summary.text}</Text>
+                        </View>
+                        {machine.relay?.account !== undefined ? (
+                          <>
+                            <Text style={styles.detail} numberOfLines={1}>{machine.relay.serverUrl}</Text>
+                            <Text style={styles.detail} numberOfLines={1}>{machine.relay.account}</Text>
+                          </>
+                        ) : null}
                       </View>
                     }
                     leading={<ComputerGlyph size={17} color={summary.dot === "down" ? colors.fgFaint : colors.tileFg} />}
@@ -295,7 +301,11 @@ export function MachinesScreen({
                     last={index === machines.length - 1}
                     onPress={() => onOpen(machine)}
                     onLongPress={() => setSheet(machine)}
-                    accessibilityLabel={t("common.pair", { label: displayName(machine), value: summary.text })}
+                    accessibilityLabel={[
+                      t("common.pair", { label: displayName(machine), value: summary.text }),
+                      machine.relay?.account === undefined ? undefined : machine.relay.serverUrl,
+                      machine.relay?.account,
+                    ].filter(Boolean).join(", ")}
                   />
                 );
               })}

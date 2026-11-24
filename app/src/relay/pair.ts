@@ -13,8 +13,9 @@ import type { Hello, Machine, RelayLink } from "../types";
 import { relaySelection, type RelayCandidate } from "./selection";
 
 export { relaySelection, type RelayCandidate };
-import { phoneFor, relayHosts, saveCredentials, saveLogin } from "./hosts";
-import { PairingError, cancelPairing, claimPairing, keyFingerprint, loginWithAccount, pairingStatus, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
+import { phoneFor, relayHosts, saveCredentials, saveLogin, savedRelayAccount } from "./hosts";
+import { PairingError, authenticateRelayAccount, cancelPairing, claimPairing, keyFingerprint, pairingStatus, registerAccountPhone, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
+import { RemoteServerError, type RemoteHostListing } from "./server";
 import { relayFetch } from "./tunnel";
 
 const POLL_MS = 1_500;
@@ -105,6 +106,7 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
 /** What an account sign-in found: the computers to choose among. */
 export interface RelayLoginResult {
   serverUrl: string;
+  account: string;
   candidates: RelayCandidate[];
 }
 
@@ -117,14 +119,27 @@ export interface RelayLoginResult {
  * several the user chooses.
  */
 export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
-  const phone = await phoneFor(serverUrl, newPhone);
-  const credentials = await loginWithAccount(serverUrl, email, password, phone, appConfig.expo.version);
-  await saveLogin(serverUrl, phone, credentials);
-  const hosts = await relayHosts(serverUrl);
+  const login = await authenticateRelayAccount(serverUrl, email, password);
+  let hosts: RemoteHostListing[] | undefined;
+  if (await savedRelayAccount(serverUrl) === login.account) {
+    try {
+      hosts = await relayHosts(serverUrl);
+    } catch (error) {
+      if (!(error instanceof RemoteServerError) || (error.status !== 401 && error.status !== 403)) throw error;
+    }
+  }
+  // Registering an existing device invalidates its live connection. Reuse valid credentials
+  // when the user signs in again to discover another computer on the same account.
+  if (hosts === undefined) {
+    const phone = await phoneFor(serverUrl, newPhone);
+    await saveLogin(serverUrl, phone, await registerAccountPhone(serverUrl, login, phone, appConfig.expo.version));
+    hosts = await relayHosts(serverUrl);
+  }
   if (hosts.length === 0) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
   const added = new Set(machines.map((item) => item.url));
   return {
     serverUrl,
+    account: login.account,
     candidates: hosts.map((host) => ({
       deviceId: host.deviceId,
       name: host.name,
@@ -136,11 +151,22 @@ export async function loginRelay(serverUrl: string, email: string, password: str
 }
 
 /**
- * Connect to the chosen computer. `machines` is checked again because the list
- * may have changed while the choice was on screen.
+ * Save the chosen computer from the relay listing. Its sessions screen opens
+ * the tunnel after selection, so adding it cannot replace an active connection.
  */
 export async function pickRelay(result: RelayLoginResult, deviceId: string, machines: readonly Machine[]): Promise<Machine> {
   const url = `${result.serverUrl}#${deviceId}`;
   if (machines.some((item) => item.url === url)) throw new Error(t("api.duplicate"));
-  return relayMachine({ serverUrl: result.serverUrl, hostDeviceId: deviceId });
+  const candidate = result.candidates.find((item) => item.deviceId === deviceId);
+  if (candidate === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
+  return {
+    id: `relay:${url}`,
+    url,
+    token: "",
+    name: candidate.name,
+    os: candidate.platform,
+    version: "",
+    cwd: "",
+    relay: { serverUrl: result.serverUrl, hostDeviceId: deviceId, account: result.account },
+  };
 }

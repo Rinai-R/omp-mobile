@@ -265,6 +265,8 @@ export const zhCN: Record<Key, Message> = {
   "probe.sessions": "{count}个会话",
   "probe.seen": "{reason} · {ago}在线",
   "probe.online": "在线 · {ms} ms",
+  "probe.relayOnline": "中转在线",
+  "relay.selectComputer": "请选择这台电脑后连接。",
   "probe.unreachable": "离线：{reason}",
   "ago.now": "刚刚",
   "ago.minutes": "{count}分钟前",

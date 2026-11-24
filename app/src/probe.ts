@@ -24,7 +24,9 @@ export type Probe =
       running: number;
       name: string;
       version: string;
+      cwd?: string;
     }
+  | { state: "relay-online" }
   | { state: "unreachable"; reason: Reason };
 
 /** A state dot's tone: working, not working, or not known yet. */
@@ -146,6 +148,7 @@ export async function probeMachine(
       running: sessions.filter((session) => session?.status === "streaming").length,
       name: hello.name,
       version: hello.version,
+      ...(machine.relay?.account !== undefined && "cwd" in hello && typeof hello.cwd === "string" ? { cwd: hello.cwd } : {}),
     };
   } catch (cause) {
     return { state: "unreachable", reason: cause instanceof ProbeFailure ? cause.reason : "network" };
@@ -182,7 +185,7 @@ export function agoText(time: number, now: number): string {
 /** @returns the dot of a probe; undefined is a machine not probed yet. */
 export function dotOf(probe: Probe | undefined): Dot {
   if (probe === undefined) return "checking";
-  return probe.state === "online" ? "online" : "down";
+  return probe.state === "unreachable" ? "down" : "online";
 }
 
 function sessionsText(probe: Extract<Probe, { state: "online" }>): string {
@@ -205,6 +208,7 @@ export function summaryOf(
 ): { dot: Dot; text: string } {
   if (probe === undefined) return { dot: "checking", text: t("probe.checking") };
   if (probe.state === "online") return { dot: "online", text: `${linkName(machine)} · ${sessionsText(probe)}` };
+  if (probe.state === "relay-online") return { dot: "online", text: t("probe.relayOnline") };
   const reason = reasonText(probe.reason);
   return {
     dot: "down",
@@ -227,5 +231,6 @@ export function linkName(machine: Pick<Machine, "url" | "relay"> | undefined): s
 export function linkText(probe: Probe | undefined): string {
   if (probe === undefined) return t("probe.checking");
   if (probe.state === "online") return t("probe.online", { ms: probe.latencyMs });
+  if (probe.state === "relay-online") return t("probe.relayOnline");
   return t("probe.unreachable", { reason: reasonText(probe.reason) });
 }

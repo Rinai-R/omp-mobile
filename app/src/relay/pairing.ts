@@ -256,6 +256,14 @@ export async function cancelPairing(serverUrl: string, session: PairingSession, 
  * which registers this phone as a client device and returns its device token
  * pair. The password is not kept after this call.
  */
+export async function authenticateRelayAccount(serverUrl: string, email: string, password: string) {
+  return parse(
+    loginSchema,
+    await post(serverUrl, "/api/v1/auth/login", JSON.stringify({ email: email.trim(), password })),
+    "login answer",
+  );
+}
+
 export async function loginWithAccount(
   serverUrl: string,
   email: string,
@@ -263,11 +271,15 @@ export async function loginWithAccount(
   phone: PhoneIdentity,
   clientVersion: string,
 ): Promise<{ account: string; tokens: PairingTokens }> {
-  const login = parse(
-    loginSchema,
-    await post(serverUrl, "/api/v1/auth/login", JSON.stringify({ email: email.trim(), password })),
-    "login answer",
-  );
+  return registerAccountPhone(serverUrl, await authenticateRelayAccount(serverUrl, email, password), phone, clientVersion);
+}
+
+export async function registerAccountPhone(
+  serverUrl: string,
+  login: { account: string; token: string },
+  phone: PhoneIdentity,
+  clientVersion: string,
+): Promise<{ account: string; tokens: PairingTokens }> {
   const registered = parse(
     registerSchema,
     await post(serverUrl, "/api/v1/devices/register", JSON.stringify({
