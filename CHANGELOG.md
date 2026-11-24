@@ -4,6 +4,18 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+OMP Mobile can now update itself from its GitHub releases (thanks @tingQian).
+
+- Settings checks once a day, and on demand, for a newer release; a newer version offers its APK, downloaded in the app and checked against the SHA-256 GitHub publishes before Android's installer sees it. Release history is one tap away.
+- Android asks once for permission to install updates from OMP Mobile; the system installer still confirms every install and checks the signature.
+
+### 中文
+
+OMP Mobile 现在可以从 GitHub 发布页更新自己（感谢 @tingQian）。
+
+- 设置页每天自动检查一次，也可以手动检查；有新版本时提示下载 APK，在应用内下载，并用 GitHub 公布的 SHA-256 校验后才交给 Android 安装器。发布记录一键打开。
+- Android 会询问一次"允许 OMP Mobile 安装应用"；每次安装仍由系统安装器确认并校验签名。
+
 ## v0.8.2
 
 - Swiping on a command's output no longer scrolls the chat the wrong way. The output was a small box that scrolled on its own; inside the chat it passed the swipe on reversed. It now shows the last 12 lines, with the whole output one tap away.
