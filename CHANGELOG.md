@@ -4,6 +4,22 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.5
+
+Self-hosted relays can sign in with an account, and the phone adds the account's computers without pairing codes (thanks @tingQian).
+
+- On the computer, start with `omp-mobile --relay <url>`, then sign in with `omp-mobile relay login <email>` or `/mobile login` in omp; the password prompt is hidden and the password is not stored. `omp-mobile relay logout` / `/mobile logout` sign out, also when the relay cannot be reached.
+- On the phone, **+** on Computers opens a menu: scan to pair, connect with a token, or sign in with an account. An account sign-in lists its computers (ones already added are dimmed) and adds the one you pick; a saved account adds more computers later without the password again. Anonymous pairing works as before.
+- The launch screen follows the app's appearance setting. With the app set to dark on a phone in light mode (or the other way round), it used to open on the phone's scheme and then switch, a bright flash on every start; Android now keeps the app's choice and draws the launch screen in it (Android 12 and later).
+
+### 中文
+
+自建中继服务器支持账号登录，手机可以直接添加账号下的电脑，不用配对码（感谢 @tingQian）。
+
+- 电脑上用 `omp-mobile --relay <url>` 启动，再用 `omp-mobile relay login <email>` 或在 omp 里用 `/mobile login` 登录；输入密码时不显示，密码也不保存。`omp-mobile relay logout` / `/mobile logout` 退出登录，中继连不上时也能退出。
+- 手机「电脑」页的 **+** 改为菜单：扫码配对、Token 连接、账号密码。账号登录后列出它名下的电脑（已添加的显示为灰色），选一台添加；保存过的账号以后添加别的电脑不用再输密码。匿名配对不变。
+- 启动画面跟随应用里的外观设置。以前手机是浅色、应用设为深色（或反过来）时，启动先按手机配色显示再切换，每次打开都闪一下亮色；现在 Android 会记住应用的选择，启动画面直接用这套配色（Android 12 及以上）。
+
 ## v0.8.4
 
 Updates open in their own sheet, with what changed in every version the phone skipped.
