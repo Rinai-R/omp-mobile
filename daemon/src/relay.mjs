@@ -222,6 +222,17 @@ export function createTunnelRouter(target, send) {
 }
 
 /**
+ * The account stored credentials sign in as: its name after a password login,
+ * "" after joining with a phone's code (the relay does not say which account),
+ * undefined for anonymous pairing, which has no login to end.
+ */
+function accountOf(stored) {
+  if (stored?.authorizationMethod === "account") return stored.account ?? "";
+  if (stored?.authorizationMethod === "host_registration_code") return "";
+  return undefined;
+}
+
+/**
  * This daemon's Host identity, pairing and relay connection on one server.
  * State (identity key, device tokens, pinned phones, a pairing in progress)
  * lives in `dir`, owner-only.
@@ -267,6 +278,17 @@ export class RelayHost {
       this.identity = next;
       return next;
     });
+    this.connect();
+  }
+
+  /**
+   * Join an account with the one-time code a signed-in phone made: the relay
+   * registers this computer under that account and hands back device tokens.
+   * No password is ever entered on this computer.
+   */
+  async loginWithCode(code) {
+    this.options.log("relay info: joining an account with a one-time code");
+    await this.api.authorizeHostWithCode(this.identity, code);
     this.connect();
   }
 
@@ -379,7 +401,7 @@ export class RelayHost {
       online: this.connection?.isOnline() ?? false,
       connected: this.connections?.connectionCount() ?? 0,
       // Only an account login is something `relay logout` can end; anonymous pairing is not.
-      account: stored?.authorizationMethod === "account" ? stored.account : undefined,
+      account: accountOf(stored),
     };
   }
 
@@ -392,7 +414,7 @@ export class RelayHost {
   async storedAccount() {
     if (this.api === undefined || this.identity === undefined) return undefined;
     const stored = await this.api.store.load(this.api.baseUrl, this.identity.deviceId).catch(() => undefined);
-    return stored?.authorizationMethod === "account" ? stored.account : undefined;
+    return accountOf(stored);
   }
 
   /**

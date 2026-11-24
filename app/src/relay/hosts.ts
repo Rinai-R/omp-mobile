@@ -21,6 +21,12 @@ interface ServerCredentials {
   account: string;
   tokens: PairingTokens;
   authorizationMethod?: "account";
+  /**
+   * The account's own token from the last sign-in, kept only to make the code
+   * a new computer joins with; it has no refresh, so a refused one means
+   * signing in again. The device tokens above do not depend on it.
+   */
+  accountToken?: string;
 }
 
 type Store = Record<string, ServerCredentials>;
@@ -59,6 +65,20 @@ export async function saveLogin(serverUrl: string, phone: PhoneIdentity, credent
     current[serverUrl] = { phone, account: credentials.account, tokens: credentials.tokens, authorizationMethod: "account" };
   });
   apis.delete(serverUrl);
+}
+
+/** Keep the account token of a sign-in on `serverUrl` (undefined: forget it, it was refused). */
+export async function saveAccountToken(serverUrl: string, token: string | undefined): Promise<void> {
+  await update((current) => {
+    const entry = current[serverUrl];
+    if (entry === undefined) return;
+    if (token === undefined) delete entry.accountToken;
+    else entry.accountToken = token;
+  });
+}
+
+export async function savedAccountToken(serverUrl: string): Promise<string | undefined> {
+  return (await loadStore())[serverUrl]?.accountToken;
 }
 
 export async function savedRelayAccount(serverUrl: string): Promise<string | undefined> {

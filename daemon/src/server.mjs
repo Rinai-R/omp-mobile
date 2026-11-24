@@ -24,7 +24,7 @@ import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
 import { SessionSearchIndex, matchOf, rankRecords, searchTokens, sessionFilesUnder } from "./session-search.mjs";
 import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
-import { DEFAULT_RELAY, runRelayCli } from "./relay-control.mjs";
+import { DEFAULT_RELAY, hostCode, runRelayCli } from "./relay-control.mjs";
 import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
 import { runRestartCli } from "./restart.mjs";
 
@@ -323,7 +323,7 @@ user (403 otherwise), before the token is checked. Loopback hosts skip admission
   --no-qr                Do not print the pairing QR code at startup
   --relay [url]          Also serve paired phones through a ds-harness-remote relay (default ${DEFAULT_RELAY}),
                          end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay.
-                         A relay that needs an account: \`omp-mobile relay login <email>\` (or /mobile login)
+                         Or join the phone's account: \`omp-mobile relay login <code>\` (or /mobile login <code>)
   --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
 
 Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
@@ -333,6 +333,8 @@ Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
 
 Relay commands (talk to the running daemon; same --state-file):
   omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
+  omp-mobile relay login <code> [relay]   Join the account the phone is signed in to, with the code
+                              it shows (Add computer → Add a new computer); turns the relay on if needed
   omp-mobile relay login <email>   Sign in to a self-hosted relay with an account (password is asked
                               for, never in argv); the password is exchanged once for device tokens
   omp-mobile relay logout     Sign out of that account: revoke this computer and drop its tokens
@@ -903,23 +905,54 @@ class Daemon {
     this.tunnelServer = undefined;
     /** @type {RelayHost | undefined} */
     this.relay = undefined;
-    if (options.relay) {
-      // Built here, not in `listen()`: nothing at startup prompts any more, so the
-      // constructor can own it and the diff stays small.
-      this.relay = new RelayHost({
-        serverUrl: options.relay,
-        dir: options.relayDir,
-        name: `omp-mobile on ${hostname().replace(/\.local$/, "")}`,
-        version: VERSION,
-        port: () => this.tunnelServer.address().port,
-        token: this.token,
-        log: (line) => this.log(line),
-      });
-      this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
-      this.tunnelServer.on("upgrade", (req, socket, head) => {
-        socket.on("error", () => socket.destroy());
-        this.handleUpgrade(req, socket, head);
-      });
+    if (options.relay) this.buildRelay(options.relay);
+  }
+
+  /** The relay host and its loopback tunnel listener; `listen()` or `enableRelay()` starts them. */
+  buildRelay(serverUrl) {
+    this.relay = new RelayHost({
+      serverUrl,
+      dir: this.options.relayDir,
+      name: `omp-mobile on ${hostname().replace(/\.local$/, "")}`,
+      version: VERSION,
+      port: () => this.tunnelServer.address().port,
+      token: this.token,
+      log: (line) => this.log(line),
+    });
+    this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
+    this.tunnelServer.on("upgrade", (req, socket, head) => {
+      socket.on("error", () => socket.destroy());
+      this.handleUpgrade(req, socket, head);
+    });
+  }
+
+  async startRelay() {
+    await new Promise((resolveListen) => this.tunnelServer.listen(0, "127.0.0.1", () => resolveListen()));
+    await this.relay.start();
+  }
+
+  /**
+   * Serve through `serverUrl` from now on, without a restart: a daemon started by
+   * plain `/mobile` can still join an account (`/mobile login <code>`). The state
+   * file records it, so `omp-mobile restart` keeps the relay.
+   */
+  async enableRelay(serverUrl) {
+    const wanted = serverUrl.replace(/\/+$/, "");
+    if (this.relay !== undefined) {
+      if (this.relay.serverUrl !== wanted) throw Object.assign(new Error(`the daemon already serves ${this.relay.serverUrl}`), { status: 409 });
+      return;
+    }
+    this.buildRelay(wanted);
+    this.options.relay = wanted;
+    await this.startRelay();
+    try {
+      const state = JSON.parse(readFileSync(this.options.stateFile, "utf8"));
+      if (state.pid === process.pid) {
+        // No relay before this call, so `argv` has no `--relay` to replace.
+        writeState(this.options.stateFile, { ...state, relay: wanted, argv: [...(Array.isArray(state.argv) ? state.argv : []), "--relay", wanted] });
+      }
+    } catch {
+      // No state file (a test, or started by hand elsewhere): nothing to record.
     }
   }
 
@@ -1690,6 +1723,17 @@ class Daemon {
       sendJson(res, 403, { error: "relay control is local only" });
       return;
     }
+    // Turning the relay on is the one call a daemon without it answers.
+    if (url.pathname === "/relay/enable" && req.method === "POST") {
+      const body = await readBody(req);
+      try {
+        await this.enableRelay(typeof body.server === "string" && body.server !== "" ? body.server : DEFAULT_RELAY);
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+      } catch (error) {
+        sendJson(res, typeof error?.status === "number" ? error.status : 502, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return;
+    }
     if (this.relay === undefined) {
       sendJson(res, 409, { error: "the daemon runs without --relay" });
       return;
@@ -1731,6 +1775,17 @@ class Daemon {
       // tokens here, never stored (never in argv, so never in a plist or process list).
       if (url.pathname === "/relay/login" && req.method === "POST") {
         const body = await readBody(req);
+        // A one-time code a signed-in phone made: this computer joins that account, no password here.
+        if (typeof body.code === "string") {
+          const code = hostCode(body.code);
+          if (code === undefined) {
+            sendJson(res, 400, { error: "the code is 8 letters and digits, like K7QM-4XPA" });
+            return;
+          }
+          await this.relay.loginWithCode(code);
+          sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+          return;
+        }
         if (typeof body.account !== "string" || body.account.trim() === "" || typeof body.password !== "string" || body.password === "") {
           sendJson(res, 400, { error: "account and password are required" });
           return;
@@ -1764,10 +1819,7 @@ class Daemon {
 
   async listen() {
     await new Promise((resolveListen) => this.server.listen(this.options.port, this.options.host, () => resolveListen()));
-    if (this.relay !== undefined) {
-      await new Promise((resolveListen) => this.tunnelServer.listen(0, "127.0.0.1", () => resolveListen()));
-      await this.relay.start();
-    }
+    if (this.relay !== undefined) await this.startRelay();
     this.startTimers();
   }
 

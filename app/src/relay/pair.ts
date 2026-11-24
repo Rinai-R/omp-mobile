@@ -10,15 +10,14 @@ import { generateKeyPair } from "@dsh-remote/crypto";
 import appConfig from "../../app.json";
 import { t } from "../i18n/index.ts";
 import type { Hello, Machine, RelayLink } from "../types";
-import { relaySelection, type RelayCandidate } from "./selection";
-
-export { relaySelection, type RelayCandidate };
-import { phoneFor, relayHosts, saveCredentials, saveLogin, savedRelayAccount } from "./hosts";
+import { accountOf } from "./account";
+import { phoneFor, relayHosts, saveAccountToken, saveCredentials, saveLogin, savedRelayAccount } from "./hosts";
 import { PairingError, authenticateRelayAccount, cancelPairing, claimPairing, keyFingerprint, pairingStatus, registerAccountPhone, resolvePairing, type PairingTicket, type PhoneIdentity } from "./pairing";
 import { RemoteServerError, type RemoteHostListing } from "./server";
 import { relayFetch } from "./tunnel";
 
 const POLL_MS = 1_500;
+const JOIN_POLL_MS = 2_500;
 
 /** What the screen shows while the computer has the code to enter. */
 export interface PairingCode {
@@ -103,6 +102,16 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
   };
 }
 
+/** A computer on the account, as the add sheet lists it. */
+export interface RelayCandidate {
+  deviceId: string;
+  name: string;
+  platform: string;
+  online: boolean;
+  /** Already in the phone's list: shown dimmed, not offered again. */
+  added: boolean;
+}
+
 /** What an account sign-in found: the computers to choose among. */
 export interface RelayLoginResult {
   serverUrl: string;
@@ -119,7 +128,20 @@ export interface RelayLoginResult {
  * several the user chooses.
  */
 export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
-  const login = await authenticateRelayAccount(serverUrl, email, password);
+  return signInRelay(serverUrl, await authenticateRelayAccount(serverUrl, email, password), machines);
+}
+
+/** Sign in with the account token a browser sign-in (GitHub, Google, ...) handed over. */
+export async function loginRelayWithToken(serverUrl: string, token: string, machines: readonly Machine[]): Promise<RelayLoginResult> {
+  return signInRelay(serverUrl, { account: await accountOf(serverUrl, token), token }, machines);
+}
+
+/**
+ * This phone on the account `login` names: its device registered (or the saved
+ * one reused), the account token kept for making computer codes, and the
+ * account's computers listed.
+ */
+async function signInRelay(serverUrl: string, login: { account: string; token: string }, machines: readonly Machine[]): Promise<RelayLoginResult> {
   let hosts: RemoteHostListing[] | undefined;
   if (await savedRelayAccount(serverUrl) === login.account) {
     try {
@@ -135,7 +157,35 @@ export async function loginRelay(serverUrl: string, email: string, password: str
     await saveLogin(serverUrl, phone, await registerAccountPhone(serverUrl, login, phone, appConfig.expo.version));
     hosts = await relayHosts(serverUrl);
   }
+  await saveAccountToken(serverUrl, login.token);
   return accountComputers(serverUrl, login.account, hosts, machines);
+}
+
+/**
+ * The computer that joined the account after a code was made: polls the
+ * account's list until a computer not in `known` shows up. Undefined once
+ * `isCancelled` says so.
+ */
+export async function waitForNewComputer(
+  serverUrl: string,
+  account: string,
+  known: ReadonlySet<string>,
+  machines: readonly Machine[],
+  isCancelled: () => boolean,
+  pollMs = JOIN_POLL_MS,
+): Promise<{ result: RelayLoginResult; deviceId: string } | undefined> {
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    if (isCancelled()) return undefined;
+    // A dropped poll is asked again; a refused one (signed out) ends the wait.
+    const result = await resumeRelay(serverUrl, account, machines).catch((error: unknown) => {
+      if (error instanceof RemoteServerError && (error.status === 401 || error.status === 403)) throw error;
+      return undefined;
+    });
+    if (isCancelled()) return undefined;
+    const joined = result?.candidates.find((item) => !known.has(item.deviceId) && !item.added);
+    if (result !== undefined && joined !== undefined) return { result, deviceId: joined.deviceId };
+  }
 }
 
 /** Discover more computers using the phone's saved, refreshable device credentials. */
@@ -143,8 +193,11 @@ export async function resumeRelay(serverUrl: string, account: string, machines: 
   return accountComputers(serverUrl, account, await relayHosts(serverUrl), machines);
 }
 
+/**
+ * The account's computers as the add sheet lists them. An account with none is
+ * an answer, not an error: the sheet then offers to add one with a code.
+ */
 function accountComputers(serverUrl: string, account: string, hosts: RemoteHostListing[], machines: readonly Machine[]): RelayLoginResult {
-  if (hosts.length === 0) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
   const added = new Set(machines.map((item) => item.url));
   return {
     serverUrl,

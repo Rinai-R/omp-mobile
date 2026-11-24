@@ -1,32 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Modal, Pressable, RefreshControl, Text, View } from "react-native";
+import { RefreshControl, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
-import { pairMachine } from "../api";
-import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, LockGlyph, AgentsGlyph, SettingsGlyph } from "../components/icons";
+import { AddComputerSheet, type AddStart } from "../components/AddComputerSheet";
+import { ComputerGlyph, MoreGlyph, PlusGlyph, SettingsGlyph } from "../components/icons";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MachineSheet } from "../components/MachineSheet";
-import {
-  Button,
-  ConfirmSheet,
-  EmptyState,
-  Field,
-  Group,
-  IconButton,
-  Row,
-  Sheet,
-  StateDot,
-} from "../components/ui";
-import { isPairingLink, normalizeUrl, pairingMessage, readPairing } from "../pairing";
-import { PairSuccess } from "../components/PairSuccess";
-import { RelayPairingCard, useRelayPairing } from "../components/RelayPairing";
-import { parsePairingTicket } from "../relay/pairing";
-import { savedAccountRelays } from "../relay/hosts";
-import { RemoteServerError } from "../relay/server";
-import { loginRelay, resumeRelay, pickRelay, relaySelection, type RelayLoginResult } from "../relay/pair";
+import { Button, ConfirmSheet, EmptyState, Group, IconButton, Row, StateDot } from "../components/ui";
 import { summaryOf, type Probe } from "../probe";
-import { SANS, MONO, useColors, useStyles, type Palette } from "../theme";
+import { MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
@@ -82,204 +65,27 @@ export function MachinesScreen({
   const insets = useSafeAreaInsets();
   const page = usePageScroll(under);
   const top = usePageTop();
-  const [addMenu, setAddMenu] = useState(false);
-  const [accountNew, setAccountNew] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [url, setUrl] = useState("");
-  const [token, setToken] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  /** The sheet was filled from a pairing link: one tap on Connect adds it. */
-  const [fromLink, setFromLink] = useState(false);
-  /** Account login for a self-hosted relay: fields shown, credentials typed. */
-  const [relayLogin, setRelayLogin] = useState(false);
-  const [account, setAccount] = useState("");
-  const [password, setPassword] = useState("");
-  /**
-   * The account's computers, when the sign-in found more than one to add: the
-   * sheet lists them and waits for a choice instead of picking silently.
-   */
-  const [relayChoice, setRelayChoice] = useState<RelayLoginResult | null>(null);
-  const [savedRelays, setSavedRelays] = useState<{ serverUrl: string; account: string }[]>([]);
-  useEffect(() => {
-    if (!adding) return;
-    let cancelled = false;
-    void savedAccountRelays(machines).then((items) => {
-      if (!cancelled) setSavedRelays(items);
-    }).catch((cause: unknown) => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-    });
-    return () => { cancelled = true; };
-  }, [adding, machines]);
+  /** How the Add computer sheet opened; null while it is closed. */
+  const [adding, setAdding] = useState<AddStart | null>(null);
+  const lastStart = useRef<AddStart>({ kind: "home" });
+  if (adding !== null) lastStart.current = adding;
+  const openAdd = useCallback(() => setAdding({ kind: "home" }), []);
+  const closeAdd = useCallback(() => setAdding(null), []);
 
   /** The machine whose sheet is open. */
   const [sheet, setSheet] = useState<Machine | null>(null);
   const closeSheet = useCallback(() => setSheet(null), []);
   /** The machine whose removal is being confirmed. */
   const [removing, setRemoving] = useState<Machine | null>(null);
-  /**
-   * A computer just paired: the sheet celebrates it, then closes and hands it to
-   * `onAdd` once. It stays shown while the sheet slides away and is cleared on the next open.
-   */
-  const [paired, setPaired] = useState<Machine | null>(null);
-  const pending = useRef<Machine | null>(null);
-  const celebrate = useCallback((machine: Machine) => {
-    pending.current = machine;
-    setPaired(machine);
-  }, []);
-  const offerComputers = useCallback(async (found: RelayLoginResult) => {
-    const { pick, multiple } = relaySelection(found.candidates);
-    if (pick === undefined && !multiple) throw new Error(t("api.duplicate"));
-    if (pick !== undefined) celebrate(await pickRelay(found, pick.deviceId, machines));
-    else setRelayChoice(found);
-  }, [machines, celebrate]);
-
-  const handOn = useCallback(() => {
-    const machine = pending.current;
-    if (machine === null) return;
-    pending.current = null;
-    setAdding(false);
-    onAdd(machine);
-  }, [onAdd]);
-  /** A relay pairing code pasted into the address: paired here, then the sheet closes. */
-  const relay = useRelayPairing(
-    machines,
-    useCallback(
-      (machine: Machine) => {
-        setUrl("");
-        celebrate(machine);
-      },
-      [celebrate],
-    ),
-  );
-  const ticket = parsePairingTicket(url.trim());
-
-  const close = useCallback(() => {
-    // Dismissed mid-celebration: the pairing still counts.
-    if (pending.current !== null) return handOn();
-    relay.cancel();
-    setAdding(false);
-    setError(null);
-    setBusy(false);
-    setRelayLogin(false);
-    setAccountNew(false);
-    setAccount("");
-    setPassword("");
-    setRelayChoice(null);
-    // A link's token is not left behind in a sheet the user dismissed.
-    if (fromLink) {
-      setUrl("");
-      setToken("");
-      setFromLink(false);
-    }
-  }, [fromLink, handOn, relay.cancel]);
-
-  // A pairing link or the scanner's "Enter address" opens the sheet.
+  // A pairing link opens the direct address filled in; the scanner's "Enter address" opens it empty.
   useEffect(() => {
     if (addRequest === null) return;
     onAddRequestHandled();
-    setBusy(false);
-    setRelayLogin(false);
-    setAccountNew(false);
-    setPaired(null);
-    setAdding(true);
-    if (addRequest.link === null) {
-      setError(null);
-      return;
-    }
-    const pairing = readPairing(addRequest.link);
-    if (pairing.ok) {
-      setUrl(pairing.url);
-      setToken(pairing.token);
-      setFromLink(true);
-      setError(null);
-    } else {
-      setUrl(addRequest.link);
-      setToken("");
-      setFromLink(false);
-      setError(pairingMessage(pairing.problem, pairing.host));
-    }
+    setAdding({ kind: "direct", link: addRequest.link });
   }, [addRequest, onAddRequestHandled]);
-
-  const connect = useCallback(async () => {
-    if (ticket !== undefined) {
-      setError(null);
-      relay.start(ticket);
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      if (relayLogin) {
-        const base = normalizeUrl(url);
-        const found = await loginRelay(base, account, password, machines);
-        await offerComputers(found);
-        setUrl("");
-        setAccount("");
-        setPassword("");
-        setRelayLogin(false);
-        return;
-      }
-      let base: string;
-      let secret: string;
-      if (isPairingLink(url)) {
-        const pairing = readPairing(url);
-        if (!pairing.ok) throw new Error(pairingMessage(pairing.problem, pairing.host));
-        base = pairing.url;
-        secret = pairing.token;
-      } else {
-        base = normalizeUrl(url);
-        secret = token;
-      }
-      celebrate(await pairMachine(base, secret, machines));
-      setUrl("");
-      setToken("");
-      setFromLink(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  }, [account, celebrate, machines, offerComputers, password, relay.start, relayLogin, ticket, token, url]);
-
-  const resumeAccount = async (saved: { serverUrl: string; account: string }) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await offerComputers(await resumeRelay(saved.serverUrl, saved.account, machines));
-    } catch (cause) {
-      if (cause instanceof RemoteServerError && (cause.status === 401 || cause.status === 403)) {
-        setUrl(saved.serverUrl);
-        setAccount(saved.account);
-        setPassword("");
-        setRelayLogin(true);
-        setAccountNew(true);
-        setError(t("machines.addSheet.signInAgain"));
-      } else {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
-  const openAdd = (accountLogin: boolean) => {
-    setAddMenu(false);
-    setPaired(null);
-    setRelayChoice(null);
-    setError(null);
-    setBusy(false);
-    setUrl("");
-    setToken("");
-    setAccount("");
-    setPassword("");
-    setFromLink(false);
-    setRelayLogin(accountLogin);
-    setAccountNew(false);
-    setAdding(true);
-  };
   // "seen 5 min ago" is recomputed on each render; each probe round re-renders the list.
   const now = Date.now();
 
@@ -312,7 +118,7 @@ export function MachinesScreen({
             body={t("machines.empty.body")}
             action={
               <View style={styles.emptyActions}>
-                <Button label={t("machines.add")} onPress={() => setAddMenu(true)} />
+                <Button label={t("machines.add")} onPress={openAdd} />
               </View>
             }
           />
@@ -369,7 +175,7 @@ export function MachinesScreen({
         right={
           <>
             {machines.length > 0 ? (
-              <IconButton onPress={() => setAddMenu(true)} label={t("machines.add")}>
+              <IconButton onPress={openAdd} label={t("machines.add")}>
                 <PlusGlyph size={24} color={colors.tint} />
               </IconButton>
             ) : null}
@@ -381,28 +187,6 @@ export function MachinesScreen({
           </>
         }
       />
-
-      <Modal visible={addMenu} transparent animationType="fade" onRequestClose={() => setAddMenu(false)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setAddMenu(false)} accessibilityLabel={t("common.close")}>
-          <View style={[styles.addMenu, { top: insets.top + 48 }]}>
-            {[
-              { label: t("machines.scan"), icon: QrGlyph, action: () => { setAddMenu(false); onScan(); } },
-              { label: t("machines.addMenu.token"), icon: LockGlyph, action: () => openAdd(false) },
-              { label: t("machines.addMenu.account"), icon: AgentsGlyph, action: () => openAdd(true) },
-            ].map(({ label, icon: Icon, action }) => (
-              <Pressable
-                key={label}
-                accessibilityRole="button"
-                onPress={action}
-                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
-              >
-                <Icon size={19} color={colors.fgFaint} />
-                <Text style={styles.menuLabel}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </Pressable>
-      </Modal>
 
       <MachineSheet
         machine={sheet}
@@ -428,147 +212,23 @@ export function MachinesScreen({
         onClose={() => setRemoving(null)}
       />
 
-      <Sheet visible={adding} title={t(relayLogin ? "machines.addMenu.account" : "machines.addSheet.title")} onClose={close}>
-        {paired !== null ? (
-          <PairSuccess name={displayName(paired)} c={colors} onDone={handOn} />
-        ) : relay.busy ? (
-          <RelayPairingCard code={relay.code} c={colors} onCancel={relay.cancel} />
-        ) : relayChoice !== null ? (
-          <RelayChoice
-            result={relayChoice}
-            machines={machines}
-            onPick={(deviceId) => {
-              const choice = relayChoice;
-              setRelayChoice(null);
-              setBusy(true);
-              setError(null);
-              void pickRelay(choice, deviceId, machines)
-                .then((machine) => celebrate(machine))
-                .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
-                .finally(() => setBusy(false));
-            }}
-          />
-        ) : relayLogin && !accountNew ? (
-          <>
-            {savedRelays.length > 0 ? <Text style={styles.detail}>{t("machines.addSheet.history")}</Text> : null}
-            {savedRelays.map((saved) => (
-              <Button
-                key={saved.serverUrl}
-                label={`${saved.serverUrl} · ${saved.account}`}
-                kind="plain"
-                disabled={busy}
-                onPress={() => void resumeAccount(saved)}
-              />
-            ))}
-            <Button label={t("machines.addSheet.newAccount")} kind="plain" disabled={busy} onPress={() => {
-              setError(null);
-              setAccountNew(true);
-            }} />
-            {busy ? <Text style={styles.detail}>{t("probe.checking")}</Text> : null}
-            {error !== null ? <Text style={styles.error}>{error}</Text> : null}
-          </>
-        ) : (
-          <>
-            <Field
-              label={t("machines.addSheet.address")}
-              value={url}
-              onChangeText={setUrl}
-              placeholder={t("machines.addSheet.addressPlaceholder")}
-              autoFocus={!fromLink}
-            />
-            {relayLogin ? (
-              <>
-                <Field label={t("machines.addSheet.account")} value={account} onChangeText={setAccount} keyboardType="email-address" />
-                <Field label={t("machines.addSheet.password")} value={password} onChangeText={setPassword} secure />
-              </>
-            ) : ticket === undefined ? (
-              <Field label={t("machines.addSheet.token")} value={token} onChangeText={setToken} secure />
-            ) : null}
-            {(relay.error ?? error) !== null ? <Text style={styles.error}>{relay.error ?? error}</Text> : null}
-            <Button
-              label={t("machines.addSheet.connect")}
-              onPress={() => void connect()}
-              busy={busy}
-              disabled={
-                url.trim() === "" ||
-                (relayLogin && (account.trim() === "" || password === "")) ||
-                (!relayLogin && token.trim() === "" && !isPairingLink(url) && ticket === undefined)
-              }
-            />
-          </>
-        )}
-      </Sheet>
+      <AddComputerSheet
+        visible={adding !== null}
+        start={lastStart.current}
+        machines={machines}
+        onAdd={onAdd}
+        onScan={() => {
+          setAdding(null);
+          onScan();
+        }}
+        onClose={closeAdd}
+      />
     </View>
-  );
-}
-
-/**
- * The computers an account sign-in found. Every one is listed — the added ones
- * dimmed — so the sheet shows what the account has and asks which to connect to
- * instead of silently taking the first.
- */
-function RelayChoice({
-  result,
-  machines,
-  onPick,
-}: {
-  result: RelayLoginResult;
-  machines: readonly Machine[];
-  onPick: (deviceId: string) => void;
-}): ReactNode {
-  const colors = useColors();
-  const styles = useStyles(createStyles);
-  const open = result.candidates.filter((item) => !item.added);
-  return (
-    <>
-      <Text style={styles.choiceHint}>{t("machines.addSheet.choose", { count: open.length })}</Text>
-      <Group>
-        {result.candidates.map((item, index) => (
-          <Row
-            key={item.deviceId}
-            title={item.name}
-            dim={item.added}
-            detail={
-              <View style={styles.state}>
-                <StateDot dot={item.online ? "online" : "down"} />
-                <Text style={styles.detail} numberOfLines={1}>
-                  {item.added ? t("machines.addSheet.alreadyAdded") : item.platform}
-                </Text>
-              </View>
-            }
-            leading={<ComputerGlyph size={17} color={item.added ? colors.fgFaint : colors.tileFg} />}
-            chevron={!item.added}
-            last={index === result.candidates.length - 1}
-            onPress={item.added ? undefined : () => onPick(item.deviceId)}
-            accessibilityLabel={item.name}
-          />
-        ))}
-      </Group>
-    </>
   );
 }
 
 function createStyles(c: Palette) {
   return {
-    menuBackdrop: { flex: 1 },
-    addMenu: {
-      position: "absolute",
-      right: 12,
-      width: 208,
-      padding: 6,
-      borderRadius: 14,
-      borderWidth: 0.5,
-      borderColor: c.borderStrong,
-      backgroundColor: c.overlay,
-      elevation: 5,
-      shadowColor: "#000",
-      shadowOpacity: 0.1,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-    },
-    menuItem: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 46, paddingHorizontal: 12, borderRadius: 9 },
-    menuItemPressed: { backgroundColor: c.hover },
-    menuLabel: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fg, fontWeight: "500" },
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16 },
     // The large title keeps the home's 20 px inset inside this 16 px-padded list.
@@ -576,8 +236,6 @@ function createStyles(c: Palette) {
     emptyContent: { flexGrow: 1 },
     emptyActions: { gap: 10 },
     detail: { flexShrink: 1, fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.fgMuted },
-    choiceHint: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.fgMuted, marginBottom: 10, marginHorizontal: 2 },
     state: { flexDirection: "row", alignItems: "center", gap: 5 },
-    error: { fontFamily: MONO, fontSize: 12, lineHeight: 17, color: c.err, marginHorizontal: 2 },
   } as const;
 }
