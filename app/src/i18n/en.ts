@@ -3,7 +3,7 @@
  * the same keys (typed against this one, and checked by test/i18n.test.mjs).
  *
  * A message is a string with `{name}` placeholders, or `{ one, other }` for a
- * count (`{count}`). Product terms (OMP, omp-mobile, Tailscale, daemon, token)
+ * count (`{count}`). Product terms (oh-my-pi, omp, OMP Mobile, omp-mobile, Tailscale, daemon, token)
  * are written as they are.
  */
 export type Message = string | { readonly one: string; readonly other: string };
@@ -22,7 +22,7 @@ export const en = {
   "common.open": "Open",
   "common.remove": "Remove",
   "common.running": "{count} running",
-  "brand.working": "OMP is working",
+  "brand.working": "oh-my-pi is working",
 
   // Settings
   "settings.title": "Settings",
@@ -38,7 +38,7 @@ export const en = {
   "settings.appearance.system": "Same as phone",
   "settings.appearance.dark": "Dark",
   "settings.appearance.light": "Light",
-  "settings.about.app": "OMP mobile",
+  "settings.about.app": "OMP Mobile",
   "settings.updates.releases": "Release history",
   "settings.updates.openFailed": "Could not open the releases page.",
   "settings.updates.check": "Check for updates",
@@ -72,7 +72,7 @@ export const en = {
   "home.unreachable": "Unreachable · {reason}",
   "home.machineA11y": "{name}, {detail}. Switch computer",
   "home.close.title": "Close this session?",
-  "home.close.body": "Its OMP process stops on the computer. The session file stays.",
+  "home.close.body": "Its omp process stops on the computer. The session file stays.",
   "home.close.action": "Close session",
   "home.close.failed": "Could not close it: {error}",
   "fork.session": "Fork session",
@@ -98,14 +98,14 @@ export const en = {
   "home.tab.sessions": "Sessions",
   "home.tab.computers": "Computers",
   "home.widget.title": "Needs your approval",
-  "home.widget.question": "OMP is asking",
+  "home.widget.question": "oh-my-pi is asking",
   "home.widget.view": "View",
   "home.widget.allow": "Allow",
   "home.widget.failed": "Could not answer: {error}",
 
   // Chat
   "chat.sending": "Sending…",
-  "chat.steerNeedsUpdate": "OMP is still working, and the omp-mobile on your computer is too old to pass a message to it mid-run. Update it (omp plugin upgrade omp-mobile, or npm i -g omp-mobile), or send again when it finishes.",
+  "chat.steerNeedsUpdate": "oh-my-pi is still working, and the omp-mobile on your computer is too old to pass a message to it mid-run. Update it (omp plugin upgrade omp-mobile, or npm i -g omp-mobile), or send again when it finishes.",
   "chat.failure.gone.title": "This session is gone",
   "chat.failure.terminal.title": "Open in a terminal",
   "chat.failure.terminal.body": "Exit omp there, then try again.",
@@ -118,8 +118,8 @@ export const en = {
   "chat.takeover.confirmBusy": "The terminal's turn stops, omp closes there, and the session continues here.",
   "chat.failure.fileGone.title": "The session file is gone",
   "chat.failure.other.title": "This session didn't open",
-  "chat.stopped": "OMP stopped: {reason}",
-  "chat.protocolError": "The computer sent an unreadable OMP frame.",
+  "chat.stopped": "oh-my-pi stopped: {reason}",
+  "chat.protocolError": "The computer sent a message this app could not read.",
   "chat.notConnected": "Not connected to the computer.",
   "chat.photosNeedUpdate": "Update omp-mobile on the computer to send photos (omp plugin install omp-mobile).",
   "chat.defaultModel": "default model",
@@ -138,7 +138,7 @@ export const en = {
   "chat.offline": "out of reach",
   "chat.offlineSaved": "Can't reach {name}. This is the saved copy; it updates when the computer is back.",
   "chat.offlineEmpty": "Can't reach {name}. Nothing is saved for this chat yet; it opens when the computer is back.",
-  "chat.emptyPrompt": "What should OMP do?",
+  "chat.emptyPrompt": "What should oh-my-pi do?",
   "chat.jumpA11y": "Jump to the newest message",
   "chat.unseen": "{count} new",
 
@@ -147,7 +147,7 @@ export const en = {
   "composer.camera": "Take a photo",
   "composer.removePhoto": "Remove photo",
   "composer.attach": "Attach photos",
-  "composer.placeholder": "Message OMP",
+  "composer.placeholder": "Message oh-my-pi",
   "composer.placeholder.steer": "Steer the current turn…",
   "composer.placeholder.closed": "This session is closed",
   "composer.placeholder.offline": "Can't send until the computer is back",
@@ -198,14 +198,14 @@ export const en = {
 
   // In-app banner and system notifications
   "notify.channel.live": "Live activity",
-  "notify.channel.live.detail": "What OMP is running or waiting on, in the status bar and on the lock screen",
+  "notify.channel.live.detail": "What oh-my-pi is running or waiting on, in the status bar and on the lock screen",
   "live.approve": "Approve",
   "live.answer": "Answer",
   "live.working": "Working",
   "live.more": "{name} · {count} more",
   "settings.live.title": "Live activity",
-  "settings.live.on": "Shown in the status bar and on the lock screen while OMP runs",
-  "settings.live.off": "Allow Live Updates to see OMP in the status bar and on the lock screen",
+  "settings.live.on": "Shown in the status bar and on the lock screen while oh-my-pi runs",
+  "settings.live.off": "Allow Live Updates to see oh-my-pi in the status bar and on the lock screen",
   "settings.live.allow": "Allow Live Updates",
   "settings.live.unsupported": "Needs Android 16; until then it shows as an ongoing notification",
   "attention.approval": "Approval needed",
@@ -215,11 +215,11 @@ export const en = {
   "attention.openA11y": "{headline}: {title}. Open",
   "attention.dismiss": "Dismiss",
   "notify.channel.attention": "Approvals & questions",
-  "notify.channel.attention.detail": "An OMP session is waiting for you",
+  "notify.channel.attention.detail": "A session is waiting for you",
   "notify.channel.turns": "Finished turns",
-  "notify.channel.turns.detail": "An OMP session finished or failed",
+  "notify.channel.turns.detail": "A session finished or failed",
   "notify.channel.service": "Background connection",
-  "notify.channel.service.detail": "Keeps OMP connected to your computers",
+  "notify.channel.service.detail": "Keeps OMP Mobile connected to your computers",
   "notify.service.title": { one: "Watching {count} machine", other: "Watching {count} machines" },
   "notify.service.connected": "Connected",
   "notify.service.partial": "Connected to {connected} of {total}",
@@ -246,7 +246,7 @@ export const en = {
   "machine.saveName": "Save name",
   "machine.host": "Host",
   "machine.address": "Address",
-  "machine.daemon": "OMP daemon",
+  "machine.daemon": "omp-mobile",
   "switcher.title": "Computers",
   "switcher.hereA11y": "{name}, {summary}, current",
   "switcher.manage": "Manage computers",
@@ -266,7 +266,7 @@ export const en = {
   "ago.minutes": "{count} min ago",
   "ago.hours": "{count} h ago",
   "ago.days": "{count} d ago",
-  "pairing.notPairing": "That is not an OMP pairing code. Scan the code the omp-mobile daemon prints.",
+  "pairing.notPairing": "That is not a pairing code. Scan the one the omp-mobile daemon prints.",
   "pairing.badAddress": "This pairing code has no valid daemon address.",
   "pairing.notTailnet": "{host} is not on your tailnet. Start the daemon with --host set to the computer's Tailscale IP.",
   "pairing.thisAddress": "This address",
@@ -297,7 +297,7 @@ export const en = {
   "relay.notOmp": "That computer does not run omp-mobile. Pair with the code `/mobile relay` (or `omp-mobile relay pair`) shows.",
   "relay.renewRefused": "The server refused to renew this phone's sign-in. Pair it again.",
   "attachments.unreadable": "The photo could not be read.",
-  "attachments.cameraOff": "Camera access is off for OMP. Turn it on in the system settings to take a photo.",
+  "attachments.cameraOff": "Camera access is off for OMP Mobile. Turn it on in the system settings to take a photo.",
 
   // Session lists
   "group.waiting": "Needs you",

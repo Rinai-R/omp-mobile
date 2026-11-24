@@ -46,7 +46,7 @@ object Notifier {
         text(context, "notify.channel.attention", "Approvals & questions"),
         NotificationManager.IMPORTANCE_HIGH,
       ).apply {
-        description = text(context, "notify.channel.attention.detail", "An OMP session is waiting for you")
+        description = text(context, "notify.channel.attention.detail", "A session is waiting for you")
       },
     )
     manager.createNotificationChannel(
@@ -55,7 +55,7 @@ object Notifier {
         text(context, "notify.channel.turns", "Finished turns"),
         NotificationManager.IMPORTANCE_DEFAULT,
       ).apply {
-        description = text(context, "notify.channel.turns.detail", "An OMP session finished or failed")
+        description = text(context, "notify.channel.turns.detail", "A session finished or failed")
       },
     )
     manager.createNotificationChannel(
@@ -64,14 +64,14 @@ object Notifier {
         text(context, "notify.channel.service", "Background connection"),
         NotificationManager.IMPORTANCE_LOW,
       ).apply {
-        description = text(context, "notify.channel.service.detail", "Keeps OMP connected to your computers")
+        description = text(context, "notify.channel.service.detail", "Keeps OMP Mobile connected to your computers")
         setShowBadge(false)
       },
     )
     LiveActivity.ensureChannel(
       context,
       text(context, "notify.channel.live", "Live activity"),
-      text(context, "notify.channel.live.detail", "What OMP is running or waiting on, in the status bar and on the lock screen"),
+      text(context, "notify.channel.live.detail", "What oh-my-pi is running or waiting on, in the status bar and on the lock screen"),
     )
   }
 
