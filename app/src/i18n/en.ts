@@ -44,8 +44,6 @@ export const en = {
   "settings.updates.available": "OMP Mobile {version} is available",
   "settings.updates.description": "Download the APK in OMP Mobile and install it with Android.",
   "settings.updates.download": "Download update",
-  "settings.updates.browser": "Download in browser",
-  "settings.updates.browserFailed": "Could not open the download link.",
   "settings.updates.downloadStarted": "Downloading update…",
   "settings.updates.downloading": "Downloading update · {percent}%",
   "settings.updates.downloadFailed": "Could not download or verify the APK. Try again.",
