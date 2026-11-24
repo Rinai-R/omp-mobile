@@ -117,7 +117,7 @@ export async function runRelayCli(args) {
       // there was no account login to end.
       const done = await relayCall(state, "POST", "/relay/logout");
       console.log(`Signed out of ${done.account ?? "the relay account"}.`);
-      console.log("Sign in again with --relay-login on the next start, or pair a phone with: omp-mobile relay pair");
+      console.log("Sign in again with: omp-mobile relay login <email>, or pair a phone with: omp-mobile relay pair");
       process.exit(0);
     }
     if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, login, logout, status, revoke)`);

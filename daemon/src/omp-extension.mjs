@@ -392,7 +392,7 @@ export default function ompMobile(pi) {
           // No `GET /relay` first: it fetches the phone list and fails whenever the
           // relay is unreachable, which is exactly when the tokens must still go.
           const done = await relayCall(state, "POST", "/relay/logout");
-          ctx.ui.notify(`OMP Mobile: signed out of ${done.account ?? "the relay account"}. Sign in again with --relay-login on the next start.`, "info");
+          ctx.ui.notify(`OMP Mobile: signed out of ${done.account ?? "the relay account"}. Sign in again with /mobile login.`, "info");
         } catch (error) {
           ctx.ui.notify(`OMP Mobile: sign-out failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }

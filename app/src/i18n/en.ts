@@ -243,7 +243,6 @@ export const en = {
   "machines.addSheet.addressPlaceholder": "100.64.0.1:7390 or omp-mobile://pair?...",
   "machines.addSheet.token": "Token",
   "machines.addSheet.connect": "Connect",
-  "machines.addSheet.relayLogin": "Sign in to a self-hosted relay with an account",
   "machines.addSheet.signInAgain": "Your relay credentials expired. Sign in again.",
   "machines.addSheet.account": "Account email",
   "machines.addSheet.password": "Password",

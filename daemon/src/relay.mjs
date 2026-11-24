@@ -397,8 +397,7 @@ export class RelayHost {
 
   /**
    * Sign this computer out of an account login: end the connection, revoke the
-   * device on the server, and drop the stored tokens. Without it `--relay-account`
-   * is ignored while tokens exist, so switching accounts had no way in.
+   * device on the server, and drop the stored tokens before switching accounts.
    *
    * The revoke is best effort: `revokeCurrentDevice()` clears the local tokens in
    * its `finally`, so an unreachable server (or one that no longer knows this

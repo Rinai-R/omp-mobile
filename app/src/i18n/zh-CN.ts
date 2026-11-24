@@ -242,7 +242,6 @@ export const zhCN: Record<Key, Message> = {
   "machines.addSheet.addressPlaceholder": "100.64.0.1:7390 或 omp-mobile://pair?...",
   "machines.addSheet.token": "Token",
   "machines.addSheet.connect": "连接",
-  "machines.addSheet.relayLogin": "使用账号登录自建中继",
   "machines.addSheet.signInAgain": "中转凭据已失效，请重新登录。",
   "machines.addSheet.account": "账号邮箱",
   "machines.addSheet.password": "密码",

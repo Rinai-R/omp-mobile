@@ -60,6 +60,8 @@ A device on your Tailscale account that has the token can run anything OMP can o
 
 The phone and daemon sign in to the same self-hosted relay account, exchanging the password for persistent device credentials. The relay discovers computers and forwards end-to-end encrypted traffic. Deployment details are maintained in the [upstream server documentation](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server).
 
+Start the daemon with `omp-mobile --relay <url>`, then sign in from another terminal with `omp-mobile relay login <email>` or in OMP with `/mobile login`. The password prompt hides input. Later starts only need `--relay <url>`. To sign out, use `omp-mobile relay logout` or `/mobile logout`.
+
 The app reuses saved credentials to discover additional computers. Account-based connections keep one active tunnel because the self-hosted server replaces concurrent connections from the same client device; other computers' online status comes from the relay. Switching computers closes the previous tunnel first. Anonymous pairing uses its existing connection flow.
 
 ## Development

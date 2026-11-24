@@ -59,6 +59,8 @@ omp plugin install omp-mobile
 
 手机与 daemon 登录同一个自建中继账号，将密码换成持久保存的设备凭据。中继负责发现电脑和转发端到端加密的通信。搭建方式见 [原项目服务端文档](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server)。
 
+用 `omp-mobile --relay <url>` 启动 daemon，再从另一个终端执行 `omp-mobile relay login <email>`，或在 OMP 中执行 `/mobile login`。密码输入会隐藏，后续启动只需指定 `--relay <url>`。退出登录可用 `omp-mobile relay logout` 或 `/mobile logout`。
+
 App 复用已有凭据发现新电脑。自建服务会替换同一客户端的并发连接，因此账号模式只连接当前电脑，其他电脑通过中继查询在线状态，切换时先关闭旧连接。匿名配对沿用原有连接流程。
 
 ## 开发
