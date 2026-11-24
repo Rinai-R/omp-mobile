@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { WebSocketServer } from "ws";
-import { RELAY_HEADER, createTunnelRouter } from "../src/relay.mjs";
+import { RELAY_HEADER, RelayHost, createTunnelRouter } from "../src/relay.mjs";
 
 const TOKEN = "t".repeat(48);
 let server;
@@ -97,4 +100,67 @@ test("a WebSocket carries the token in its query, splits large messages and echo
   await call("omp.ws.send", { id: "w", text: "hi" });
   await until(() => events.some((event) => event.text === "echo:hi"));
   router.closePeerStreams();
+});
+
+test("start never waits for a password: stored tokens connect and none means unpaired", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-start-"));
+  const host = new RelayHost({
+    // Nothing listens here: any network call would reject, so an unpaired start proves none was made.
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: () => undefined,
+  });
+  // Must resolve: a background start (launchd) has no terminal to ask for a password.
+  await host.start();
+  const status = await host.status();
+  assert.equal(status.paired, false);
+  assert.equal(status.online, false);
+  await host.close();
+});
+
+test("status reports an account login, and logout clears it and the stored tokens", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-logout-"));
+  const host = new RelayHost({
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: () => undefined,
+  });
+  // Identity first: the credential file is keyed by this host's device id.
+  await host.start();
+  const before = await host.status();
+  assert.equal(before.paired, false);
+  assert.equal(before.account, undefined);
+
+  const { join: joinPath } = await import("node:path");
+  const credentials = joinPath(dir, "server-credentials.json");
+  writeFileSync(credentials, JSON.stringify({
+    schemaVersion: 1,
+    serverUrl: "http://127.0.0.1:9",
+    deviceId: before.deviceId,
+    authorizationMethod: "account",
+    account: "user@example.com",
+    accessToken: "a".repeat(24),
+    accessTokenExpiresAt: Date.now() + 3_600_000,
+    refreshToken: "r".repeat(24),
+    refreshTokenExpiresAt: Date.now() + 3_600_000,
+  }), { mode: 0o600 });
+  const signedIn = await host.status();
+  assert.equal(signedIn.paired, true);
+  assert.equal(signedIn.account, "user@example.com");
+
+  // The server is unreachable, so the revoke fails and the local tokens must go anyway.
+  await host.logout();
+  const after = await host.status();
+  assert.equal(after.paired, false);
+  assert.equal(after.account, undefined);
+  await host.close();
 });

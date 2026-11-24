@@ -67,6 +67,18 @@ const statusSchema = z.object({
 
 const errorSchema = z.object({ error: z.object({ code: z.string(), message: z.string().optional() }) });
 
+/** The answer of `POST /api/v1/auth/login` on a server with accounts. */
+const loginSchema = z.object({
+  token: z.string().min(16),
+  account: z.string().min(1).max(254),
+});
+
+/**
+ * The answer of `POST /api/v1/devices/register` with an account token: a flat
+ * token object, the shape `apps/server` sends and the vendored host client reads.
+ */
+const registerSchema = tokensSchema;
+
 export type PairingDevice = z.infer<typeof deviceSchema>;
 export type PairingSession = z.infer<typeof sessionSchema>;
 export type PairingCredentials = z.infer<typeof credentialsSchema>;
@@ -152,10 +164,10 @@ export class PairingError extends Error {
   }
 }
 
-async function post(serverUrl: string, path: string, body: string, proof?: string): Promise<unknown> {
+async function post(serverUrl: string, path: string, body: string, headers?: Record<string, string>): Promise<unknown> {
   const response = await fetch(`${serverUrl}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(proof === undefined ? {} : { "x-dsh-pairing-proof": proof }) },
+    headers: { "content-type": "application/json", ...headers },
     body,
   });
   const text = await response.text();
@@ -211,7 +223,7 @@ export async function claimPairing(
       device: { deviceId: phone.deviceId, name: phone.name, role: "client", platform: "android", identityKey: phone.publicKey, clientVersion },
     });
   const proof = pairingProof(phone.privateKey, session.serverPublicKey, session.sessionId, path, raw);
-  const claimed = parse(claimedSchema, await post(serverUrl, path, raw, proof), "claim answer");
+  const claimed = parse(claimedSchema, await post(serverUrl, path, raw, { "x-dsh-pairing-proof": proof }), "claim answer");
   return { verificationCode: claimed.verificationCode, expiresAt: claimed.expiresAt, body: raw };
 }
 
@@ -219,7 +231,7 @@ export async function claimPairing(
 export async function pairingStatus(serverUrl: string, session: PairingSession, phone: PhoneIdentity): Promise<PairingStatus> {
   const path = `/api/v1/device-pairing/sessions/${session.sessionId}/mobile/status`;
   const proof = pairingProof(phone.privateKey, session.serverPublicKey, session.sessionId, path, "{}");
-  const status = parse(statusSchema, await post(serverUrl, path, "{}", proof), "pairing status");
+  const status = parse(statusSchema, await post(serverUrl, path, "{}", { "x-dsh-pairing-proof": proof }), "pairing status");
   // The host must stay the one the code named: a swapped key fails closed.
   if (status.host !== undefined && (status.host.deviceId !== session.host.deviceId || status.host.identityKey !== session.host.identityKey)) {
     throw new PairingError("HOST_CHANGED", "The computer's identity changed during pairing.");
@@ -233,5 +245,48 @@ export async function pairingStatus(serverUrl: string, session: PairingSession, 
 
 export async function cancelPairing(serverUrl: string, session: PairingSession, phone: PhoneIdentity): Promise<void> {
   const path = `/api/v1/device-pairing/sessions/${session.sessionId}/mobile/cancel`;
-  await post(serverUrl, path, "{}", pairingProof(phone.privateKey, session.serverPublicKey, session.sessionId, path, "{}"));
+  await post(serverUrl, path, "{}", {
+    "x-dsh-pairing-proof": pairingProof(phone.privateKey, session.serverPublicKey, session.sessionId, path, "{}"),
+  });
+}
+
+/**
+ * Account login for a self-hosted relay (the server's own `auth/login`), as an
+ * alternative to pairing: the password is exchanged once for an account token,
+ * which registers this phone as a client device and returns its device token
+ * pair. The password is not kept after this call.
+ */
+export async function authenticateRelayAccount(serverUrl: string, email: string, password: string) {
+  return parse(
+    loginSchema,
+    await post(serverUrl, "/api/v1/auth/login", JSON.stringify({ email: email.trim(), password })),
+    "login answer",
+  );
+}
+
+export async function loginWithAccount(
+  serverUrl: string,
+  email: string,
+  password: string,
+  phone: PhoneIdentity,
+  clientVersion: string,
+): Promise<{ account: string; tokens: PairingTokens }> {
+  return registerAccountPhone(serverUrl, await authenticateRelayAccount(serverUrl, email, password), phone, clientVersion);
+}
+
+export async function registerAccountPhone(
+  serverUrl: string,
+  login: { account: string; token: string },
+  phone: PhoneIdentity,
+  clientVersion: string,
+): Promise<{ account: string; tokens: PairingTokens }> {
+  const registered = parse(
+    registerSchema,
+    await post(serverUrl, "/api/v1/devices/register", JSON.stringify({
+      v: 1,
+      device: { deviceId: phone.deviceId, name: phone.name, role: "client", platform: "android", identityKey: phone.publicKey, clientVersion },
+    }), { authorization: `Bearer ${login.token}` }),
+    "register answer",
+  );
+  return { account: login.account, tokens: registered };
 }

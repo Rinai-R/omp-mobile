@@ -78,7 +78,8 @@ export class RemoteServerApi {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ deviceId: this.deviceId, refreshToken: this.tokens.refreshToken }),
       });
-      if (!response.ok) throw new RemoteServerError(response.status, t("relay.renewRefused"));
+      // A missing device cannot refresh its credentials; sign-in can register it again.
+      if (!response.ok) throw new RemoteServerError(response.status === 404 ? 401 : response.status, t("relay.renewRefused"));
       const next = tokensSchema.parse(await response.json());
       await this.onTokens(next);
       this.tokens = next;

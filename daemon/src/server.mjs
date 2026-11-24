@@ -182,6 +182,9 @@ function pendingOf(request) {
 function answerOf(message) {
   const answer = {};
   if (typeof message.value === "string") answer.value = message.value;
+  // An OMP form question (`method: "form"`, AskUserQuestion) answers with the
+  // form's fields in `data`, not `value`; OMP rejects anything else.
+  if (typeof message.data === "object" && message.data !== null && !Array.isArray(message.data)) answer.data = message.data;
   if (typeof message.confirmed === "boolean") answer.confirmed = message.confirmed;
   if (message.cancelled === true) answer.cancelled = true;
   return answer;
@@ -319,7 +322,8 @@ this node in Host (421 otherwise) and come from a tailnet device of this node's
 user (403 otherwise), before the token is checked. Loopback hosts skip admission.
   --no-qr                Do not print the pairing QR code at startup
   --relay [url]          Also serve paired phones through a ds-harness-remote relay (default ${DEFAULT_RELAY}),
-                         end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay
+                         end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay.
+                         A relay that needs an account: \`omp-mobile relay login <email>\` (or /mobile login)
   --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
 
 Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
@@ -329,6 +333,9 @@ Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
 
 Relay commands (talk to the running daemon; same --state-file):
   omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
+  omp-mobile relay login <email>   Sign in to a self-hosted relay with an account (password is asked
+                              for, never in argv); the password is exchanged once for device tokens
+  omp-mobile relay logout     Sign out of that account: revoke this computer and drop its tokens
   omp-mobile relay status     Relay server, connection and paired phones
   omp-mobile relay revoke <phone device id>
 `);
@@ -897,11 +904,8 @@ class Daemon {
     /** @type {RelayHost | undefined} */
     this.relay = undefined;
     if (options.relay) {
-      this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
-      this.tunnelServer.on("upgrade", (req, socket, head) => {
-        socket.on("error", () => socket.destroy());
-        this.handleUpgrade(req, socket, head);
-      });
+      // Built here, not in `listen()`: nothing at startup prompts any more, so the
+      // constructor can own it and the diff stays small.
       this.relay = new RelayHost({
         serverUrl: options.relay,
         dir: options.relayDir,
@@ -910,6 +914,11 @@ class Daemon {
         port: () => this.tunnelServer.address().port,
         token: this.token,
         log: (line) => this.log(line),
+      });
+      this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
+      this.tunnelServer.on("upgrade", (req, socket, head) => {
+        socket.on("error", () => socket.destroy());
+        this.handleUpgrade(req, socket, head);
       });
     }
   }
@@ -1718,6 +1727,33 @@ class Daemon {
         sendJson(res, 200, { ok: true });
         return;
       }
+      // Account login is opt-in and one-shot: the password is exchanged for device
+      // tokens here, never stored (never in argv, so never in a plist or process list).
+      if (url.pathname === "/relay/login" && req.method === "POST") {
+        const body = await readBody(req);
+        if (typeof body.account !== "string" || body.account.trim() === "" || typeof body.password !== "string" || body.password === "") {
+          sendJson(res, 400, { error: "account and password are required" });
+          return;
+        }
+        await this.relay.login(body.account, body.password);
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+        return;
+      }
+      // Sign out of an account login. Whether there is one is decided locally:
+      // asking the server first fails exactly when logout matters — an unreachable
+      // relay, or a device the server no longer knows — and leaves the tokens behind.
+      if (url.pathname === "/relay/logout" && req.method === "POST") {
+        const account = await this.relay.storedAccount();
+        if (account === undefined) {
+          sendJson(res, 409, { error: "this computer is not signed in to a relay account (anonymous pairing has no login to end)" });
+          return;
+        }
+        await this.relay.logout();
+        // `status()` now reports no account (the tokens are gone); the account this
+        // call ended is what a caller shows, so it goes last.
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()), account });
+        return;
+      }
       sendJson(res, 404, { error: "not found" });
     } catch (error) {
       // The relay's own refusals carry a code (PAIRING_EXPIRED, PAIRING_ATTEMPT_USED, ...): pass it on.
@@ -1896,6 +1932,7 @@ async function main() {
   if (daemon.relay !== undefined) {
     const relay = await daemon.relay.status();
     console.log(`  relay      ${relay.server} · ${relay.paired ? "paired" : "no phone paired yet"} · pair a phone: omp-mobile relay pair`);
+    if (relay.account !== undefined) console.log(`             account login: ${relay.account}`);
   }
   const tailnet = isTailnetAddress(options.host);
   if (options.qr && (tailnet || daemon.relay === undefined)) {

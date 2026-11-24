@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import { requireOptionalNativeModule } from "expo";
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   Appearance,
@@ -35,7 +35,7 @@ import { isPairingLink } from "./src/pairing";
 import { SettingsScreen, type LiveState, type NotificationState } from "./src/screens/SettingsScreen";
 import { probeMachine, type Probe } from "./src/probe";
 import { followRelayEvents } from "./src/relay/attention";
-import { forgetRelay } from "./src/relay/hosts";
+import { forgetRelay, relayHost, selectAccountRelay } from "./src/relay/hosts";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type AppearancePreference, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
 import { dropMachine } from "./src/transcripts";
@@ -195,15 +195,28 @@ export default function App(): ReactNode {
     };
   }, []);
 
-  // Relay machines' events, followed here while notifications are on (the service keeps the app alive).
-  const relayIds = machines
-    .filter((machine) => machine.relay !== undefined)
+  const selectedMachine = route.base.kind === "home" ? route.base.machine : undefined;
+  const selectedRelay = selectedMachine?.relay;
+  useLayoutEffect(() => selectAccountRelay(selectedRelay), [selectedRelay]);
+  const selectedMachineId = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    selectedMachineId.current = selectedMachine?.id;
+  }, [selectedMachine?.id]);
+
+  const anonymousRelayIds = machines
+    .filter((machine) => machine.relay !== undefined && machine.relay.account === undefined)
     .map((machine) => machine.id)
     .join("\n");
   useEffect(() => {
-    if (notifications !== "on" || relayIds === "") return undefined;
-    return followRelayEvents(machinesRef.current.filter((machine) => machine.relay !== undefined));
-  }, [notifications, relayIds]);
+    if (notifications !== "on" || anonymousRelayIds === "") return undefined;
+    return followRelayEvents(machinesRef.current.filter((machine) =>
+      machine.relay !== undefined && machine.relay.account === undefined,
+    ));
+  }, [notifications, anonymousRelayIds]);
+  useEffect(() => {
+    if (notifications !== "on" || selectedMachine?.relay?.account === undefined) return undefined;
+    return followRelayEvents([selectedMachine]);
+  }, [notifications, selectedMachine]);
 
   // `omp-mobile://pair?...` links, whether they launched the app or arrived while it ran.
   useEffect(() => {
@@ -275,20 +288,38 @@ export default function App(): ReactNode {
 
   const probeOne = useCallback(
     (machine: Machine): Promise<void> => {
-      const pending = inFlight.current.get(machine.id);
+      const relay = machine.relay;
+      const inactiveAccountRelay = relay?.account !== undefined && machine.id !== selectedMachineId.current;
+      const probeKey = inactiveAccountRelay ? `presence:${machine.id}` : machine.id;
+      const pending = inFlight.current.get(probeKey);
       if (pending !== undefined) return pending;
-      const run = probeMachine(machine)
+      const presence = async (link: NonNullable<Machine["relay"]>): Promise<Probe> => {
+        try {
+          const host = await relayHost(link);
+          if (host?.online) return { state: "relay-online" };
+        } catch {
+          // The relay did not answer or rejected the phone's credentials.
+        }
+        return { state: "unreachable", reason: "network" };
+      };
+      const run = (inactiveAccountRelay ? presence(relay) : probeMachine(machine))
         .then((probe) => {
+          // A selection can change while either kind of probe is in flight.
+          if (relay?.account !== undefined && inactiveAccountRelay === (machine.id === selectedMachineId.current)) return;
           // A machine removed while it was probed has no row to update.
           if (!machinesRef.current.some((item) => item.id === machine.id)) return;
           setProbes((current) => new Map(current).set(machine.id, probe));
-          if (probe.state === "online") {
-            const seen = Date.now();
-            persist(machinesRef.current.map((item) => (item.id === machine.id ? { ...item, lastSeen: seen } : item)));
+          if (probe.state !== "unreachable") {
+            const lastSeen = Date.now();
+            persist(machinesRef.current.map((item) => {
+              if (item.id !== machine.id) return item;
+              if (relay?.account === undefined || probe.state !== "online") return { ...item, lastSeen };
+              return { ...item, lastSeen, version: probe.version, cwd: probe.cwd ?? item.cwd };
+            }));
           }
         })
-        .finally(() => inFlight.current.delete(machine.id));
-      inFlight.current.set(machine.id, run);
+        .finally(() => inFlight.current.delete(probeKey));
+      inFlight.current.set(probeKey, run);
       return run;
     },
     [persist],
@@ -299,6 +330,9 @@ export default function App(): ReactNode {
     [probeOne],
   );
   const probeAllNow = useCallback(() => void probeAll(), [probeAll]);
+  useEffect(() => {
+    if (selectedMachine?.relay?.account !== undefined) void probeOne(selectedMachine);
+  }, [selectedMachine, probeOne]);
   /** The home of `machine`, remembered as the computer to open on next time. */
   const goHome = useCallback(
     (machine: Machine, create?: boolean) => {

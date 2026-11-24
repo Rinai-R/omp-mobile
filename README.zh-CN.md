@@ -47,13 +47,21 @@ omp plugin install omp-mobile
 
 ### 手机
 
-从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **Scan to pair**，扫描二维码。**Enter address** 可以手动填地址和 token，或粘贴配对链接。
+从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **添加电脑（＋）→ 扫码配对**，扫描二维码。**Token 连接** 可手动填地址和 Token，扫码页的 **手动输入地址** 也可粘贴配对链接。
 
 #### 通过中继（不用 Tailscale）
 
 守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码，或把链接粘贴到 **Enter address**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。
 
 你 Tailscale 账号下持有 token 的设备，可以在那台电脑上执行 OMP 能做的任何事。
+
+#### 自建中继与账号登录
+
+手机与 daemon 登录同一个自建中继账号，将密码换成持久保存的设备凭据。中继负责发现电脑和转发端到端加密的通信。搭建方式见 [原项目服务端文档](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server)。
+
+用 `omp-mobile --relay <url>` 启动 daemon，再从另一个终端执行 `omp-mobile relay login <email>`，或在 OMP 中执行 `/mobile login`。密码输入会隐藏，后续启动只需指定 `--relay <url>`。退出登录可用 `omp-mobile relay logout` 或 `/mobile logout`。
+
+App 复用已有凭据发现新电脑。自建服务会替换同一客户端的并发连接，因此账号模式只连接当前电脑，其他电脑通过中继查询在线状态，切换时先关闭旧连接。匿名配对沿用原有连接流程。
 
 ## 开发
 
