@@ -35,6 +35,7 @@ interface Props {
   /** Back to the computers screen: only before any computer is paired, when there is no tab bar. */
   onBack?: () => void;
   version: string;
+  apkUpdate: { label: string; busy: boolean; action?: () => void };
   /** Where this page reports how much of it runs on under the tab bar; only as a tab. */
   under?: SharedValue<number>;
 }
@@ -58,6 +59,7 @@ export function SettingsScreen({
   onAllowLive,
   onBack,
   version,
+  apkUpdate,
   under,
 }: Props): ReactNode {
   const styles = useStyles(createStyles);
@@ -158,7 +160,14 @@ export function SettingsScreen({
 
         <View style={styles.gap} />
         <Group>
-          <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last />
+          <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last={apkUpdate.action === undefined} />
+          {apkUpdate.action !== undefined ? (
+            <Row
+              title={apkUpdate.label}
+              onPress={apkUpdate.busy ? undefined : apkUpdate.action}
+              last
+            />
+          ) : null}
         </Group>
       </Reanimated.ScrollView>
       <PageBar

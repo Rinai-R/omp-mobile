@@ -37,6 +37,7 @@ import { forgetRelay } from "./src/relay/hosts";
 import { DEFAULT_SETTINGS, loadMachines, loadSettings, saveMachines, saveSettings, type AppearancePreference, type Settings } from "./src/storage";
 import { palette } from "./src/theme";
 import { dropMachine } from "./src/transcripts";
+import { useApkUpdate } from "./src/useApkUpdate";
 import type { Machine, SessionSummary } from "./src/types";
 
 /** The shell under every pushed screen. */
@@ -122,6 +123,7 @@ export default function App(): ReactNode {
   settingsRef.current = settings;
   const [route, setRoute] = useState<Route>({ base: { kind: "machines" }, top: null });
   const [restored, setRestored] = useState(false);
+  const apkUpdate = useApkUpdate(restored, appConfig.expo.version);
   const [refreshing, setRefreshing] = useState(false);
   /** The latest probe of each machine by id, in memory only. */
   const [probes, setProbes] = useState<ReadonlyMap<string, Probe>>(new Map());
@@ -470,6 +472,7 @@ export default function App(): ReactNode {
         onBack={onBack}
         under={onBack === undefined ? tabUnder.settings : undefined}
         version={appConfig.expo.version}
+        apkUpdate={apkUpdate}
       />
     );
   }
