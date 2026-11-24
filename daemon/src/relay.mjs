@@ -258,6 +258,11 @@ export class RelayHost {
     else if (this.options.account !== undefined && this.options.password !== undefined) {
       try {
         await this.login(this.options.account, await this.options.password());
+      } catch (error) {
+        // Without a terminal and without $OMP_MOBILE_RELAY_PASSWORD there is
+        // nothing to answer the prompt: say so and stay up without the login.
+        if (error?.code !== "RELAY_PASSWORD_REQUIRED") throw error;
+        log(`relay warn: ${error.message}; starting without relay login`);
       } finally {
         this.options.password = undefined;
       }

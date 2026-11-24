@@ -46,6 +46,14 @@ async function relayPassword(options) {
   const fromEnv = process.env.OMP_MOBILE_RELAY_PASSWORD;
   delete process.env.OMP_MOBILE_RELAY_PASSWORD;
   if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
+  // Under launchd (or any other non-TTY start) nothing can answer the prompt:
+  // fail with one clear line so the daemon serves without the login instead of
+  // waiting on stdin forever while the HTTP server already looks healthy.
+  if (process.stdin.isTTY !== true) {
+    throw Object.assign(new Error("--relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal"), {
+      code: "RELAY_PASSWORD_REQUIRED",
+    });
+  }
   const output = new Writable({ write(_chunk, _encoding, done) { done(); } });
   const prompt = createInterface({ input: process.stdin, output, terminal: process.stdin.isTTY === true });
   process.stderr.write(`Relay account password for ${options.relayAccount}: `);
