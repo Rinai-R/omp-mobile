@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { RefreshControl, Text, View } from "react-native";
+import { Modal, Pressable, RefreshControl, Text, View } from "react-native";
 import Reanimated, { type SharedValue } from "react-native-reanimated";
 import { pairMachine } from "../api";
-import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, SettingsGlyph } from "../components/icons";
+import { ComputerGlyph, MoreGlyph, PlusGlyph, QrGlyph, LockGlyph, AgentsGlyph, SettingsGlyph } from "../components/icons";
 import { LargeTitle, PageBar, usePageScroll, usePageTop } from "../components/LargeTitle";
 import { TAB_BAR_HEIGHT } from "../components/TabBar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,7 +26,7 @@ import { savedAccountRelays } from "../relay/hosts";
 import { RemoteServerError } from "../relay/server";
 import { loginRelay, resumeRelay, pickRelay, relaySelection, type RelayLoginResult } from "../relay/pair";
 import { summaryOf, type Probe } from "../probe";
-import { MONO, useColors, useStyles, type Palette } from "../theme";
+import { SANS, MONO, useColors, useStyles, type Palette } from "../theme";
 import { displayName, machineLabel } from "../machines";
 import type { Machine } from "../types";
 import { t } from "../i18n/index.ts";
@@ -82,6 +82,8 @@ export function MachinesScreen({
   const insets = useSafeAreaInsets();
   const page = usePageScroll(under);
   const top = usePageTop();
+  const [addMenu, setAddMenu] = useState(false);
+  const [accountNew, setAccountNew] = useState(false);
   const [adding, setAdding] = useState(false);
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
@@ -160,6 +162,7 @@ export function MachinesScreen({
     setError(null);
     setBusy(false);
     setRelayLogin(false);
+    setAccountNew(false);
     setAccount("");
     setPassword("");
     setRelayChoice(null);
@@ -176,6 +179,8 @@ export function MachinesScreen({
     if (addRequest === null) return;
     onAddRequestHandled();
     setBusy(false);
+    setRelayLogin(false);
+    setAccountNew(false);
     setPaired(null);
     setAdding(true);
     if (addRequest.link === null) {
@@ -248,6 +253,7 @@ export function MachinesScreen({
         setAccount(saved.account);
         setPassword("");
         setRelayLogin(true);
+        setAccountNew(true);
         setError(t("machines.addSheet.signInAgain"));
       } else {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -259,10 +265,21 @@ export function MachinesScreen({
 
   const confirmRemove = useCallback((machine: Machine) => setRemoving(machine), []);
 
-  const openAdd = useCallback(() => {
+  const openAdd = (accountLogin: boolean) => {
+    setAddMenu(false);
     setPaired(null);
+    setRelayChoice(null);
+    setError(null);
+    setBusy(false);
+    setUrl("");
+    setToken("");
+    setAccount("");
+    setPassword("");
+    setFromLink(false);
+    setRelayLogin(accountLogin);
+    setAccountNew(false);
     setAdding(true);
-  }, []);
+  };
   // "seen 5 min ago" is recomputed on each render; each probe round re-renders the list.
   const now = Date.now();
 
@@ -295,8 +312,7 @@ export function MachinesScreen({
             body={t("machines.empty.body")}
             action={
               <View style={styles.emptyActions}>
-                <Button label={t("machines.scan")} onPress={onScan} icon={<QrGlyph size={18} color={colors.accentFg} />} />
-                <Button label={t("machines.enterAddress")} kind="plain" onPress={openAdd} />
+                <Button label={t("machines.add")} onPress={() => setAddMenu(true)} />
               </View>
             }
           />
@@ -353,7 +369,7 @@ export function MachinesScreen({
         right={
           <>
             {machines.length > 0 ? (
-              <IconButton onPress={onScan} label={t("machines.add")}>
+              <IconButton onPress={() => setAddMenu(true)} label={t("machines.add")}>
                 <PlusGlyph size={24} color={colors.tint} />
               </IconButton>
             ) : null}
@@ -365,6 +381,28 @@ export function MachinesScreen({
           </>
         }
       />
+
+      <Modal visible={addMenu} transparent animationType="fade" onRequestClose={() => setAddMenu(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setAddMenu(false)} accessibilityLabel={t("common.close")}>
+          <View style={[styles.addMenu, { top: insets.top + 48 }]}>
+            {[
+              { label: t("machines.scan"), icon: QrGlyph, action: () => { setAddMenu(false); onScan(); } },
+              { label: t("machines.addMenu.token"), icon: LockGlyph, action: () => openAdd(false) },
+              { label: t("machines.addMenu.account"), icon: AgentsGlyph, action: () => openAdd(true) },
+            ].map(({ label, icon: Icon, action }) => (
+              <Pressable
+                key={label}
+                accessibilityRole="button"
+                onPress={action}
+                style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+              >
+                <Icon size={19} color={colors.fgFaint} />
+                <Text style={styles.menuLabel}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
 
       <MachineSheet
         machine={sheet}
@@ -390,7 +428,7 @@ export function MachinesScreen({
         onClose={() => setRemoving(null)}
       />
 
-      <Sheet visible={adding} title={t("machines.addSheet.title")} onClose={close}>
+      <Sheet visible={adding} title={t(relayLogin ? "machines.addMenu.account" : "machines.addSheet.title")} onClose={close}>
         {paired !== null ? (
           <PairSuccess name={displayName(paired)} c={colors} onDone={handOn} />
         ) : relay.busy ? (
@@ -410,9 +448,10 @@ export function MachinesScreen({
                 .finally(() => setBusy(false));
             }}
           />
-        ) : (
+        ) : relayLogin && !accountNew ? (
           <>
-            {!relayLogin && !fromLink && ticket === undefined ? savedRelays.map((saved) => (
+            {savedRelays.length > 0 ? <Text style={styles.detail}>{t("machines.addSheet.history")}</Text> : null}
+            {savedRelays.map((saved) => (
               <Button
                 key={saved.serverUrl}
                 label={`${saved.serverUrl} · ${saved.account}`}
@@ -420,7 +459,16 @@ export function MachinesScreen({
                 disabled={busy}
                 onPress={() => void resumeAccount(saved)}
               />
-            )) : null}
+            ))}
+            <Button label={t("machines.addSheet.newAccount")} kind="plain" disabled={busy} onPress={() => {
+              setError(null);
+              setAccountNew(true);
+            }} />
+            {busy ? <Text style={styles.detail}>{t("probe.checking")}</Text> : null}
+            {error !== null ? <Text style={styles.error}>{error}</Text> : null}
+          </>
+        ) : (
+          <>
             <Field
               label={t("machines.addSheet.address")}
               value={url}
@@ -428,9 +476,6 @@ export function MachinesScreen({
               placeholder={t("machines.addSheet.addressPlaceholder")}
               autoFocus={!fromLink}
             />
-            {ticket === undefined && !relayLogin ? (
-              <Button label={t("machines.addSheet.relayLogin")} kind="plain" onPress={() => setRelayLogin(true)} />
-            ) : null}
             {relayLogin ? (
               <>
                 <Field label={t("machines.addSheet.account")} value={account} onChangeText={setAccount} keyboardType="email-address" />
@@ -505,6 +550,25 @@ function RelayChoice({
 
 function createStyles(c: Palette) {
   return {
+    menuBackdrop: { flex: 1 },
+    addMenu: {
+      position: "absolute",
+      right: 12,
+      width: 208,
+      padding: 6,
+      borderRadius: 14,
+      borderWidth: 0.5,
+      borderColor: c.borderStrong,
+      backgroundColor: c.overlay,
+      elevation: 5,
+      shadowColor: "#000",
+      shadowOpacity: 0.1,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+    },
+    menuItem: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 46, paddingHorizontal: 12, borderRadius: 9 },
+    menuItemPressed: { backgroundColor: c.hover },
+    menuLabel: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fg, fontWeight: "500" },
     root: { flex: 1, backgroundColor: c.bg },
     content: { width: "100%", maxWidth: 600, alignSelf: "center", paddingHorizontal: 16 },
     // The large title keeps the home's 20 px inset inside this 16 px-padded list.

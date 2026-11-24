@@ -48,7 +48,7 @@ Without the plugin, the same daemon runs from npm (Node.js 22.19 or newer) in th
 
 ### Phone
 
-Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Scan to pair** and scan the code. **Enter address** takes the address and token by hand, or a pasted pairing link.
+Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Add computer (+) → Scan to pair** and scan the code. **Connect with Token** takes an address and token by hand. The scanner also offers **Enter address** for a pasted pairing link.
 
 #### Through the relay (no Tailscale)
 
@@ -58,17 +58,9 @@ A device on your Tailscale account that has the token can run anything OMP can o
 
 #### Self-hosted relay with account login
 
-Run the [ds-harness-remote self-hosted server](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server) using its setup guide. Configure `DSH_SERVER_ACCOUNT` with an email address, `DSH_SERVER_PASSWORD`, and `DSH_SERVER_PUBLIC_URL` with the HTTPS origin both the computer and phone will use. Your reverse proxy must forward WebSocket upgrades to the server. The server keeps its device state in its persistent data volume.
+The phone and daemon sign in to the same self-hosted relay account, exchanging the password for persistent device credentials. The relay discovers computers and forwards end-to-end encrypted traffic. Deployment details are maintained in the [upstream server documentation](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server).
 
-On the computer, sign in with the CLI against the running daemon — the password is asked for in the terminal, so it never reaches argv, shell history or a plist:
-
-```bash
-omp-mobile relay login you@example.com
-```
-
-Or in OMP: `/mobile login`. Either way the password is exchanged once for this computer's device tokens and is not kept; the tokens are stored owner-only (`~/.omp-mobile/relay/server-credentials.json`, mode 0600). A later start needs `--relay <url>` only, and a headless start (launchd, a service manager) with no stored tokens simply serves without the relay login — it never waits on a prompt nobody can answer. `omp-mobile relay logout` (or `/mobile logout`) revokes this computer on the server and drops its tokens, which is the way back from a wrong account or a device the server no longer knows.
-
-On the phone, use **Add computer → Sign in to a self-hosted relay with an account**: server address, account email, password — the phone registers with the same account and lists its computers. A custom `--relay <url>` needs a server that supports the matching authorization method (account sign-in for a relay account, anonymous pairing otherwise).
+The app reuses saved credentials to discover additional computers. Account-based connections keep one active tunnel because the self-hosted server replaces concurrent connections from the same client device; other computers' online status comes from the relay. Switching computers closes the previous tunnel first. Anonymous pairing uses its existing connection flow.
 
 ## Development
 
