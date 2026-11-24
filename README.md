@@ -48,11 +48,14 @@ Without the plugin, the same daemon runs from npm (Node.js 22.19 or newer) in th
 
 ### Phone
 
-Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Add computer (+) → Scan to pair** and scan the code. **Connect with Token** takes an address and token by hand. The scanner also offers **Enter address** for a pasted pairing link.
+Install the APK from the [releases page](https://github.com/Rinai-R/omp-mobile/releases). In the app, tap **Add computer (+)**.
+
+- **With an account (recommended):** sign in with GitHub, Google or Zhihu (or email and password) on the public [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) relay. The sheet lists the account's computers; **Add a new computer** shows a one-time code (`ABCD-EFGH`, ten minutes, one use). On the computer, run `/mobile login ABCD-EFGH` in OMP, or `omp-mobile relay login ABCD-EFGH` in a terminal: the computer joins the account with no password of its own (the relay is turned on if the daemon ran without it), and the phone adds it by itself.
+- **Other ways:** **Scan to pair** the QR code the computer shows, **Direct address** for a Tailscale or LAN address and token (a pairing link can be pasted there too), or **Self-hosted relay** for your own server.
 
 #### Through the relay (no Tailscale)
 
-The daemon can also be reached through the public relay of [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) (`https://dsh.r2049.cn`), with no Tailscale and no account. In OMP run `/mobile relay` (or start the daemon with `omp-mobile --relay` and run `omp-mobile relay pair`). Scan the code it shows, or paste its link into **Enter address**; the phone shows the computer's key fingerprint and an 8-digit code, which you type where the computer asks. Traffic is end-to-end encrypted between the phone and the daemon (Noise IK, both keys pinned); the relay only forwards ciphertext. Everything works as over Tailscale. `omp-mobile relay status` lists paired phones, `omp-mobile relay revoke <id>` removes one, and removing the computer on the phone ends the pairing too.
+The daemon can also be reached through the public relay of [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) (`https://dsh.r2049.cn`), with no Tailscale and no account. In OMP run `/mobile relay` (or start the daemon with `omp-mobile --relay` and run `omp-mobile relay pair`). Scan the code it shows (**Other ways → Scan to pair**), or paste its link into **Direct address**; the phone shows the computer's key fingerprint and an 8-digit code, which you type where the computer asks. Traffic is end-to-end encrypted between the phone and the daemon (Noise IK, both keys pinned); the relay only forwards ciphertext. Everything works as over Tailscale. `omp-mobile relay status` lists paired phones, `omp-mobile relay revoke <id>` removes one, and removing the computer on the phone ends the pairing too.
 
 A device on your Tailscale account that has the token can run anything OMP can on that computer.
 
@@ -60,7 +63,7 @@ A device on your Tailscale account that has the token can run anything OMP can o
 
 The phone and daemon sign in to the same self-hosted relay account, exchanging the password for persistent device credentials. The relay discovers computers and forwards end-to-end encrypted traffic. Deployment details are maintained in the [upstream server documentation](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server).
 
-Start the daemon with `omp-mobile --relay <url>`, then sign in from another terminal with `omp-mobile relay login <email>` or in OMP with `/mobile login`. The password prompt hides input. Later starts only need `--relay <url>`. To sign out, use `omp-mobile relay logout` or `/mobile logout`.
+In the app, **Other ways → Self-hosted relay** takes the server's address and offers what that server supports: its browser sign-ins, or account and password. Once signed in, computers join the same way as on the public relay, with `/mobile login <code> <url>` (the app shows the command with the address). On a server that cannot make computer codes, start the daemon with `omp-mobile --relay <url>` and sign the computer in with `omp-mobile relay login <email>` or `/mobile login`; the password prompt hides input and later starts only need `--relay <url>`. To sign out, use `omp-mobile relay logout` or `/mobile logout`.
 
 The app reuses saved credentials to discover additional computers. Account-based connections keep one active tunnel because the self-hosted server replaces concurrent connections from the same client device; other computers' online status comes from the relay. Switching computers closes the previous tunnel first. Anonymous pairing uses its existing connection flow.
 

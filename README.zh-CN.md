@@ -47,11 +47,14 @@ omp plugin install omp-mobile
 
 ### 手机
 
-从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **添加电脑（＋）→ 扫码配对**，扫描二维码。**Token 连接** 可手动填地址和 Token，扫码页的 **手动输入地址** 也可粘贴配对链接。
+从 [Releases 页面](https://github.com/Rinai-R/omp-mobile/releases)下载 APK 并安装。在 App 里点 **添加电脑（＋）**。
+
+- **用账号（推荐）：** 在 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 公共中继上用 GitHub、Google、知乎（或邮箱密码）登录。面板会列出账号下的电脑；点 **添加一台新电脑** 会显示一次性码（`ABCD-EFGH`，10 分钟有效，只能用一次）。在电脑的 OMP 里输入 `/mobile login ABCD-EFGH`，或在终端运行 `omp-mobile relay login ABCD-EFGH`：电脑无需自己的密码即加入该账号（daemon 没开中继时会自动打开），手机随后自动添加它。
+- **其他方式：** **扫码配对** 扫描电脑显示的二维码；**直连地址** 填 Tailscale / 局域网地址和 Token（也可粘贴配对链接）；**自建中继** 连接你自己的服务器。
 
 #### 通过中继（不用 Tailscale）
 
-守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码，或把链接粘贴到 **Enter address**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。
+守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码（**其他方式 → 扫码配对**），或把链接粘贴到 **直连地址**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。
 
 你 Tailscale 账号下持有 token 的设备，可以在那台电脑上执行 OMP 能做的任何事。
 
@@ -59,7 +62,7 @@ omp plugin install omp-mobile
 
 手机与 daemon 登录同一个自建中继账号，将密码换成持久保存的设备凭据。中继负责发现电脑和转发端到端加密的通信。搭建方式见 [原项目服务端文档](https://github.com/liguobao/ds-harness-remote/tree/main/apps/server)。
 
-用 `omp-mobile --relay <url>` 启动 daemon，再从另一个终端执行 `omp-mobile relay login <email>`，或在 OMP 中执行 `/mobile login`。密码输入会隐藏，后续启动只需指定 `--relay <url>`。退出登录可用 `omp-mobile relay logout` 或 `/mobile logout`。
+在 App 里选 **其他方式 → 自建中继**，填服务器地址后会显示该服务器支持的登录方式：浏览器登录，或账号密码。登录后添加电脑的方式与公共中继相同，用 `/mobile login <码> <url>`（App 会显示带地址的完整命令）。服务器不支持生成电脑码时，用 `omp-mobile --relay <url>` 启动 daemon，再用 `omp-mobile relay login <email>` 或 `/mobile login` 登录；密码输入会隐藏，后续启动只需指定 `--relay <url>`。退出登录可用 `omp-mobile relay logout` 或 `/mobile logout`。
 
 App 复用已有凭据发现新电脑。自建服务会替换同一客户端的并发连接，因此账号模式只连接当前电脑，其他电脑通过中继查询在线状态，切换时先关闭旧连接。匿名配对沿用原有连接流程。
 

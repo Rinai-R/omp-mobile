@@ -18,7 +18,7 @@ const TOKEN = "l".repeat(48);
 
 /** A fake apps/server: account login, device register, self revoke, memberships. */
 async function fakeRelay({ password = "right-password", revokeRefuses = false } = {}) {
-  const seen = { logins: 0, registers: 0, revokes: 0, lastLogin: undefined };
+  const seen = { logins: 0, registers: 0, revokes: 0, lastLogin: undefined, codeRegisters: [] };
   const server = createServer((req, res) => {
     let body = "";
     req.on("data", (chunk) => (body += chunk));
@@ -39,6 +39,21 @@ async function fakeRelay({ password = "right-password", revokeRefuses = false } 
       }
       if (req.url === "/api/v1/devices/register") {
         seen.registers += 1;
+        send(200, {
+          accessToken: "device-access-1234567890",
+          accessTokenExpiresAt: Date.now() + 3_600_000,
+          refreshToken: "device-refresh-1234567890",
+          refreshTokenExpiresAt: Date.now() + 3_600_000,
+        });
+        return;
+      }
+      if (req.url === "/api/v1/devices/register-with-code") {
+        const request = JSON.parse(body || "{}");
+        seen.codeRegisters.push(request);
+        if (request.code !== "K7QM-4XPA") {
+          send(409, { error: { code: "HOST_REGISTRATION_CODE_CONSUMED", message: "code already used", retryable: false } });
+          return;
+        }
         send(200, {
           accessToken: "device-access-1234567890",
           accessTokenExpiresAt: Date.now() + 3_600_000,
@@ -255,5 +270,69 @@ test("GET /relay cannot answer when the relay is down, which is why logout must 
     assert.equal(await daemon.relay.storedAccount(), "user@example.com");
   } finally {
     await daemon.close();
+  }
+});
+
+
+function relayPost(daemon, path, body) {
+  return fetch(`http://127.0.0.1:${daemon.server.address().port}${path}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+test("a daemon started without the relay turns it on and joins the phone's account with its code", async () => {
+  const relay = await fakeRelay();
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-code-"));
+  const daemon = await daemonPointingAt(undefined, dir);
+  try {
+    assert.equal((await relayPost(daemon, "/relay/login", { code: "K7QM-4XPA" })).status, 409, "no relay yet");
+    const enabled = await relayPost(daemon, "/relay/enable", { server: relay.url });
+    assert.equal(enabled.status, 200);
+    // Typed the way people do: lower case, no dash.
+    const joined = await relayPost(daemon, "/relay/login", { code: "k7qm4xpa" });
+    assert.equal(joined.status, 200);
+    assert.equal(relay.seen.codeRegisters.length, 1);
+    assert.equal(relay.seen.codeRegisters[0].code, "K7QM-4XPA");
+    assert.equal(relay.seen.codeRegisters[0].device.role, "host");
+    assert.equal(relay.seen.logins, 0, "no password login");
+    // Joined with a code is an account sign-in too: logout can end it.
+    assert.equal((await callLogout(daemon)).status, 200);
+    assert.equal(existsSync(join(dir, "relay", "server-credentials.json")), false);
+  } finally {
+    await daemon.close();
+    await relay.close();
+  }
+});
+
+test("enabling a second, different relay is refused; the same one again is a no-op", async () => {
+  const relay = await fakeRelay();
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-enable-"));
+  const daemon = await daemonPointingAt(relay.url, dir);
+  try {
+    assert.equal((await relayPost(daemon, "/relay/enable", { server: `${relay.url}/` })).status, 200);
+    const other = await relayPost(daemon, "/relay/enable", { server: "https://relay.example.com" });
+    assert.equal(other.status, 409);
+    assert.match((await other.json()).error, /already serves/);
+  } finally {
+    await daemon.close();
+    await relay.close();
+  }
+});
+
+test("a refused code passes the relay's reason on and stores nothing", async () => {
+  const relay = await fakeRelay();
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-badcode-"));
+  const daemon = await daemonPointingAt(relay.url, dir);
+  try {
+    const response = await relayPost(daemon, "/relay/login", { code: "ZZZZ-9999" });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).code, "HOST_REGISTRATION_CODE_CONSUMED");
+    assert.equal(await daemon.relay.storedAccount(), undefined);
+    assert.equal((await relayPost(daemon, "/relay/login", { code: "nope" })).status, 400);
+  } finally {
+    await daemon.close();
+    await relay.close();
   }
 });

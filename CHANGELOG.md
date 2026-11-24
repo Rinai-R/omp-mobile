@@ -4,6 +4,22 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+## v0.8.6
+
+Adding a computer starts from an account: sign in once on the phone, and each computer joins with a code instead of a password.
+
+- **Add computer** opens one sheet instead of a three-item menu. Signed out, it starts with the browser sign-ins the public relay offers (GitHub, Google, Zhihu; the likely one for the app's language first) and email and password. Signed in, it lists the account's computers, one tap adds one, and **Add a new computer** shows a one-time code with the exact command to run, then adds that computer by itself once it joins. **Switch** changes account or relay.
+- On the computer, `/mobile login <code>` or `omp-mobile relay login <code>` joins the phone's account with no password there, and turns the relay on when the daemon ran without it (kept across `omp-mobile restart`).
+- Scanning, a direct address and a self-hosted relay are under **Other ways**. A self-hosted relay asks for its address first, then offers what that server supports; the address field no longer doubles as the relay address, and an address typed without a scheme gets `https://` (`http://` for an IP or localhost).
+
+### 中文
+
+添加电脑改为从账号开始：手机上登录一次，每台电脑输入一个码即可加入，不用再输密码。
+
+- **添加电脑** 不再弹三项菜单，而是打开一个面板。未登录时先显示公共中继提供的浏览器登录（GitHub、Google、知乎，按应用语言把最可能用的放在最前）以及邮箱密码；登录后列出账号下的电脑，点一下即可添加；**添加一台新电脑** 会显示一次性码和要运行的完整命令，电脑加入后自动添加。**切换** 可换账号或中继。
+- 电脑上用 `/mobile login <码>` 或 `omp-mobile relay login <码>` 加入手机的账号，不需要在电脑上输密码；daemon 没开中继时会自动打开（`omp-mobile restart` 后保持）。
+- 扫码配对、直连地址、自建中继收在 **其他方式** 里。自建中继先填服务器地址，再按该服务器的能力显示登录方式；地址栏不再兼作中继地址，不带协议的地址默认补 `https://`（IP 或 localhost 补 `http://`）。
+
 ## v0.8.5
 
 Self-hosted relays can sign in with an account, and the phone adds the account's computers without pairing codes (thanks @tingQian).

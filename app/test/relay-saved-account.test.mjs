@@ -24,7 +24,7 @@ function mockRelayStorage(t) {
       if (context.parentURL?.endsWith("/relay/pair.ts")) {
         if (specifier === "./tunnel") return { url: "data:text/javascript,export const relayFetch = null", shortCircuit: true };
         if (specifier === "../../app.json") return { url: "data:text/javascript,export default { expo: { version: '0.8.4' } }", shortCircuit: true };
-        if (["./hosts", "./pairing", "./selection", "./server"].includes(specifier)) return next(`${specifier}.ts`, context);
+        if (["./account", "./hosts", "./pairing", "./server"].includes(specifier)) return next(`${specifier}.ts`, context);
       }
       if (specifier === "./server" && context.parentURL.includes("/relay/hosts.ts")) return next("./server.ts", context);
       return next(specifier, context);
@@ -141,3 +141,39 @@ for (const rejected of [false, true]) {
     assert.deepEqual(JSON.parse(storage.get("omp.relay.v1"))[serverUrl].tokens, rejected ? replacement : tokens);
   });
 }
+
+test("a browser sign-in keeps the account token for computer codes; the wait finds only the computer that joined", async (t) => {
+  const storage = mockRelayStorage(t);
+  const { savedAccountToken } = await import("../src/relay/hosts.ts");
+  const { loginRelayWithToken, waitForNewComputer } = await import("../src/relay/pair.ts");
+  const serverUrl = "https://oauth.test";
+  const host = (deviceId, extra = {}) => ({ deviceId, name: deviceId, platform: "darwin", role: "host", membershipId: `m-${deviceId}`, online: true, ...extra });
+  let listings = [[host("already-here")]];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    const path = new URL(url).pathname;
+    if (path === "/api/v1/auth/me") {
+      assert.equal(options.headers.authorization, "Bearer {{SECRET_nyovfb7t}}");
+      return Response.json({ account: "rinai", isAdmin: false });
+    }
+    if (path === "/api/v1/devices/register") {
+      return Response.json({ accessToken: "{{SECRET_w2xq6zvn}}", accessTokenExpiresAt: Date.now() + 3600000, refreshToken: "{{SECRET_4aqqhmab}}", refreshTokenExpiresAt: Date.now() + 86400000 });
+    }
+    if (path === "/api/v1/devices") return Response.json({ items: listings.length > 1 ? listings.shift() : listings[0] });
+    assert.fail(`Unexpected request: ${url}`);
+  });
+
+  const signedIn = await loginRelayWithToken(serverUrl, "{{SECRET_nyovfb7t}}", []);
+  assert.equal(signedIn.account, "rinai");
+  assert.deepEqual(signedIn.candidates.map((item) => item.deviceId), ["already-here"]);
+  assert.equal(await savedAccountToken(serverUrl), "{{SECRET_nyovfb7t}}");
+  assert.ok(!storage.get("omp.relay.v1").includes("password"));
+
+  // Nothing new on the first look; then the computer that used the code shows up.
+  listings = [[host("already-here")], [host("already-here"), host("joined")]];
+  const joined = await waitForNewComputer(serverUrl, "rinai", new Set(["already-here"]), [], () => false, 1);
+  assert.equal(joined?.deviceId, "joined");
+
+  let polls = 0;
+  const cancelled = await waitForNewComputer(serverUrl, "rinai", new Set(["already-here", "joined"]), [], () => ++polls > 3, 1);
+  assert.equal(cancelled, undefined);
+});

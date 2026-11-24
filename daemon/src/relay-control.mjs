@@ -11,6 +11,24 @@ import { readState, tokenOf } from "./state.mjs";
 export const DEFAULT_RELAY = "https://dsh.r2049.cn";
 const POLL_MS = 1_500;
 
+/**
+ * A host registration code as the relay wants it (`K7QM-4XPA`), from what a
+ * person typed: either case, with or without the dash. Undefined when it is not one.
+ */
+export function hostCode(text) {
+  const match = /^\s*([A-Za-z0-9]{4})-?([A-Za-z0-9]{4})\s*$/.exec(text);
+  return match === null ? undefined : `${match[1]}-${match[2]}`.toUpperCase();
+}
+
+/** What a refused code means, for a person; other errors keep their own text. */
+export function loginFailure(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  if (code === "HOST_REGISTRATION_CODE_EXPIRED") return "the code expired. Make a new one on the phone (Add computer → Add a new computer).";
+  if (code === "HOST_REGISTRATION_CODE_CONSUMED") return "the code was already used. Make a new one on the phone.";
+  if (code === "HOST_REGISTRATION_CODE_NOT_FOUND") return "no such code. Check it against the phone, or make a new one there.";
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** One `/relay` call to the daemon `state` describes; throws its error text. */
 export async function relayCall(state, method, path, body) {
   const response = await fetch(`${state.url}${path}`, {
@@ -24,7 +42,12 @@ export async function relayCall(state, method, path, body) {
     signal: AbortSignal.timeout(30_000),
   });
   const answer = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof answer.error === "string" ? answer.error : `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(typeof answer.error === "string" ? answer.error : `HTTP ${response.status}`);
+    // The relay's own refusal code (HOST_REGISTRATION_CODE_EXPIRED, ...), for `loginFailure`.
+    if (typeof answer.code === "string") error.code = answer.code;
+    throw error;
+  }
   return answer;
 }
 
@@ -99,6 +122,20 @@ export async function runRelayCli(args) {
       console.log("Revoked: that phone can no longer reach this computer.");
       process.exit(0);
     }
+    if (command === "login" && args[1] !== undefined && hostCode(args[1]) !== undefined) {
+      // A code from the phone (Add computer → Add a new computer): joins its account, no password.
+      // A daemon started without the relay turns it on first; the code belongs to the phone's relay.
+      // No relay named: the one the daemon serves, else the public one.
+      const server = args[2] !== undefined && !args[2].startsWith("--") ? args[2] : undefined;
+      if (server !== undefined || !state.relay) await relayCall(state, "POST", "/relay/enable", { server: server ?? DEFAULT_RELAY });
+      try {
+        const done = await relayCall(state, "POST", "/relay/login", { code: hostCode(args[1]) });
+        console.log(`Joined the phone's account on ${done.server} · ${done.online ? "online" : "connecting"}. The phone adds this computer by itself.`);
+      } catch (error) {
+        throw new Error(loginFailure(error));
+      }
+      process.exit(0);
+    }
     if (command === "login") {
       // The password is asked for here, in the terminal, and sent once: it never
       // goes into argv, so it cannot end up in shell history, a plist or `ps`.
@@ -107,7 +144,7 @@ export async function runRelayCli(args) {
       const password = await ask("Relay account password: ", { hidden: true });
       if (password === undefined || password === "") throw new Error("a password is required");
       const done = await relayCall(state, "POST", "/relay/login", { account: account.trim(), password });
-      console.log(`Signed in as ${done.account ?? account.trim()} · ${done.online ? "online" : "connecting"}`);
+      console.log(`Signed in as ${done.account || account.trim()} · ${done.online ? "online" : "connecting"}`);
       process.exit(0);
     }
     if (command === "logout") {
@@ -116,8 +153,8 @@ export async function runRelayCli(args) {
       // tokens must still go. The daemon decides locally and answers 409 when
       // there was no account login to end.
       const done = await relayCall(state, "POST", "/relay/logout");
-      console.log(`Signed out of ${done.account ?? "the relay account"}.`);
-      console.log("Sign in again with: omp-mobile relay login <email>, or pair a phone with: omp-mobile relay pair");
+      console.log(`Signed out of ${done.account || "the relay account"}.`);
+      console.log("Sign in again with: omp-mobile relay login <code from the phone> (or <email>), or pair a phone with: omp-mobile relay pair");
       process.exit(0);
     }
     if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, login, logout, status, revoke)`);

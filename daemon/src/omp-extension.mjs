@@ -24,7 +24,7 @@ import { renderQr } from "./qr.mjs";
 import { Tailscale } from "./admission.mjs";
 import { requestPath, shellWord } from "./takeover.mjs";
 import { alive, readState, tokenOf } from "./state.mjs";
-import { DEFAULT_RELAY, grouped, pairingOutcome, relayCall, waitForPhone } from "./relay-control.mjs";
+import { DEFAULT_RELAY, grouped, hostCode, loginFailure, pairingOutcome, relayCall, waitForPhone } from "./relay-control.mjs";
 
 const HOME = join(homedir(), ".omp-mobile");
 const LOG_FILE = join(HOME, "daemon.log");
@@ -41,7 +41,7 @@ const TAKEOVER_MAX_AGE_MS = 60_000;
 const TAKEOVER_IDLE_WAIT_MS = 5_000;
 const SUBCOMMANDS = [
   { value: "relay", label: "relay", description: "Pair a phone through the ds-harness-remote relay (no Tailscale)" },
-  { value: "login", label: "login", description: "Sign in to a self-hosted relay with an account" },
+  { value: "login", label: "login", description: "Join the phone's account: /mobile login <code the phone shows>; no code: email and password" },
   { value: "logout", label: "logout", description: "Sign this computer out of the relay account" },
   { value: "status", label: "status", description: "Is the daemon running, and where" },
   { value: "stop", label: "stop", description: "Stop the background daemon" },
@@ -267,21 +267,31 @@ export default function ompMobile(pi) {
    * `/mobile relay`: make sure the daemon serves through the relay, show the
    * relay pairing code, and once a phone claims it ask for the code it shows.
    */
-  const pairThroughRelay = async (ctx, state, server) => {
+  /**
+   * The running daemon, serving through a relay: started with it, or (started by
+   * plain `/mobile`) told to turn it on. `server` undefined: the relay it already
+   * serves, else the public one. Undefined after telling the user why not.
+   */
+  const withRelay = async (ctx, state, server) => {
     let running = state !== undefined && (await status(state)) !== undefined ? state : undefined;
-    if (running !== undefined && !running.relay) {
-      ctx.ui.notify("OMP Mobile: the daemon runs without the relay. /mobile stop, then /mobile relay.", "warning");
-      return;
-    }
-    if (running === undefined) {
-      ctx.ui.notify("OMP Mobile: starting the daemon with the relay…", "info");
-      try {
-        running = await startDaemon(ctx.cwd, server);
-      } catch (error) {
-        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-        return;
+    try {
+      if (running === undefined) {
+        ctx.ui.notify("OMP Mobile: starting the daemon with the relay…", "info");
+        running = await startDaemon(ctx.cwd, server ?? DEFAULT_RELAY);
+      } else if (server !== undefined || !running.relay) {
+        // Already on that relay: a no-op. Another relay: the daemon says which one it serves.
+        await relayCall(running, "POST", "/relay/enable", { server: server ?? DEFAULT_RELAY });
       }
+      return running;
+    } catch (error) {
+      ctx.ui.notify(`OMP Mobile: ${error instanceof Error ? error.message : String(error)}`, "error");
+      return undefined;
     }
+  };
+
+  const pairThroughRelay = async (ctx, state, server) => {
+    const running = await withRelay(ctx, state, server);
+    if (running === undefined) return;
     let view;
     try {
       view = await relayCall(running, "POST", "/relay/pair");
@@ -361,7 +371,21 @@ export default function ompMobile(pi) {
         return;
       }
       if (sub === "relay" || sub.startsWith("relay ")) {
-        await pairThroughRelay(ctx, state, sub.slice("relay".length).trim() || DEFAULT_RELAY);
+        await pairThroughRelay(ctx, state, sub.slice("relay".length).trim() || undefined);
+        return;
+      }
+      const joining = /^login\s+(\S+)(?:\s+(\S+))?$/.exec(sub);
+      if (joining !== null && hostCode(joining[1]) !== undefined) {
+        // The code a signed-in phone shows (Add computer → Add a new computer): this computer
+        // joins that account on the phone's relay. Nothing to type but the code.
+        const running = await withRelay(ctx, state, joining[2]);
+        if (running === undefined) return;
+        try {
+          const done = await relayCall(running, "POST", "/relay/login", { code: hostCode(joining[1]) });
+          ctx.ui.notify(`OMP Mobile: joined the phone's account on ${done.server} · ${done.online ? "online" : "connecting"}. The phone adds this computer by itself.`, "info");
+        } catch (error) {
+          ctx.ui.notify(`OMP Mobile: could not join: ${loginFailure(error)}`, "error");
+        }
         return;
       }
       if (sub === "login") {
@@ -377,7 +401,7 @@ export default function ompMobile(pi) {
         if (password === undefined || password === "") return;
         try {
           const done = await relayCall(state, "POST", "/relay/login", { account, password });
-          ctx.ui.notify(`OMP Mobile: signed in as ${done.account ?? account} · ${done.online ? "online" : "connecting"}`, "info");
+          ctx.ui.notify(`OMP Mobile: signed in as ${done.account || account} · ${done.online ? "online" : "connecting"}`, "info");
         } catch (error) {
           ctx.ui.notify(`OMP Mobile: sign-in failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
@@ -392,7 +416,7 @@ export default function ompMobile(pi) {
           // No `GET /relay` first: it fetches the phone list and fails whenever the
           // relay is unreachable, which is exactly when the tokens must still go.
           const done = await relayCall(state, "POST", "/relay/logout");
-          ctx.ui.notify(`OMP Mobile: signed out of ${done.account ?? "the relay account"}. Sign in again with /mobile login.`, "info");
+          ctx.ui.notify(`OMP Mobile: signed out of ${done.account || "the relay account"}. Join again with /mobile login <code from the phone>.`, "info");
         } catch (error) {
           ctx.ui.notify(`OMP Mobile: sign-out failed: ${error instanceof Error ? error.message : String(error)}`, "error");
         }
