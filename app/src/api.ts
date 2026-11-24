@@ -147,7 +147,7 @@ export async function answerRequest(
   machine: Machine,
   sessionId: string,
   id: string,
-  answer: { value?: string; confirmed?: boolean; cancelled?: boolean },
+  answer: { value?: string; data?: Record<string, string>; confirmed?: boolean; cancelled?: boolean },
 ): Promise<void> {
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(sessionId)}/answer`, {
     method: "POST",

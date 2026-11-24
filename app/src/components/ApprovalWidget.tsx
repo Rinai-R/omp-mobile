@@ -19,7 +19,7 @@ type Answer = { value?: string; confirmed?: boolean };
  */
 export function quickAnswer(request: Request): Answer | undefined {
   if (request.method === "confirm") return { confirmed: true };
-  if (request.method !== "select" || !request.title.startsWith(TOOL_APPROVAL_PREFIX)) return undefined;
+  if (request.method !== "select" || !request.title?.startsWith(TOOL_APPROVAL_PREFIX)) return undefined;
   const options = request.options ?? [];
   const once = options.find((option) => option === "Approve Once" || option === "Approve" || option === "Approve File");
   return once === undefined ? undefined : { value: once };
@@ -27,7 +27,8 @@ export function quickAnswer(request: Request): Answer | undefined {
 
 /** What the card says the question is about: the tool and its first detail (`bash · ls -la`), or the question itself. */
 function subjectOf(request: Request): string {
-  const text = approvalText(request.title, request.message);
+  if (request.method === "form") return t("home.widget.form");
+  const text = approvalText(request.title ?? "", request.message);
   const first = text.details[0]?.value.replace(/\s+/g, " ");
   if (text.tool === undefined) return [text.heading, first].filter(Boolean).join(" · ");
   return first === undefined ? text.tool : `${text.tool} · ${first}`;
@@ -51,7 +52,7 @@ export function ApprovalWidget({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const answer = quickAnswer(session.request);
-  const tool = session.request.title.startsWith(TOOL_APPROVAL_PREFIX);
+  const tool = session.request.title?.startsWith(TOOL_APPROVAL_PREFIX) === true;
   return (
     <View style={styles.widget}>
       <GradientFill colors={[c.widgetA, c.widgetB, c.widgetC]} radius={24} />

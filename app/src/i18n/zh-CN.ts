@@ -73,6 +73,7 @@ export const zhCN: Record<Key, Message> = {
   "home.widget.view": "查看",
   "home.widget.allow": "允许",
   "home.widget.failed": "无法回复：{error}",
+  "home.widget.form": "OMP 在提问（请在会话中回答）",
 
   // Chat
   "chat.sending": "发送中…",
@@ -134,6 +135,7 @@ export const zhCN: Record<Key, Message> = {
   // OMP's questions
   "approval.no": "否",
   "approval.yes": "是",
+  "approval.unsupportedForm": "请在电脑上的 OMP 会话中回答这个表单。",
   "approval.submit": "提交",
   "approval.option.approve": "允许",
   "approval.option.approveOnce": "允许一次",

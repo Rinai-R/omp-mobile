@@ -13,10 +13,12 @@ import { SANS, MONO, radius, useColors, useStyles, type Palette } from "../theme
 import type { ApprovalRequest } from "../types";
 import { t } from "../i18n/index.ts";
 import { approvalText, optionLabel } from "../ompText";
+import { singleChoiceForm } from "../askForm";
 import { BrandMark, GradientFill } from "./brand";
 import { SheetGrab, SheetHost, SheetSurface, useSheet } from "./ui";
 
-type Answer = { value?: string; confirmed?: boolean; cancelled?: boolean };
+/** An answer: a choice or a confirm (`value`/`confirmed`), or a form's fields (`data`). */
+type Answer = { value?: string; data?: Record<string, string>; confirmed?: boolean; cancelled?: boolean };
 
 /** Answers that refuse: drawn in the system red, like a destructive action. */
 const REFUSAL = /^(?:(?:deny|reject|no|cancel|abort)\b|否|拒绝)/i;
@@ -51,7 +53,7 @@ function Option({
   );
 }
 
-/** OMP's question for the user (select / confirm / input), as a bottom sheet over the chat. */
+/** OMP's question for the user (select / confirm / input / form), as a bottom sheet over the chat. */
 export function ApprovalSheet({
   request,
   onAnswer,
@@ -78,7 +80,8 @@ export function ApprovalSheet({
   );
   const input = request.method === "input" || request.method === "editor";
   const options = request.options ?? [];
-  const text = approvalText(request.title, request.message);
+  const form = request.method === "form" ? singleChoiceForm(request.html) : undefined;
+  const text = approvalText(request.title ?? "", request.message);
   return (
     <SheetHost sheet={sheet} modal={false} backdropLabel={t("common.cancel")}>
       <SheetSurface style={[styles.sheet, { paddingBottom: 10 + insets.bottom }]}>
@@ -92,8 +95,12 @@ export function ApprovalSheet({
               <GradientFill colors={[colors.accentA, colors.accentV]} radius={26} />
               <BrandMark size={22} color="#ffffff" />
             </View>
-            <Text style={styles.title}>{text.heading}</Text>
-            {text.details.length > 0 ? (
+            <Text style={styles.title}>{form !== undefined ? form.question || t("home.widget.question") : text.heading || t("home.widget.question")}</Text>
+            {request.method === "form" && form === undefined ? (
+              <Text style={styles.formPrompt}>{t("approval.unsupportedForm")}</Text>
+            ) : form?.prompt !== undefined ? (
+              <Text style={styles.formPrompt}>{form.prompt}</Text>
+            ) : text.details.length > 0 ? (
               <View style={styles.cmd}>
                 {text.details.map((detail, index) =>
                   detail.command ? (
@@ -135,9 +142,22 @@ export function ApprovalSheet({
                   key={`${option}-${index}`}
                   label={option}
                   description={request.optionDetails?.[index]?.description}
-                 
+
                   primary={index === 0}
                   onPress={() => onAnswer({ value: option })}
+                />
+              ))}
+            </ScrollView>
+          ) : null}
+
+          {form !== undefined ? (
+            <ScrollView style={styles.options} bounces={false}>
+              {form.choices.map((choice, index) => (
+                <Option
+                  key={`${choice.value}-${index}`}
+                  label={choice.label}
+                  primary={index === 0}
+                  onPress={() => onAnswer({ data: { [form.name]: choice.value } })}
                 />
               ))}
             </ScrollView>
@@ -208,5 +228,6 @@ function createStyles(c: Palette) {
     inputFocused: { ...input, borderColor: c.ring },
     cancel: { minHeight: 56, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: c.dark ? "#2c2c2e" : "#ffffff" },
     cancelText: { fontFamily: SANS, fontSize: 18, lineHeight: 23, fontWeight: "600", color: c.tint },
+    formPrompt: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: c.fgMuted, textAlign: "center" },
   } as const;
 }

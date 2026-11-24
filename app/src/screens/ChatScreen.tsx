@@ -585,7 +585,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   }, []);
 
   const answer = useCallback(
-    (value: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
+    (value: { value?: string; data?: Record<string, string>; confirmed?: boolean; cancelled?: boolean }) => {
       if (approval === null) return;
       socketRef.current?.send({ type: "approval", id: approval.id, ...value });
       setApproval(null);

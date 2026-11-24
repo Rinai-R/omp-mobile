@@ -74,6 +74,7 @@ export const en = {
   "home.widget.view": "View",
   "home.widget.allow": "Allow",
   "home.widget.failed": "Could not answer: {error}",
+  "home.widget.form": "OMP is asking (answer in the chat)",
 
   // Chat
   "chat.sending": "Sending…",
@@ -135,6 +136,7 @@ export const en = {
   // OMP's questions
   "approval.no": "No",
   "approval.yes": "Yes",
+  "approval.unsupportedForm": "Open the OMP session on your computer to answer this form.",
   "approval.submit": "Submit",
   "approval.option.approve": "Allow",
   "approval.option.approveOnce": "Allow once",

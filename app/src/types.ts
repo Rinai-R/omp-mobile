@@ -174,13 +174,15 @@ export type ChatItem = MessageItem | ToolItem | NoticeItem;
 
 export interface ApprovalRequest {
   id: string;
-  method: "select" | "confirm" | "input" | "editor";
-  title: string;
+  method: "select" | "confirm" | "input" | "editor" | "form";
+  title?: string;
   message?: string;
   options?: string[];
   optionDetails?: { description?: string }[];
   placeholder?: string;
   prefill?: string;
+  /** A `form` question's HTML (AskUserQuestion): one `<form>` with radio inputs. */
+  html?: string;
 }
 
 export interface Hello {
