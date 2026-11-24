@@ -102,15 +102,23 @@ export function pairRelay(ticket: PairingTicket, machines: readonly Machine[], o
 /**
  * Sign in to a self-hosted relay with an account (`loginWithAccount`) and list
  * its hosts: the password is used once, this phone keeps only its device token
- * pair. The first online host connects; with none online the error says so.
+ * pair.
+ *
+ * Hosts already in `machines` are skipped, so an account with several computers
+ * still adds the next one instead of stopping at "already added". Online ones
+ * come first; with every host already added or none at all, the error says which.
  */
 export async function loginRelay(serverUrl: string, email: string, password: string, machines: readonly Machine[]): Promise<Machine> {
   const phone = await phoneFor(serverUrl, newPhone);
   const credentials = await loginWithAccount(serverUrl, email, password, phone, appConfig.expo.version);
   await saveLogin(serverUrl, phone, credentials);
   const hosts = await relayHosts(serverUrl);
-  const host = hosts.find((item) => item.online) ?? hosts[0];
-  if (host === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
-  if (machines.some((item) => item.url === `${serverUrl}#${host.deviceId}`)) throw new Error(t("api.duplicate"));
-  return relayMachine({ serverUrl, hostDeviceId: host.deviceId });
+  const added = new Set(machines.map((item) => item.url));
+  const candidates = hosts
+    .map((item) => ({ item, url: `${serverUrl}#${item.deviceId}` }))
+    .filter(({ url }) => !added.has(url));
+  if (hosts.length > 0 && candidates.length === 0) throw new Error(t("api.duplicate"));
+  const chosen = candidates.find(({ item }) => item.online) ?? candidates[0];
+  if (chosen === undefined) throw new PairingError("NO_HOST", t("relayLogin.noHost"));
+  return relayMachine({ serverUrl, hostDeviceId: chosen.item.deviceId });
 }

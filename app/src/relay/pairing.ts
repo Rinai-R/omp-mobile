@@ -73,8 +73,11 @@ const loginSchema = z.object({
   account: z.string().min(1).max(254),
 });
 
-/** The answer of `POST /api/v1/devices/register` with an account token. */
-const registerSchema = z.union([tokensSchema, z.object({ tokens: tokensSchema })]);
+/**
+ * The answer of `POST /api/v1/devices/register` with an account token: a flat
+ * token object, the shape `apps/server` sends and the vendored host client reads.
+ */
+const registerSchema = tokensSchema;
 
 export type PairingDevice = z.infer<typeof deviceSchema>;
 export type PairingSession = z.infer<typeof sessionSchema>;
@@ -273,5 +276,5 @@ export async function loginWithAccount(
     }), { authorization: `Bearer ${login.token}` }),
     "register answer",
   );
-  return { account: login.account, tokens: "accessToken" in registered ? registered : registered.tokens };
+  return { account: login.account, tokens: registered };
 }

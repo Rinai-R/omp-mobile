@@ -384,23 +384,30 @@ export class RelayHost {
   }
 
   /**
+   * The account this computer is signed in as, read from disk alone. Logout has
+   * to decide whether it has anything to end without asking the server: the
+   * server is exactly what may be unreachable or refusing this device.
+   * @returns {Promise<string | undefined>}
+   */
+  async storedAccount() {
+    if (this.api === undefined || this.identity === undefined) return undefined;
+    const stored = await this.api.store.load(this.api.baseUrl, this.identity.deviceId).catch(() => undefined);
+    return stored?.authorizationMethod === "account" ? stored.account : undefined;
+  }
+
+  /**
    * Sign this computer out of an account login: end the connection, revoke the
-   * device on the server, and drop the stored tokens. Without it a wrong account
-   * or a device revoked server-side leaves no way back, since `start` only logs
-   * in while nothing is stored.
+   * device on the server, and drop the stored tokens. Without it `--relay-account`
+   * is ignored while tokens exist, so switching accounts had no way in.
+   *
+   * The revoke is best effort: `revokeCurrentDevice()` clears the local tokens in
+   * its `finally`, so an unreachable server (or one that no longer knows this
+   * device) still ends in a signed-out daemon.
    */
   async logout() {
     await this.connection?.stop().catch(() => undefined);
     this.connection = undefined;
-    const api = this.api;
-    if (api !== undefined && this.identity !== undefined) {
-      try {
-        await api.revokeCurrentDevice();
-      } catch {
-        // Offline, or the server no longer knows this device: the local tokens still go.
-        await api.clearAuthorization().catch(() => undefined);
-      }
-    }
+    await this.api?.revokeCurrentDevice().catch(() => undefined);
     this.pairing?.close();
     this.pairing = undefined;
   }

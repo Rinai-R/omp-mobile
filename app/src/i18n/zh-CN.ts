@@ -295,7 +295,7 @@ export const zhCN: Record<Key, Message> = {
   "relayPair.expired": "验证码已过期。请在电脑上重新生成。",
   "relayPair.wrongCode": "电脑收到的验证码不一致。请在电脑上重新生成二维码后再扫。",
   "relayPair.failed": "配对未完成：{reason}",
-  "relayLogin.noHost": "已登录，但该账号下没有电脑。请先在那台电脑上用 --relay-login 启动 daemon。",
+  "relayLogin.noHost": "已登录，但该账号下没有电脑。请先在那台电脑上执行 omp-mobile relay login（或 /mobile login）。",
   "relay.notPaired": "这部手机已不再与该中继服务器配对，请重新配对。",
   "relay.notOmp": "那台电脑没有运行 omp-mobile。请扫描 `/mobile relay`（或 `omp-mobile relay pair`）显示的配对码。",
   "relay.renewRefused": "服务器拒绝续期这部手机的登录，请重新配对。",

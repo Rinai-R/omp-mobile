@@ -904,6 +904,17 @@ class Daemon {
     /** @type {RelayHost | undefined} */
     this.relay = undefined;
     if (options.relay) {
+      // Built here, not in `listen()`: nothing at startup prompts any more, so the
+      // constructor can own it and the diff stays small.
+      this.relay = new RelayHost({
+        serverUrl: options.relay,
+        dir: options.relayDir,
+        name: `omp-mobile on ${hostname().replace(/\.local$/, "")}`,
+        version: VERSION,
+        port: () => this.tunnelServer.address().port,
+        token: this.token,
+        log: (line) => this.log(line),
+      });
       this.tunnelServer = createServer((req, res) => void this.handleHttp(req, res));
       this.tunnelServer.on("upgrade", (req, socket, head) => {
         socket.on("error", () => socket.destroy());
@@ -1728,9 +1739,19 @@ class Daemon {
         sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
         return;
       }
+      // Sign out of an account login. Whether there is one is decided locally:
+      // asking the server first fails exactly when logout matters — an unreachable
+      // relay, or a device the server no longer knows — and leaves the tokens behind.
       if (url.pathname === "/relay/logout" && req.method === "POST") {
+        const account = await this.relay.storedAccount();
+        if (account === undefined) {
+          sendJson(res, 409, { error: "this computer is not signed in to a relay account (anonymous pairing has no login to end)" });
+          return;
+        }
         await this.relay.logout();
-        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+        // `status()` now reports no account (the tokens are gone); the account this
+        // call ended is what a caller shows, so it goes last.
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()), account });
         return;
       }
       sendJson(res, 404, { error: "not found" });
@@ -1743,19 +1764,6 @@ class Daemon {
 
   async listen() {
     await new Promise((resolveListen) => this.server.listen(this.options.port, this.options.host, () => resolveListen()));
-    if (this.options.relay) {
-      // Anonymous pairing only: account sign-in is an explicit `relay login`, from
-      // the CLI or /mobile, so a background start never waits on a password.
-      this.relay = new RelayHost({
-        serverUrl: this.options.relay,
-        dir: this.options.relayDir,
-        name: `omp-mobile on ${hostname().replace(/\.local$/, "")}`,
-        version: VERSION,
-        port: () => this.tunnelServer.address().port,
-        token: this.token,
-        log: (line) => this.log(line),
-      });
-    }
     if (this.relay !== undefined) {
       await new Promise((resolveListen) => this.tunnelServer.listen(0, "127.0.0.1", () => resolveListen()));
       await this.relay.start();

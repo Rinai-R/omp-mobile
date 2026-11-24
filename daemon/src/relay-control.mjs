@@ -111,10 +111,13 @@ export async function runRelayCli(args) {
       process.exit(0);
     }
     if (command === "logout") {
-      const before = await relayCall(state, "GET", "/relay");
-      if (before.account === undefined) throw new Error("this computer is not signed in to a relay account (anonymous pairing has no login to end)");
+      // No `GET /relay` first: it fetches the phone list, so it fails whenever the
+      // relay is unreachable or has forgotten this device — exactly when the
+      // tokens must still go. The daemon decides locally and answers 409 when
+      // there was no account login to end.
       const done = await relayCall(state, "POST", "/relay/logout");
-      console.log(`Signed out${done.paired ? " locally, but the server still lists this computer" : ""}. Pair a phone again with: omp-mobile relay pair`);
+      console.log(`Signed out of ${done.account ?? "the relay account"}.`);
+      console.log("Sign in again with --relay-login on the next start, or pair a phone with: omp-mobile relay pair");
       process.exit(0);
     }
     if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, login, logout, status, revoke)`);

@@ -296,7 +296,7 @@ export const en = {
   "relayPair.expired": "The code expired. Show a new one on the computer.",
   "relayPair.wrongCode": "The computer got a different code. Show a new code there and scan again.",
   "relayPair.failed": "Pairing did not complete: {reason}",
-  "relayLogin.noHost": "Signed in, but this account has no computer on the relay. Start the daemon with --relay-login there first.",
+  "relayLogin.noHost": "Signed in, but this account has no computer on the relay. Sign that computer in with omp-mobile relay login (or /mobile login) first.",
   "relay.notPaired": "This phone is not paired with this relay server any more. Pair it again.",
   "relay.notOmp": "That computer does not run omp-mobile. Pair with the code `/mobile relay` (or `omp-mobile relay pair`) shows.",
   "relay.renewRefused": "The server refused to renew this phone's sign-in. Pair it again.",

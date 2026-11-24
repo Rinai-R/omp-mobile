@@ -65,7 +65,8 @@ test("account login registers the phone with the account bearer token", async (t
       v: 1,
       device: { deviceId: "phone", name: "Phone", role: "client", platform: "android", identityKey: "public", clientVersion: "0.8.2" },
     });
-    return Response.json({ tokens });
+    // The flat shape apps/server sends, and the only one the schema accepts.
+    return Response.json(tokens);
   });
 
   assert.deepEqual(
