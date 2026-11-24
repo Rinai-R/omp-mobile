@@ -228,11 +228,10 @@ export function createTunnelRouter(target, send) {
  */
 export class RelayHost {
   /**
-   * @param {{serverUrl: string, dir: string, name: string, version: string, port: () => number, token: string, log: (line: string) => void,
-   *          account?: string, password?: () => Promise<string>}} options
-   *   `account` + `password` opt in to account authorization instead of anonymous
-   *   pairing (a self-hosted relay that supports `auth/login`); the password is
-   *   used once to exchange for device tokens and never stored.
+   * @param {{serverUrl: string, dir: string, name: string, version: string, port: () => number, token: string, log: (line: string) => void}} options
+   *   Account sign-in is not part of construction: `login` is an explicit call
+   *   (`relay login` / `/mobile login`), so a background start never asks for a
+   *   password, and stored tokens alone bring the relay back online.
    */
   constructor(options) {
     this.options = options;
@@ -254,19 +253,9 @@ export class RelayHost {
       (_context, send) => createTunnelRouter({ port: this.options.port(), token: this.options.token }, send),
       this.logger,
     );
+    // Stored tokens are all a restart needs; without them the relay stays up
+    // unpaired until an explicit `relay login` or anonymous pairing.
     if (await this.api.hasStoredAuthorization()) this.connect();
-    else if (this.options.account !== undefined && this.options.password !== undefined) {
-      try {
-        await this.login(this.options.account, await this.options.password());
-      } catch (error) {
-        // Without a terminal and without $OMP_MOBILE_RELAY_PASSWORD there is
-        // nothing to answer the prompt: say so and stay up without the login.
-        if (error?.code !== "RELAY_PASSWORD_REQUIRED") throw error;
-        log(`relay warn: ${error.message}; starting without relay login`);
-      } finally {
-        this.options.password = undefined;
-      }
-    }
   }
 
   /** Exchange the account password once for device tokens, then go online; the password is not kept. */
@@ -378,13 +367,42 @@ export class RelayHost {
 
   async status() {
     // Before `start` finished there is no identity yet: not paired, not online.
+    // An unreadable or malformed credential file must not take `/status` down with
+    // it: report "not paired" and leave the error to the login/logout paths.
+    const stored = this.api === undefined || this.identity === undefined
+      ? undefined
+      : await this.api.store.load(this.api.baseUrl, this.identity.deviceId).catch(() => undefined);
     return {
       server: this.serverUrl,
       deviceId: this.identity?.deviceId ?? null,
-      paired: (await this.api?.hasStoredAuthorization()) ?? false,
+      paired: stored !== undefined,
       online: this.connection?.isOnline() ?? false,
       connected: this.connections?.connectionCount() ?? 0,
+      // Only an account login is something `relay logout` can end; anonymous pairing is not.
+      account: stored?.authorizationMethod === "account" ? stored.account : undefined,
     };
+  }
+
+  /**
+   * Sign this computer out of an account login: end the connection, revoke the
+   * device on the server, and drop the stored tokens. Without it a wrong account
+   * or a device revoked server-side leaves no way back, since `start` only logs
+   * in while nothing is stored.
+   */
+  async logout() {
+    await this.connection?.stop().catch(() => undefined);
+    this.connection = undefined;
+    const api = this.api;
+    if (api !== undefined && this.identity !== undefined) {
+      try {
+        await api.revokeCurrentDevice();
+      } catch {
+        // Offline, or the server no longer knows this device: the local tokens still go.
+        await api.clearAuthorization().catch(() => undefined);
+      }
+    }
+    this.pairing?.close();
+    this.pairing = undefined;
   }
 
   async close() {

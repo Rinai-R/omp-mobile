@@ -3,6 +3,7 @@
  * `/relay` API: shared by `omp-mobile relay ...` and `/mobile relay`.
  */
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { renderQr } from "./qr.mjs";
 import { readState, tokenOf } from "./state.mjs";
 
@@ -49,6 +50,28 @@ export function grouped(fingerprint) {
   return fingerprint.match(/.{1,4}/g)?.join(" ") ?? fingerprint;
 }
 
+/**
+ * One line from the terminal. `hidden` suppresses the echo, so a password never
+ * shows on screen and never passes through argv.
+ */
+async function ask(question, { hidden = false } = {}) {
+  if (process.stdin.isTTY !== true) {
+    throw new Error(`${question.trim()} cannot be asked without a terminal; run this from one`);
+  }
+  const output = new Writable({ write(_chunk, _encoding, done) { done(); } });
+  const prompt = createInterface({ input: process.stdin, output: hidden ? output : process.stdout, terminal: true });
+  process.stderr.write(question);
+  try {
+    return (await prompt.question("")).trim();
+  } finally {
+    prompt.close();
+    if (hidden) {
+      output.end();
+      process.stderr.write("\n");
+    }
+  }
+}
+
 function stateFileOf(args) {
   const at = args.indexOf("--state-file");
   return at === -1 ? undefined : args[at + 1];
@@ -76,7 +99,25 @@ export async function runRelayCli(args) {
       console.log("Revoked: that phone can no longer reach this computer.");
       process.exit(0);
     }
-    if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, status, revoke)`);
+    if (command === "login") {
+      // The password is asked for here, in the terminal, and sent once: it never
+      // goes into argv, so it cannot end up in shell history, a plist or `ps`.
+      const account = args[1] ?? (await ask("Relay account email: "));
+      if (account === undefined || account.trim() === "") throw new Error("usage: omp-mobile relay login <email>");
+      const password = await ask("Relay account password: ", { hidden: true });
+      if (password === undefined || password === "") throw new Error("a password is required");
+      const done = await relayCall(state, "POST", "/relay/login", { account: account.trim(), password });
+      console.log(`Signed in as ${done.account ?? account.trim()} · ${done.online ? "online" : "connecting"}`);
+      process.exit(0);
+    }
+    if (command === "logout") {
+      const before = await relayCall(state, "GET", "/relay");
+      if (before.account === undefined) throw new Error("this computer is not signed in to a relay account (anonymous pairing has no login to end)");
+      const done = await relayCall(state, "POST", "/relay/logout");
+      console.log(`Signed out${done.paired ? " locally, but the server still lists this computer" : ""}. Pair a phone again with: omp-mobile relay pair`);
+      process.exit(0);
+    }
+    if (command !== "pair") throw new Error(`unknown relay command "${command}" (pair, login, logout, status, revoke)`);
     const view = await relayCall(state, "POST", "/relay/pair");
     let cancelled = false;
     process.on("SIGINT", () => {

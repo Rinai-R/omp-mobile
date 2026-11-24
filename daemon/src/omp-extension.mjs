@@ -41,6 +41,8 @@ const TAKEOVER_MAX_AGE_MS = 60_000;
 const TAKEOVER_IDLE_WAIT_MS = 5_000;
 const SUBCOMMANDS = [
   { value: "relay", label: "relay", description: "Pair a phone through the ds-harness-remote relay (no Tailscale)" },
+  { value: "login", label: "login", description: "Sign in to a self-hosted relay with an account" },
+  { value: "logout", label: "logout", description: "Sign this computer out of the relay account" },
   { value: "status", label: "status", description: "Is the daemon running, and where" },
   { value: "stop", label: "stop", description: "Stop the background daemon" },
   { value: "hide", label: "hide", description: "Hide the pairing code" },
@@ -362,8 +364,45 @@ export default function ompMobile(pi) {
         await pairThroughRelay(ctx, state, sub.slice("relay".length).trim() || DEFAULT_RELAY);
         return;
       }
+      if (sub === "login") {
+        if (state === undefined) {
+          ctx.ui.notify("OMP Mobile: the daemon is not running. /mobile starts it.", "info");
+          return;
+        }
+        const account = (await ctx.ui.input("OMP Mobile: relay account email"))?.trim();
+        if (account === undefined || account === "") return;
+        // `secret` keeps the password off screen; it goes straight to the daemon
+        // and is never written down or put in argv.
+        const password = await ctx.ui.input("OMP Mobile: relay account password", undefined, { secret: true });
+        if (password === undefined || password === "") return;
+        try {
+          const done = await relayCall(state, "POST", "/relay/login", { account, password });
+          ctx.ui.notify(`OMP Mobile: signed in as ${done.account ?? account} · ${done.online ? "online" : "connecting"}`, "info");
+        } catch (error) {
+          ctx.ui.notify(`OMP Mobile: sign-in failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
+      if (sub === "logout") {
+        if (state === undefined) {
+          ctx.ui.notify("OMP Mobile: the daemon is not running.", "info");
+          return;
+        }
+        try {
+          const before = await relayCall(state, "GET", "/relay");
+          if (before.account === undefined) {
+            ctx.ui.notify("OMP Mobile: this computer is not signed in to a relay account.", "info");
+            return;
+          }
+          await relayCall(state, "POST", "/relay/logout");
+          ctx.ui.notify("OMP Mobile: signed out. Pair a phone again with /mobile relay.", "info");
+        } catch (error) {
+          ctx.ui.notify(`OMP Mobile: sign-out failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+        return;
+      }
       if (sub !== "") {
-        ctx.ui.notify(`OMP Mobile: unknown "${sub}". Use /mobile, /mobile relay, /mobile status, /mobile stop or /mobile hide.`, "warning");
+        ctx.ui.notify(`OMP Mobile: unknown "${sub}". Use /mobile, /mobile relay, /mobile login, /mobile logout, /mobile status, /mobile stop or /mobile hide.`, "warning");
         return;
       }
       let running = state !== undefined && (await status(state)) !== undefined ? state : undefined;

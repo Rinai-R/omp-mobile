@@ -102,28 +102,65 @@ test("a WebSocket carries the token in its query, splits large messages and echo
   router.closePeerStreams();
 });
 
-test("a relay login with no terminal and no password starts without the login instead of hanging", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "omp-relay-login-"));
-  const logs = [];
+test("start never waits for a password: stored tokens connect and none means unpaired", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-start-"));
   const host = new RelayHost({
-    // Nothing listens here: a login attempt would reject, so reaching the log proves none was made.
+    // Nothing listens here: any network call would reject, so an unpaired start proves none was made.
     serverUrl: "http://127.0.0.1:9",
     dir,
     name: "test host",
     version: "0.0.0",
     port: () => 1,
     token: TOKEN,
-    log: (line) => logs.push(line),
-    account: "user@example.com",
-    password: async () => {
-      throw Object.assign(new Error("--relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal"), {
-        code: "RELAY_PASSWORD_REQUIRED",
-      });
-    },
+    log: () => undefined,
   });
-  // Must resolve rather than wait for an answer that cannot come.
+  // Must resolve: a background start (launchd) has no terminal to ask for a password.
   await host.start();
-  assert.deepEqual(logs, ["relay warn: --relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal; starting without relay login"]);
-  assert.equal((await host.status()).online, false);
+  const status = await host.status();
+  assert.equal(status.paired, false);
+  assert.equal(status.online, false);
+  await host.close();
+});
+
+test("status reports an account login, and logout clears it and the stored tokens", async () => {
+  const { writeFileSync } = await import("node:fs");
+  const dir = mkdtempSync(join(tmpdir(), "omp-relay-logout-"));
+  const host = new RelayHost({
+    serverUrl: "http://127.0.0.1:9",
+    dir,
+    name: "test host",
+    version: "0.0.0",
+    port: () => 1,
+    token: TOKEN,
+    log: () => undefined,
+  });
+  // Identity first: the credential file is keyed by this host's device id.
+  await host.start();
+  const before = await host.status();
+  assert.equal(before.paired, false);
+  assert.equal(before.account, undefined);
+
+  const { join: joinPath } = await import("node:path");
+  const credentials = joinPath(dir, "server-credentials.json");
+  writeFileSync(credentials, JSON.stringify({
+    schemaVersion: 1,
+    serverUrl: "http://127.0.0.1:9",
+    deviceId: before.deviceId,
+    authorizationMethod: "account",
+    account: "user@example.com",
+    accessToken: "a".repeat(24),
+    accessTokenExpiresAt: Date.now() + 3_600_000,
+    refreshToken: "r".repeat(24),
+    refreshTokenExpiresAt: Date.now() + 3_600_000,
+  }), { mode: 0o600 });
+  const signedIn = await host.status();
+  assert.equal(signedIn.paired, true);
+  assert.equal(signedIn.account, "user@example.com");
+
+  // The server is unreachable, so the revoke fails and the local tokens must go anyway.
+  await host.logout();
+  const after = await host.status();
+  assert.equal(after.paired, false);
+  assert.equal(after.account, undefined);
   await host.close();
 });

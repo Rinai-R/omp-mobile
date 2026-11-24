@@ -8,8 +8,6 @@
  * to be exposed to the public internet.
  */
 import { STATUS_CODES, createServer } from "node:http";
-import { createInterface } from "node:readline/promises";
-import { Writable } from "node:stream";
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { homedir, hostname, platform } from "node:os";
@@ -37,34 +35,6 @@ const DEFAULT_TOKEN_FILE = join(homedir(), ".omp-mobile", "token");
 const DEFAULT_REGISTRY_FILE = join(homedir(), ".omp-mobile", "sessions.json");
 const DEFAULT_STATE_FILE = join(homedir(), ".omp-mobile", "daemon.json");
 const DEFAULT_RELAY_DIR = join(homedir(), ".omp-mobile", "relay");
-/**
- * The relay account password for `--relay-login`, from the environment or a
- * prompt. It is used once to exchange for device tokens and never stored, so
- * it must not sit in argv (shell history, launchd plists, process lists).
- */
-async function relayPassword(options) {
-  const fromEnv = process.env.OMP_MOBILE_RELAY_PASSWORD;
-  delete process.env.OMP_MOBILE_RELAY_PASSWORD;
-  if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
-  // Under launchd (or any other non-TTY start) nothing can answer the prompt:
-  // fail with one clear line so the daemon serves without the login instead of
-  // waiting on stdin forever while the HTTP server already looks healthy.
-  if (process.stdin.isTTY !== true) {
-    throw Object.assign(new Error("--relay-login needs $OMP_MOBILE_RELAY_PASSWORD when run without a terminal"), {
-      code: "RELAY_PASSWORD_REQUIRED",
-    });
-  }
-  const output = new Writable({ write(_chunk, _encoding, done) { done(); } });
-  const prompt = createInterface({ input: process.stdin, output, terminal: process.stdin.isTTY === true });
-  process.stderr.write(`Relay account password for ${options.relayAccount}: `);
-  try {
-    return await prompt.question("");
-  } finally {
-    prompt.close();
-    output.end();
-    process.stderr.write("\n");
-  }
-}
 const DEFAULT_OMP_HOME = join(homedir(), ".omp");
 const MAX_BODY = 256 * 1024;
 /** Terminal sessions listed next to the daemon's own, newest first. */
@@ -239,8 +209,6 @@ function parseArgs(argv) {
     qr: true,
     relay: "",
     relayDir: DEFAULT_RELAY_DIR,
-    relayLogin: false,
-    relayAccount: "",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -316,15 +284,6 @@ function parseArgs(argv) {
         options.relayDir = resolve(value);
         i += 1;
         break;
-      case "--relay-login":
-        // Opt-in account login for a self-hosted relay (the public relay stays
-        // anonymous): `--relay-login` with `--relay <url>` and `--relay-account <email>`.
-        options.relayLogin = true;
-        break;
-      case "--relay-account":
-        options.relayAccount = value;
-        i += 1;
-        break;
       case "--help":
       case "-h":
         printHelp();
@@ -334,16 +293,6 @@ function parseArgs(argv) {
           console.error(`unknown flag: ${flag}`);
           process.exit(2);
         }
-    }
-  }
-  if (options.relayLogin) {
-    if (!options.relay) {
-      console.error("--relay-login needs --relay <url>: the relay to log in to");
-      process.exit(2);
-    }
-    if (!options.relayAccount) {
-      console.error("--relay-login needs --relay-account <email>");
-      process.exit(2);
     }
   }
   return options;
@@ -373,12 +322,8 @@ this node in Host (421 otherwise) and come from a tailnet device of this node's
 user (403 otherwise), before the token is checked. Loopback hosts skip admission.
   --no-qr                Do not print the pairing QR code at startup
   --relay [url]          Also serve paired phones through a ds-harness-remote relay (default ${DEFAULT_RELAY}),
-                         end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay
-  --relay-login          Log in to a relay that supports accounts (a self-hosted server) instead of
-                         anonymous pairing: --relay <url> --relay-account <email>, the password comes
-                         from $OMP_MOBILE_RELAY_PASSWORD or a prompt; tokens are stored owner-only and
-                         the password is not kept. A later start needs --relay only.
-  --relay-account <m>    Account email for --relay-login
+                         end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay.
+                         A relay that needs an account: \`omp-mobile relay login <email>\` (or /mobile login)
   --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
 
 Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
@@ -388,6 +333,9 @@ Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
 
 Relay commands (talk to the running daemon; same --state-file):
   omp-mobile relay pair       Show a pairing QR code, then confirm the phone's 8-digit code
+  omp-mobile relay login <email>   Sign in to a self-hosted relay with an account (password is asked
+                              for, never in argv); the password is exchanged once for device tokens
+  omp-mobile relay logout     Sign out of that account: revoke this computer and drop its tokens
   omp-mobile relay status     Relay server, connection and paired phones
   omp-mobile relay revoke <phone device id>
 `);
@@ -961,8 +909,6 @@ class Daemon {
         socket.on("error", () => socket.destroy());
         this.handleUpgrade(req, socket, head);
       });
-      // Relay construction happens in `listen()`: the password prompt needs to await.
-      this.relayLogin = options.relayLogin ? options.relayAccount : undefined;
     }
   }
 
@@ -1770,6 +1716,23 @@ class Daemon {
         sendJson(res, 200, { ok: true });
         return;
       }
+      // Account login is opt-in and one-shot: the password is exchanged for device
+      // tokens here, never stored (never in argv, so never in a plist or process list).
+      if (url.pathname === "/relay/login" && req.method === "POST") {
+        const body = await readBody(req);
+        if (typeof body.account !== "string" || body.account.trim() === "" || typeof body.password !== "string" || body.password === "") {
+          sendJson(res, 400, { error: "account and password are required" });
+          return;
+        }
+        await this.relay.login(body.account, body.password);
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+        return;
+      }
+      if (url.pathname === "/relay/logout" && req.method === "POST") {
+        await this.relay.logout();
+        sendJson(res, 200, { ok: true, ...(await this.relay.status()) });
+        return;
+      }
       sendJson(res, 404, { error: "not found" });
     } catch (error) {
       // The relay's own refusals carry a code (PAIRING_EXPIRED, PAIRING_ATTEMPT_USED, ...): pass it on.
@@ -1781,10 +1744,8 @@ class Daemon {
   async listen() {
     await new Promise((resolveListen) => this.server.listen(this.options.port, this.options.host, () => resolveListen()));
     if (this.options.relay) {
-      // `relayLogin !== undefined` opts in to account authorization instead of
-      // anonymous pairing; the password is used once and then dropped.
-      const account = this.relayLogin;
-      this.relayLogin = undefined;
+      // Anonymous pairing only: account sign-in is an explicit `relay login`, from
+      // the CLI or /mobile, so a background start never waits on a password.
       this.relay = new RelayHost({
         serverUrl: this.options.relay,
         dir: this.options.relayDir,
@@ -1793,8 +1754,6 @@ class Daemon {
         port: () => this.tunnelServer.address().port,
         token: this.token,
         log: (line) => this.log(line),
-        account,
-        password: account === undefined ? undefined : () => relayPassword(this.options),
       });
     }
     if (this.relay !== undefined) {
@@ -1965,7 +1924,7 @@ async function main() {
   if (daemon.relay !== undefined) {
     const relay = await daemon.relay.status();
     console.log(`  relay      ${relay.server} · ${relay.paired ? "paired" : "no phone paired yet"} · pair a phone: omp-mobile relay pair`);
-    if (options.relayLogin && relay.paired) console.log(`             account login: ${options.relayAccount}`);
+    if (relay.account !== undefined) console.log(`             account login: ${relay.account}`);
   }
   const tailnet = isTailnetAddress(options.host);
   if (options.qr && (tailnet || daemon.relay === undefined)) {
