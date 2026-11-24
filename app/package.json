@@ -25,6 +25,7 @@
     "expo-haptics": "~57.0.3",
     "expo-image-manipulator": "~57.0.21",
     "expo-image-picker": "~57.0.20",
+    "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
