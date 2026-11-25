@@ -151,3 +151,32 @@ test("rejects and removes an APK whose digest does not match", async () => {
   assert.equal(env.discarded, 1);
   app.unmount();
 });
+
+test("repeated taps while a download is being queued start one transfer", async () => {
+  const env = environment();
+  const app = mount(env);
+  await settle();
+  for (let i = 0; i < 5; i++) app.primary();
+  await settle();
+  assert.equal(env.starts, 1);
+  assert.equal(app.status.kind, "downloading");
+  app.unmount();
+});
+
+test("a verified private APK restores after the system task has been removed", async () => {
+  const env = environment();
+  const first = mount(env);
+  await settle();
+  first.primary();
+  await settle();
+  env.task = { kind: "complete" }; // Native cached state remains after task removal.
+  first.tick();
+  await settle();
+  assert.equal(first.status.kind, "ready");
+  first.unmount();
+  const restored = mount(env);
+  await settle();
+  assert.equal(restored.status.kind, "ready");
+  assert.equal(env.starts, 1);
+  restored.unmount();
+});
