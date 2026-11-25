@@ -9,6 +9,7 @@ import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme
 import type { Machine, Subagent } from "../types";
 import { t } from "../i18n/index.ts";
 import { Markdown } from "./Markdown";
+import { ToolFiles } from "./FileCards";
 import { SubagentList, SubagentScreen } from "./Subagents";
 import { KindGlyph, Thumbs } from "./Transcript";
 import { Sheet, SheetScrollView } from "./ui";
@@ -97,6 +98,7 @@ export function ToolSheet({
               {stat !== undefined ? ` · ${stat}` : tool.status === "running" ? ` · ${t("step.status.running")}` : ""}
             </Text>
           </View>
+          <ToolFiles tool={tool} own={subagentParent === null} />
           {sessionId !== undefined && isAgentCall(tool.name) && knownFeatures(machine).includes(SUBAGENTS_FEATURE) ? (
             <SubagentList
               machine={machine}

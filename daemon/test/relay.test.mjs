@@ -18,7 +18,7 @@ before(async () => {
   server = createServer((req, res) => {
     seen = { url: req.url, authorization: req.headers.authorization, relay: req.headers[RELAY_HEADER] };
     if (req.url === "/image") {
-      res.writeHead(200, { "content-type": "image/png" });
+      res.writeHead(200, { "content-type": "image/png", "content-length": IMAGE.length });
       res.end(IMAGE);
       return;
     }
@@ -66,9 +66,10 @@ test("a request reaches the daemon with its token and the relay mark, never the 
   assert.deepEqual(JSON.parse(events.map((event) => event.text ?? "").join("")), { ok: true, text: "é".repeat(10) });
 });
 
-test("a binary answer arrives as base64 parts that join into the original bytes", async () => {
+test("a binary answer arrives as base64 parts that join into the original bytes, its length announced first", async () => {
   const { events, call, until } = phone();
-  await call("omp.http.open", { id: "b", method: "GET", path: "/image" });
+  const head = await call("omp.http.open", { id: "b", method: "GET", path: "/image" });
+  assert.deepEqual(head.headers, { "content-type": "image/png", "content-length": String(IMAGE.length) }, "the phone can show progress");
   await until(() => events.some((event) => event.done));
   const parts = events.filter((event) => event.data !== undefined);
   assert.ok(parts.length > 1);

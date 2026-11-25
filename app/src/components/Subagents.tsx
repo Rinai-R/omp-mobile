@@ -14,6 +14,7 @@ import { SPRING_SCREEN } from "../motion";
 import { MONO, SANS, useColors, useStyles, type Palette } from "../theme";
 import type { AgentMessage, Machine, Subagent, ToolItem } from "../types";
 import { Spinner } from "./brand";
+import { FileLinksContext } from "./FileCards";
 import { SubagentLinksContext } from "./SubagentLinks";
 import { TranscriptFolds, TranscriptRow } from "./Transcript";
 import { Banner, FADE_REDUCED, Group, Header, Row as ListRow, StatusDot } from "./ui";
@@ -182,6 +183,9 @@ export function SubagentScreen({
   /** A subagent this one started, opened from its rows: shown over this one. */
   const [child, setChild] = useState<Subagent | null>(null);
   const outer = useContext(SubagentLinksContext);
+  const outerFiles = useContext(FileLinksContext);
+  // A subagent's writes are not the session's own: only what the daemon lists is offered.
+  const files = useMemo(() => (outerFiles === null ? null : { ...outerFiles, own: false }), [outerFiles]);
   const messagesRef = useRef<AgentMessage[]>([]);
   const id = subagent?.id;
 
@@ -247,9 +251,11 @@ export function SubagentScreen({
           {error !== null ? <Banner text={error} /> : null}
           <View style={styles.listWrap}>
             <SubagentLinksContext.Provider value={outer === null || id === undefined ? null : { list: outer.list, parent: id, open: setChild }}>
-              <TranscriptFolds>
-                <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
-              </TranscriptFolds>
+              <FileLinksContext.Provider value={files}>
+                <TranscriptFolds>
+                  <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
+                </TranscriptFolds>
+              </FileLinksContext.Provider>
             </SubagentLinksContext.Provider>
             {rows.length === 0 && error === null ? (
               <View style={styles.empty} pointerEvents="none">

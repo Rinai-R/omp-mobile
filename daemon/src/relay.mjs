@@ -6,7 +6,7 @@
  * keys). The relay only forwards ciphertext; nothing of DSH runs here.
  *
  * Over the encrypted channel the phone speaks a small tunnel (`createTunnelRouter`):
- *   rpc `omp.http.open` {id, method, path, headers?, body? (text)} -> {status, headers}
+ *   rpc `omp.http.open` {id, method, path, headers?, body? (text)} -> {status, headers: {content-type, content-length?}}
  *   rpc `omp.ws.open`   {id, path}                            -> {}
  *   rpc `omp.ws.send`   {id, text}                            -> {}
  *   rpc `omp.close`     {id}                                  -> {}
@@ -100,7 +100,9 @@ export function createTunnelRouter(target, send) {
       const request = httpRequest({ host: "127.0.0.1", port: target.port, method, path: `${url.pathname}${url.search}`, headers, agent: false }, (response) => {
         settled = true;
         const type = String(response.headers["content-type"] ?? "");
-        resolveOpen({ status: response.statusCode ?? 502, headers: { "content-type": type } });
+        // The length too, when the daemon gave one: the phone shows a download's progress from it.
+        const length = response.headers["content-length"];
+        resolveOpen({ status: response.statusCode ?? 502, headers: { "content-type": type, ...(length === undefined ? {} : { "content-length": String(length) }) } });
         let ended = false;
         // Text (JSON, the `/events` stream) goes as text, whole characters only; anything
         // else (an image from `/blobs`) is collected and sent as base64 in 3-byte-aligned parts,

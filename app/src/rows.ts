@@ -1,5 +1,6 @@
 import type { ChatItem, MessageItem, NoticeItem, ToolItem } from "./types";
 import { t, type Key } from "./i18n/index.ts";
+import { writtenPaths } from "./files.ts";
 
 /**
  * The transcript as the chat screen lays it out: one conversation column.
@@ -32,8 +33,8 @@ export type Row =
   | { kind: "activity"; id: string; gap: number; turn: string; steps: Step[]; running: boolean; failed: number }
   | { kind: "reply"; id: string; gap: number; turn?: string; item: MessageItem }
   | { kind: "error"; id: string; gap: number; item: MessageItem }
-  /** `last`: the turn's last answer, where a fork from this turn cuts. */
-  | { kind: "tail"; id: string; gap: number; text: string; at?: number; last?: MessageItem }
+  /** `last`: the turn's last answer, where a fork from this turn cuts. `written`: the paths its calls wrote, as they named them. */
+  | { kind: "tail"; id: string; gap: number; text: string; at?: number; last?: MessageItem; written: string[] }
   | { kind: "notice"; id: string; gap: number; item: NoticeItem };
 
 /** How a finished turn ended. */
@@ -127,7 +128,10 @@ export function layoutRows(items: readonly ChatItem[], streaming = false): Row[]
         .map((item) => item.text.trim())
         .filter((value) => value !== "")
         .join("\n\n");
-      if (!running && text !== "") push<"tail">({ kind: "tail", id: `tail:${current.id}`, text, at: current.endedAt, last: answers.at(-1) });
+      if (!running && text !== "") {
+        const written = [...new Set(turnItems.flatMap((item) => (item.kind === "tool" ? writtenPaths(item) : [])))];
+        push<"tail">({ kind: "tail", id: `tail:${current.id}`, text, at: current.endedAt, last: answers.at(-1), written });
+      }
     }
     turn = undefined;
     turnItems = [];
