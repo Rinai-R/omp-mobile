@@ -1,15 +1,20 @@
 import { requireOptionalNativeModule, type NativeModule } from "expo";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as FileSystem from "expo-file-system/legacy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { t } from "./i18n/index.ts";
-import { findUpdates, RELEASES_URL, type UpdateOffer } from "./releases";
+import { findUpdates, isNewerVersion, isReleaseAssetUrl, RELEASES_URL, type UpdateOffer } from "./releases";
 
 /** Two checks closer than this are the same look at the releases (a launch reports "active" more than once). */
 const CHECK_GAP_MS = 20_000;
 const REQUEST_TIMEOUT = 10_000;
+const DOWNLOAD_OFFER_KEY = "apk-download-offer";
 
 interface UpdatesModule extends NativeModule {
+  startDownload(url: string, sha256: string): Promise<void>;
+  downloadStatus(sha256: string): Promise<{ kind: "missing" | "downloading" | "complete" | "failed"; percent?: number | null }>;
+  discardDownload(): Promise<void>;
   verifyApk(sha256: string): Promise<boolean>;
   installApk(): Promise<boolean>;
   openInstallSettings(): Promise<void>;
@@ -114,24 +119,63 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
   const download = useCallback(async (offer: UpdateOffer) => {
     if (installer === null || FileSystem.cacheDirectory === null || downloading.current) return;
     downloading.current = true;
-    setStatus({ kind: "downloading", offer, percent: 0 });
-    const uri = `${FileSystem.cacheDirectory}omp-update.apk`;
     try {
-      const task = FileSystem.createDownloadResumable(offer.target.url, uri, {}, ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-        if (totalBytesExpectedToWrite > 0) {
-          setStatus({ kind: "downloading", offer, percent: Math.floor(100 * totalBytesWritten / totalBytesExpectedToWrite) });
-        }
-      });
-      const result = await task.downloadAsync();
-      if (result?.status !== 200 || !(await installer.verifyApk(offer.target.sha256))) throw new Error("Invalid APK");
-      setStatus({ kind: "ready", offer });
+      if (!isReleaseAssetUrl(offer.target.url) || !/^[a-f0-9]{64}$/i.test(offer.target.sha256)) {
+        throw new Error("Invalid APK source");
+      }
+      await AsyncStorage.setItem(DOWNLOAD_OFFER_KEY, JSON.stringify(offer));
+      await installer.startDownload(offer.target.url, offer.target.sha256);
+      setStatus({ kind: "downloading", offer, percent: 0 });
     } catch {
-      await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
       setStatus({ kind: "downloadFailed", offer });
-    } finally {
       downloading.current = false;
     }
   }, []);
+
+  // Poll only while visible. The system task continues independently of JS.
+  useEffect(() => {
+    if (status?.kind !== "downloading" || installer === null) return;
+    const offer = status.offer;
+    let current = true;
+    let polling = false;
+    const poll = async () => {
+      if (polling || AppState.currentState !== "active") return;
+      polling = true;
+      try {
+        const result = await installer.downloadStatus(offer.target.sha256);
+        if (!current) return;
+        if (result.kind === "downloading") {
+          setStatus({ kind: "downloading", offer, percent: result.percent ?? null });
+          return;
+        }
+        if (result.kind === "complete") {
+          if (!(await installer.verifyApk(offer.target.sha256))) {
+            await installer.discardDownload();
+            throw new Error("Invalid APK");
+          }
+          if (current) setStatus({ kind: "ready", offer });
+        } else {
+          setStatus({ kind: "downloadFailed", offer });
+        }
+        downloading.current = false;
+      } catch {
+        if (current) {
+          downloading.current = false;
+          setStatus({ kind: "downloadFailed", offer });
+        }
+      } finally {
+        polling = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 1_000);
+    const subscription = AppState.addEventListener("change", () => void poll());
+    return () => {
+      current = false;
+      clearInterval(timer);
+      subscription.remove();
+    };
+  }, [status?.kind]);
 
   const install = useCallback(async (offer: UpdateOffer) => {
     if (installer === null || installing.current) return;
@@ -156,7 +200,28 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
 
   useEffect(() => {
     if (!ready || !supported) return undefined;
-    void check(false);
+    let mounted = true;
+    // Recover the offer and task after Android has reclaimed the app process.
+    void (async () => {
+      try {
+        const saved = await AsyncStorage.getItem(DOWNLOAD_OFFER_KEY);
+        if (saved !== null) {
+          const offer = JSON.parse(saved) as UpdateOffer;
+          if (offer.target?.sha256 && isNewerVersion(offer.target.version, version)) {
+            const task = await installer!.downloadStatus(offer.target.sha256);
+            if (mounted && (task.kind === "downloading" || task.kind === "complete")) {
+              downloading.current = true;
+              setStatus({ kind: "downloading", offer, percent: task.percent ?? null });
+              setVisible(true);
+              return;
+            }
+          }
+        }
+      } catch {
+        // A missing task or unreadable saved offer falls back to a release check.
+      }
+      if (mounted) void check(false);
+    })();
     let previous = AppState.currentState;
     const subscription = AppState.addEventListener("change", (state) => {
       const wasAway = previous !== "active";
@@ -176,7 +241,7 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
       }
       void check(false);
     });
-    return () => subscription.remove();
+    return () => { mounted = false; subscription.remove(); };
   }, [ready, supported, check, install]);
 
   const close = useCallback(() => {
