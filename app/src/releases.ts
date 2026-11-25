@@ -45,7 +45,14 @@ function isRelease(value: unknown): value is Release {
   return value !== null && typeof value === "object" && "tag_name" in value;
 }
 
-/** Whether `a` is a newer version than `b`; a prerelease of the same version is older than the release. */
+/** Whether a saved update is newer than the installed version. */
+export function isNewerVersion(candidate: string, installed: string): boolean {
+  const next = VERSION.exec(candidate);
+  const current = VERSION.exec(installed);
+  return next !== null && current !== null && newer(next, current);
+}
+
+/** A prerelease of the same version is older than the release. */
 function newer(a: RegExpExecArray, b: RegExpExecArray): boolean {
   const difference = Number(a[1]) - Number(b[1]) || Number(a[2]) - Number(b[2]) || Number(a[3]) - Number(b[3]);
   if (difference !== 0) return difference > 0;

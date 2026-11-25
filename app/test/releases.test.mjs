@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findUpdates, notesFor } from "../src/releases.ts";
+import { findUpdates, isNewerVersion, notesFor } from "../src/releases.ts";
 
 const sha256 = "a".repeat(64);
 
@@ -76,4 +76,13 @@ test("release notes keep only the reader's language and drop GitHub's generated 
 test("a release without a Chinese part shows its English notes to a Chinese reader", () => {
   assert.equal(notesFor("- Solid chrome again.\n\n**Full Changelog**: https://example.com", "zh-CN"), "- Solid chrome again.");
   assert.equal(notesFor("", "zh-CN"), "");
+});
+
+
+test("saved downloads restore only for a newer version, including a stable release over its prerelease", () => {
+  assert.equal(isNewerVersion("0.10.0", "0.9.9"), true);
+  assert.equal(isNewerVersion("0.8.7", "0.8.7-rc.1"), true);
+  assert.equal(isNewerVersion("0.8.7", "0.8.7"), false);
+  assert.equal(isNewerVersion("0.8.6", "0.8.7"), false);
+  assert.equal(isNewerVersion("invalid", "0.8.7"), false);
 });

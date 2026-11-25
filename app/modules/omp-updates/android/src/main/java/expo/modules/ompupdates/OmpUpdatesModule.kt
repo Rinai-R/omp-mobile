@@ -1,5 +1,7 @@
 package expo.modules.ompupdates
 
+import android.app.DownloadManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -12,8 +14,93 @@ import java.io.File
 import java.security.MessageDigest
 
 class OmpUpdatesModule : Module() {
+  private val downloadLock = Any()
+
   override fun definition() = ModuleDefinition {
     Name("OmpUpdates")
+
+    AsyncFunction("startDownload") { url: String, sha256: String ->
+      synchronized(downloadLock) {
+        val context = requireNotNull(appContext.reactContext)
+        require(url.startsWith("https://"))
+        require(sha256.matches(Regex("[a-fA-F0-9]{64}")))
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val prefs = context.getSharedPreferences("apk-download", Context.MODE_PRIVATE)
+        val id = prefs.getLong("id", -1)
+        if (prefs.getString("sha256", null) == sha256) {
+          manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+            if (cursor.moveToFirst() &&
+              cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_FAILED) {
+              return@AsyncFunction
+            }
+          }
+        }
+        if (id != -1L) manager.remove(id)
+        val destination = File(requireNotNull(context.getExternalFilesDir(null)), "omp-update-$sha256.apk")
+        if (destination.exists()) check(destination.delete())
+        val request = DownloadManager.Request(Uri.parse(url))
+          .setTitle("OMP")
+          .setMimeType("application/vnd.android.package-archive")
+          .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+          .setAllowedOverMetered(true)
+          .setAllowedOverRoaming(true)
+          .setDestinationUri(Uri.fromFile(destination))
+        val nextId = manager.enqueue(request)
+        if (!prefs.edit().putLong("id", nextId).putString("sha256", sha256).commit()) {
+          manager.remove(nextId)
+          error("Could not save download")
+        }
+      }
+    }
+
+    AsyncFunction("downloadStatus") { sha256: String ->
+      synchronized(downloadLock) {
+        val context = requireNotNull(appContext.reactContext)
+        val prefs = context.getSharedPreferences("apk-download", Context.MODE_PRIVATE)
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        if (prefs.getString("sha256", null) != sha256) {
+          return@AsyncFunction mapOf("kind" to "missing")
+        }
+        val id = prefs.getLong("id", -1)
+        manager.query(DownloadManager.Query().setFilterById(id)).use { cursor ->
+          if (!cursor.moveToFirst()) return@AsyncFunction mapOf("kind" to "missing")
+          when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+            DownloadManager.STATUS_SUCCESSFUL -> {
+              // Only the private copy is used by the verifier and installer.
+              val pending = File(context.cacheDir, "omp-update.apk.tmp")
+              try {
+                manager.openDownloadedFile(id).use { descriptor ->
+                  android.os.ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+                    pending.outputStream().use { output -> input.copyTo(output) }
+                  }
+                }
+                check(pending.renameTo(File(context.cacheDir, "omp-update.apk")))
+              } finally {
+                pending.delete()
+              }
+              mapOf("kind" to "complete")
+            }
+            DownloadManager.STATUS_FAILED -> mapOf("kind" to "failed")
+            else -> {
+              val total = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+              val written = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+              mapOf("kind" to "downloading", "percent" to if (total > 0) (100.0 * written / total).toInt().coerceIn(0, 100) else null)
+            }
+          }
+        }
+      }
+    }
+
+    AsyncFunction("discardDownload") {
+      synchronized(downloadLock) {
+        val context = requireNotNull(appContext.reactContext)
+        val prefs = context.getSharedPreferences("apk-download", Context.MODE_PRIVATE)
+        val id = prefs.getLong("id", -1)
+        if (id != -1L) (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id)
+        prefs.edit().clear().commit()
+        File(context.cacheDir, "omp-update.apk").delete()
+      }
+    }
 
     AsyncFunction("verifyApk") { expectedSha256: String ->
       val context = requireNotNull(appContext.reactContext)
