@@ -4,10 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Files the agent wrote or named in a reply can be downloaded on the phone. A finished turn lists them under the reply, a write step's Details sheet lists its file, and the file icon in the chat header opens every file of the session. Tap one to download it and open the share sheet (save, open in another app, send); tap it again later to share the copy on the phone. Only files the session wrote, or named under its directory, are served; files that may hold secrets (`.env*`, keys, `.ssh`, `.git`, …) never are. Downloads are capped at 100 MB on a direct connection and 20 MB through the relay, with progress on both. Needs omp-mobile on the computer from this version.
 - Answer HTML forms and structured questions on the phone, with field validation, descriptions, tables and images. Dialogs queue by request ID, keep regular drafts across restarts, and distinguish answering later from cancelling; secret inputs are not persisted. Requires an updated daemon, and works with stock OMP.
 
 ### 中文
 
+- 智能体写出或在回复里提到的文件可以在手机上下载。回合结束后回复下方列出这些文件，写文件步骤的「Details」面板列出它写的文件，对话标题栏的文件图标可打开整个会话的文件。点一下即下载并打开系统分享面板（保存、用其他应用打开、发送）；之后再点会直接分享手机上的副本。只提供该会话写过的文件，或回复里提到的、位于会话目录下的文件；可能含密钥的文件（`.env*`、密钥、`.ssh`、`.git` 等）一律不提供。直连单个文件上限 100 MB，经中继 20 MB，两种方式都显示进度。电脑上的 omp-mobile 也需要更新到此版本。
 - 手机支持 HTML 表单和结构化提问，保留字段校验、说明、表格及图片；多个问题按请求 ID 排队，普通草稿重启后恢复，区分稍后回答与取消问题，密码输入不落盘。需配套更新 daemon，无需修改 OMP。
 
 ## v0.8.7

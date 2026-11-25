@@ -28,6 +28,7 @@ import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
 import { DEFAULT_RELAY, hostCode, runRelayCli } from "./relay-control.mjs";
 import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
+import { listSessionFiles, sendSessionFile } from "./session-files.mjs";
 import { runRestartCli } from "./restart.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -122,11 +123,7 @@ export function promptImages(value) {
  * (`since`/`last` as `/transcript`); a live session's socket sends a `subagent`
  * frame as one starts or ends.
  */
-const FEATURES = [
-  "approval-forms",
-  "approval-validation",
-  "approval-snapshot",
-  "prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork", "subagents"];
+const FEATURES = ["approval-forms", "approval-validation", "approval-snapshot", "prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork", "subagents", "files"];
 /** Search results a phone is sent at most. */
 const SEARCH_LIMIT = 50;
 /** Who a phone continues a session on, as the terminal it leaves is told. */
@@ -1141,6 +1138,18 @@ class Daemon {
         sendJson(res, 200, body);
         return;
       }
+      const files = /^\/sessions\/([^/]+)\/files$/.exec(url.pathname);
+      if (files !== null && req.method === "GET") {
+        const { cwd, messages } = await this.sessionMessages(decodeURIComponent(files[1]));
+        sendJson(res, 200, listSessionFiles(messages, cwd));
+        return;
+      }
+      const file = /^\/sessions\/([^/]+)\/file$/.exec(url.pathname);
+      if (file !== null && req.method === "GET") {
+        const { cwd, messages } = await this.sessionMessages(decodeURIComponent(file[1]));
+        sendSessionFile(res, messages, cwd, url.searchParams.get("path"), req.headers[RELAY_HEADER] !== undefined);
+        return;
+      }
       const answer = /^\/sessions\/([^/]+)\/answer$/.exec(url.pathname);
       if (answer !== null && req.method === "POST") {
         const body = await readBody(req);
@@ -1284,6 +1293,24 @@ class Daemon {
     const read = await this.fileTranscript(file);
     if (read === undefined) throw httpError(404, "not cached");
     return deltaBody({ session: known, state: undefined, messages: read.messages, base: read.base }, held);
+  }
+
+  /**
+   * A session's directory and messages, for its files, without starting an
+   * omp: as `transcript` finds them (memory, the saved copy, the session file).
+   * @param {string} id
+   */
+  async sessionMessages(id) {
+    const live = this.sessions.get(id);
+    if (live !== undefined && !live.closed) return { cwd: live.cwd, messages: live.messages };
+    const known = this.known(id);
+    const file = known?.sessionFile;
+    if (known === undefined || typeof known.cwd !== "string") throw httpError(404, "unknown session");
+    const saved = this.transcripts.read(id, typeof file === "string" ? file : undefined);
+    if (saved !== undefined) return { cwd: known.cwd, messages: saved.messages };
+    const read = typeof file === "string" ? await this.fileTranscript(file) : undefined;
+    if (read === undefined) throw httpError(404, "not cached");
+    return { cwd: known.cwd, messages: read.messages };
   }
 
   /**

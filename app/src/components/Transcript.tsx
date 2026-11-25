@@ -63,6 +63,7 @@ import { MONO, SANS, SCALE, radius, type, useColors, useStyles, type Palette } f
 import type { ImagePart, Machine, MessageItem, NoticeItem, ToolItem } from "../types";
 import { isAgentCall } from "../subagents";
 import { SubagentLinks } from "./SubagentLinks";
+import { FileStrip } from "./FileCards";
 import { BrandMark, GradientFill, Orb, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
 import {
   AgentsGlyph,
@@ -225,7 +226,7 @@ function TranscriptRowImpl({ row, machine, cwd, animate, onOpenStep }: RowProps)
       body = <ErrorLine item={row.item} />;
       break;
     case "tail":
-      body = <TurnTail text={row.text} at={row.at} last={row.last} />;
+      body = <TurnTail text={row.text} at={row.at} last={row.last} written={row.written} />;
       break;
     case "notice":
       body = <NoticeLine item={row.item} />;
@@ -275,7 +276,7 @@ function sameRow(a: Row, b: Row): boolean {
     }
     case "tail": {
       const other = b as typeof a;
-      return a.text === other.text && a.at === other.at && a.last === other.last;
+      return a.text === other.text && a.at === other.at && a.last === other.last && a.written.join("\n") === other.written.join("\n");
     }
     default:
       return a.item === (b as typeof a).item;
@@ -1196,39 +1197,42 @@ function ErrorLine({ item }: { item: MessageItem }): ReactNode {
   );
 }
 
-/** Under a finished turn: copy the reply, fork from it (where the daemon can), and the time it ended. */
-function TurnTail({ text, at, last }: { text: string; at: number | undefined; last: MessageItem | undefined }): ReactNode {
+/** Under a finished turn: the files it wrote or named, then copy the reply, fork from it (where the daemon can), and the time it ended. */
+function TurnTail({ text, at, last, written }: { text: string; at: number | undefined; last: MessageItem | undefined; written: readonly string[] }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
   const [copied, copy] = useCopy(text);
   const action = useContext(MessageActionContext);
   return (
-    <View style={styles.tail}>
-      <Pressable
-        onPress={copy}
-        hitSlop={8}
-        style={({ pressed }) => [styles.tailButton, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel={copied ? t("turn.copied") : t("turn.copy")}
-      >
-        {copied ? <CheckGlyph size={15} color={colors.ok} /> : <CopyGlyph size={15} color={colors.fgFaint} />}
-      </Pressable>
-      {action !== undefined && last?.createdAt !== undefined ? (
+    <View>
+      <FileStrip written={written} text={text} />
+      <View style={styles.tail}>
         <Pressable
-          onPress={() => action(last)}
+          onPress={copy}
           hitSlop={8}
           style={({ pressed }) => [styles.tailButton, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel={t("fork.here")}
+          accessibilityLabel={copied ? t("turn.copied") : t("turn.copy")}
         >
-          <ForkGlyph size={15} color={colors.fgFaint} />
+          {copied ? <CheckGlyph size={15} color={colors.ok} /> : <CopyGlyph size={15} color={colors.fgFaint} />}
         </Pressable>
-      ) : null}
-      {at !== undefined ? (
-        <Text style={styles.tailTime} maxFontSizeMultiplier={SCALE.ui}>
-          {clockTime(at)}
-        </Text>
-      ) : null}
+        {action !== undefined && last?.createdAt !== undefined ? (
+          <Pressable
+            onPress={() => action(last)}
+            hitSlop={8}
+            style={({ pressed }) => [styles.tailButton, pressed && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel={t("fork.here")}
+          >
+            <ForkGlyph size={15} color={colors.fgFaint} />
+          </Pressable>
+        ) : null}
+        {at !== undefined ? (
+          <Text style={styles.tailTime} maxFontSizeMultiplier={SCALE.ui}>
+            {clockTime(at)}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }
