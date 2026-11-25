@@ -147,7 +147,7 @@ export async function answerRequest(
   machine: Machine,
   sessionId: string,
   id: string,
-  answer: { value?: string; confirmed?: boolean; cancelled?: boolean },
+  answer: import("./types").ApprovalAnswer,
 ): Promise<void> {
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(sessionId)}/answer`, {
     method: "POST",
@@ -254,7 +254,8 @@ export class SessionSocket {
     if (this.closed || this.failed) return;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
-    const query = heldQuery(this.held());
+    const held = heldQuery(this.held());
+    const query = held ? `${held}&dialogs=1` : "dialogs=1";
     const path = `/sessions/${encodeURIComponent(this.sessionId)}/ws${query === "" ? "" : `?${query}`}`;
     const previous = this.socket;
     if (previous !== undefined) {

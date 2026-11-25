@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- Answer HTML forms and structured questions on the phone, with field validation, descriptions, tables and images. Dialogs queue by request ID, keep regular drafts across restarts, and distinguish answering later from cancelling; secret inputs are not persisted. Requires an updated daemon, and works with stock OMP.
+
+### 中文
+
+- 手机支持 HTML 表单和结构化提问，保留字段校验、说明、表格及图片；多个问题按请求 ID 排队，普通草稿重启后恢复，区分稍后回答与取消问题，密码输入不落盘。需配套更新 daemon，无需修改 OMP。
+
 ## v0.8.7
 
 - A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty. (#98)

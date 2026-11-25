@@ -170,9 +170,27 @@ export interface NoticeItem {
   id: string;
   level: "info" | "warning" | "error";
   text: string;
+  url?: string;
 }
 
 export type ChatItem = MessageItem | ToolItem | NoticeItem;
+
+export interface AskQuestion {
+  id: string;
+  question: string;
+  header?: string;
+  options: { label: string; description?: string; preview?: string }[];
+  multi?: boolean;
+  recommended?: number;
+}
+
+export interface ApprovalAnswer {
+  value?: string;
+  confirmed?: boolean;
+  cancelled?: boolean;
+  data?: Record<string, string | number | string[]>;
+  answers?: { id: string; selectedOptions: string[]; customInput?: string }[];
+}
 
 export interface ApprovalRequest {
   id: string;
@@ -183,6 +201,18 @@ export interface ApprovalRequest {
   optionDetails?: { description?: string }[];
   placeholder?: string;
   prefill?: string;
+  html?: string;
+  images?: Record<string, ImagePart>;
+  questions?: AskQuestion[];
+  initialIndex?: number;
+  selectionMarker?: "radio" | "checkbox";
+  checkedIndices?: number[];
+  markableCount?: number;
+  secret?: boolean;
+  promptStyle?: boolean;
+  timeout?: number;
+  receivedAt?: number;
+  expiresAt?: number;
 }
 
 export interface Hello {
@@ -216,6 +246,7 @@ export interface Transcript {
 }
 
 export interface Snapshot extends Transcript {
+  approvals?: ApprovalRequest[];
   type: "snapshot";
   /** The reply OMP is writing now (daemons from 0.7.4): the updates that follow carry only what they add to it. */
   streaming?: AgentMessage;
@@ -263,13 +294,13 @@ export type ServerMessage =
   | { type: "approval"; request: ApprovalRequest }
   /** A dialog was answered (by any client) or closed by OMP itself. */
   | { type: "approval_resolved"; id: string; reason: "answered" | "cancelled" | "closed" }
-  | { type: "notice"; level: "info" | "warning" | "error"; message: string }
+  | { type: "notice"; level: "info" | "warning" | "error"; message: string; url?: string }
   | { type: "closed"; reason: string; stderr?: string }
   /** The session could not open (unknown, file gone, held by another omp, OMP failed to load it); the socket closes next. */
   | { type: "open_failed"; status: number; error: string; owner?: SessionOwner }
-  | { type: "accepted"; command: string }
+  | { type: "accepted"; command: string; id?: string }
   /** `command`: the frame that failed (daemons before 0.3 leave it out). */
-  | { type: "error"; error: string; command?: string }
+  | { type: "error"; error: string; command?: string; id?: string }
   | { type: "protocol-error"; line: string }
   /** A subagent started or ended (`subagents`); the subagent list reads the rest from the computer. */
   | { type: "subagent"; subagent: Pick<Subagent, "id" | "agentId" | "agent" | "description" | "status" | "parentToolCallId"> };

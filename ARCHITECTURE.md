@@ -175,3 +175,16 @@ The app's text lives in two catalogs, `app/src/i18n/en.ts` and `app/src/i18n/zh-
 | `app/src/screens/` | Machines, Sessions, Chat, Settings, pairing scanner |
 | `app/src/components/` | Transcript items, sheets, machine switcher, brand, shared UI |
 | `app/modules/omp-attention/` | Expo local module (Kotlin): foreground service, notifications, boot receiver; `src/index.ts` is its JS API |
+
+
+### Mobile dialog compatibility
+
+The mobile client handles `select`, `confirm`, `input`, `editor`, HTML `form`, and structured `ask` requests. A session socket with `dialogs=1` opts the OMP process into `set_ask_dialog`; legacy sockets retain OMP's existing fallback. The last capable socket disconnecting disables the opt-in for future dialogs.
+
+The daemon advertises `approval-forms`, `approval-validation`, and `approval-snapshot`. New snapshots include the authoritative `approvals` list, and answer acknowledgements/errors carry the request `id`. Clients queue dialogs by ID, retain drafts until acknowledgement or resolution, and reconcile uncertain submissions against a fresh snapshot instead of silently dropping or replaying them. Dismissing the presentation does not cancel the OMP request; cancellation is an explicit action.
+
+`app/vendor/omp-form` contains the MIT-licensed, pinned pure form core from oh-my-pi. `scripts/vendor-omp-form.mjs <directory-containing-pi-tui-and-pi-utils>` refreshes the client core and its equivalent daemon JavaScript; each vendor directory records upstream file hashes and adaptations. The separately attributed RPC validation adapter preserves OMP's field/value rules. The daemon validates structured answers before consuming a request, including HTML `pattern` with RegExp `v`, which Android's engine may not support. A validation error leaves the request open for correction. Both HTTP and WebSocket replies retain `data` and `answers`.
+
+Regular drafts are stored under a hash of the machine, session, request ID and content, expire after 24 hours, and are removed on resolution. Password/secret dialogs are kept in memory only. Images referenced by local form HTML are read only from that pending request, limited to supported image extensions and 8 MiB per image, and use the existing authenticated blob transport when large. Missing or failed images prevent submitting a form with incomplete context.
+
+OMP remains authoritative for deadlines; `receivedAt`/`expiresAt` let the phone display the current deadline without restarting it on reconnect. Option notes (including note images) and typing-based timeout resets are deferred until upstream OMP exposes a released RPC contract. This change includes no OMP patch, alternate launcher, attachment upload API, or activity side channel. The APK and daemon neither advertise nor enable those two capabilities. Images already present in the form HTML remain supported. Arbitrary TUI `custom()` components and transferring an in-memory dialog out of a terminated terminal process are separate capabilities, not HTML form parsing. `open_url` notices retain an explicit, user-activated HTTP(S) link; terminal status/widget decorations are not approval requests.
