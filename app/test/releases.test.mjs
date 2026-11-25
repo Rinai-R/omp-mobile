@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { findUpdates, isNewerVersion, notesFor } from "../src/releases.ts";
+import { findUpdates, isNewerVersion, isReleaseAssetUrl, notesFor } from "../src/releases.ts";
 
 const sha256 = "a".repeat(64);
 
@@ -85,4 +85,18 @@ test("saved downloads restore only for a newer version, including a stable relea
   assert.equal(isNewerVersion("0.8.7", "0.8.7"), false);
   assert.equal(isNewerVersion("0.8.6", "0.8.7"), false);
   assert.equal(isNewerVersion("invalid", "0.8.7"), false);
+});
+
+test("asset URLs require HTTPS and the exact GitHub host", () => {
+  assert.equal(isReleaseAssetUrl("https://github.com/Rinai-R/omp-mobile/releases/download/v0.8.7/OMP-Mobile-v0.8.7.apk"), true);
+  assert.equal(isReleaseAssetUrl("https://github.com/another/repository/releases/download/v1.0/app.apk"), true);
+  for (const url of [
+    "http://github.com/Rinai-R/omp-mobile/releases/download/v0.8.7/app.apk",
+    "https://example.com/app.apk",
+    "https://github.com.example.com/app.apk",
+    "https://github.com@example.com/app.apk",
+    "not a URL",
+  ]) {
+    assert.equal(isReleaseAssetUrl(url), false, url);
+  }
 });

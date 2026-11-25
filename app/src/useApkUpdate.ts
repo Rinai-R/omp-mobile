@@ -4,7 +4,7 @@ import * as FileSystem from "expo-file-system/legacy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Platform } from "react-native";
 import { t } from "./i18n/index.ts";
-import { findUpdates, isNewerVersion, RELEASES_URL, type UpdateOffer } from "./releases";
+import { findUpdates, isNewerVersion, isReleaseAssetUrl, RELEASES_URL, type UpdateOffer } from "./releases";
 
 /** Two checks closer than this are the same look at the releases (a launch reports "active" more than once). */
 const CHECK_GAP_MS = 20_000;
@@ -120,6 +120,9 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     if (installer === null || FileSystem.cacheDirectory === null || downloading.current) return;
     downloading.current = true;
     try {
+      if (!isReleaseAssetUrl(offer.target.url) || !/^[a-f0-9]{64}$/i.test(offer.target.sha256)) {
+        throw new Error("Invalid APK source");
+      }
       await AsyncStorage.setItem(DOWNLOAD_OFFER_KEY, JSON.stringify(offer));
       await installer.startDownload(offer.target.url, offer.target.sha256);
       setStatus({ kind: "downloading", offer, percent: 0 });

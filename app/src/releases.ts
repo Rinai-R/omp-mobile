@@ -45,6 +45,16 @@ function isRelease(value: unknown): value is Release {
   return value !== null && typeof value === "object" && "tag_name" in value;
 }
 
+/** The initial download URL must use HTTPS on GitHub; GitHub handles asset redirects. */
+export function isReleaseAssetUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "github.com";
+  } catch {
+    return false;
+  }
+}
+
 /** Whether a saved update is newer than the installed version. */
 export function isNewerVersion(candidate: string, installed: string): boolean {
   const next = VERSION.exec(candidate);

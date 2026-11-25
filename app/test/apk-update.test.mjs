@@ -18,7 +18,7 @@ const release = {
 function environment() {
   const saved = new Map();
   return {
-    saved, starts: 0, discarded: 0, valid: true,
+    saved, starts: 0, discarded: 0, valid: true, checks: 0, statusReads: 0,
     task: { kind: "downloading", percent: 42 },
     app: { currentState: "active", addEventListener: () => ({ remove() {} }) },
   };
@@ -73,7 +73,7 @@ function mount(env) {
   };
   const native = {
     async startDownload() { env.starts++; },
-    async downloadStatus() { return env.task; },
+    async downloadStatus() { env.statusReads++; return env.task; },
     async verifyApk() { return env.valid; },
     async discardDownload() { env.discarded++; },
   };
@@ -81,7 +81,10 @@ function mount(env) {
     exports, __DEV__: false, AbortController, setTimeout, clearTimeout,
     setInterval(fn) { timers.add(fn); return fn; },
     clearInterval(fn) { timers.delete(fn); },
-    fetch: async () => ({ ok: true, json: async () => [release] }),
+    fetch: async () => {
+      env.checks++;
+      return { ok: true, json: async () => [release] };
+    },
     require(name) {
       if (name === "react") return react;
       if (name === "react-native") return { AppState: env.app, Platform: { OS: "android" } };
@@ -180,3 +183,49 @@ test("a verified private APK restores after the system task has been removed", a
   assert.equal(env.starts, 1);
   restored.unmount();
 });
+
+for (const savedVersion of ["0.8.6", "0.8.5"]) {
+  test(`a saved ${savedVersion} download is skipped on installed 0.8.6 and releases are checked`, async () => {
+    const env = environment();
+    const initial = mount(env);
+    await settle();
+    initial.primary();
+    await settle();
+    initial.unmount();
+    const [key, value] = [...env.saved.entries()][0];
+    const offer = JSON.parse(value);
+    offer.target.version = savedVersion;
+    env.saved.set(key, JSON.stringify(offer));
+    env.task = { kind: "complete" };
+    env.checks = 0;
+    env.statusReads = 0;
+
+    const restored = mount(env);
+    await settle();
+    assert.equal(env.statusReads, 0);
+    assert.equal(env.checks, 1);
+    assert.equal(restored.status.kind, "offer");
+    assert.equal(restored.status.offer.target.version, "0.8.7");
+    restored.unmount();
+  });
+}
+
+for (const invalid of [
+  { url: "http://github.com/app.apk" },
+  { url: "https://example.com/app.apk" },
+  { url: "https://github.com.example.com/app.apk" },
+  { sha256: "invalid" },
+]) {
+  test(`download rejects ${JSON.stringify(invalid)} before saving or starting a native task`, async () => {
+    const env = environment();
+    const app = mount(env);
+    await settle();
+    Object.assign(app.status.offer.target, invalid);
+    app.primary();
+    await settle();
+    assert.equal(app.status.kind, "downloadFailed");
+    assert.equal(env.starts, 0);
+    assert.equal(env.saved.size, 0);
+    app.unmount();
+  });
+}
