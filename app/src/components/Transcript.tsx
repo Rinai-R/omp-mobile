@@ -14,6 +14,7 @@ import {
 } from "react";
 import {
   Animated,
+  Linking,
   Image,
   Modal,
   Pressable,
@@ -1247,6 +1248,7 @@ function NoticeLine({ item }: { item: NoticeItem }): ReactNode {
         maxFontSizeMultiplier={SCALE.meta}
       >
         {item.text}
+        {item.url ? <Text accessibilityRole="link" onPress={() => { void Linking.openURL(item.url!).catch(() => undefined); }} style={{ textDecorationLine: "underline" }}>{`\n${t("common.open")} · ${item.url}`}</Text> : null}
       </Text>
     </View>
   );

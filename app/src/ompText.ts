@@ -48,10 +48,10 @@ export interface ApprovalText {
 
 function detailOf(line: string): ApprovalDetail {
   const match = /^([A-Za-z]+):\s*([\s\S]*)$/.exec(line);
-  const key = match === null ? undefined : DETAIL_LABELS[match[1] ?? ""];
+  const key = match === null ? undefined : (Object.hasOwn(DETAIL_LABELS, match[1] ?? "") ? DETAIL_LABELS[match[1] ?? ""] : undefined);
   if (match === null || key === undefined) return { command: false, value: line };
   const value = (match[2] ?? "").trim();
-  const fixed = DETAIL_VALUES[value];
+  const fixed = Object.hasOwn(DETAIL_VALUES, value) ? DETAIL_VALUES[value] : undefined;
   return { label: t(key), command: match[1] === "Command", value: fixed === undefined ? value : t(fixed) };
 }
 
@@ -71,7 +71,7 @@ export function approvalText(title?: string, message?: string): ApprovalText {
   let open = false;
   for (const line of lines) {
     const match = /^([A-Za-z]+):(.*)$/.exec(line);
-    const known = match !== null && DETAIL_LABELS[match[1] ?? ""] !== undefined;
+    const known = match !== null && (Object.hasOwn(DETAIL_LABELS, match[1] ?? "") ? DETAIL_LABELS[match[1] ?? ""] : undefined) !== undefined;
     if (open && !known) {
       blocks[blocks.length - 1] += `\n${line}`;
       continue;
@@ -98,7 +98,7 @@ const OPTION_LABELS: Record<string, Key> = {
 
 /** An answer OMP offers, in the phone's language; the value sent back stays OMP's. */
 export function optionLabel(option: string): string {
-  const key = OPTION_LABELS[option];
+  const key = Object.hasOwn(OPTION_LABELS, option) ? OPTION_LABELS[option] : undefined;
   if (key !== undefined) return t(key);
   const session = /^Approve (\S+) for this session$/.exec(option);
   if (session !== null) return t("approval.option.approveForSession", { tool: session[1] ?? "" });
@@ -122,6 +122,6 @@ const LEVELS: Record<string, Key> = {
 
 /** A thinking level (`high`) in the phone's language; an unknown one as OMP named it. */
 export function levelLabel(level: string): string {
-  const key = LEVELS[level];
+  const key = Object.hasOwn(LEVELS, level) ? LEVELS[level] : undefined;
   return key === undefined ? level : t(key);
 }

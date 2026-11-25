@@ -21,6 +21,9 @@ import { FILES_FEATURE, FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, 
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
+import { queueApproval, resolveApproval } from "../approvalQueue";
+import { forgetApprovalDraft } from "../approvalDrafts";
+import type { ApprovalAnswer } from "../types";
 import { ApprovalSheet } from "../components/ApprovalSheet";
 import { GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { EmptyHero } from "../components/EmptyHero";
@@ -130,7 +133,31 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [approval, setApproval] = useState<ApprovalRequest | null>(null);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const approvalsRef = useRef<ApprovalRequest[]>([]);
+  const approval = approvals[0] ?? null;
+  const [approvalHidden, setApprovalHidden] = useState(false);
+  const [approvalSending, setApprovalSending] = useState<string | null>(null);
+  const approvalSendingRef = useRef<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string>();
+  const updateApprovals = (next: ApprovalRequest[]) => {
+    approvalsRef.current = next;
+    setApprovals(next);
+  };
+  const retireApproval = (id: string) => {
+    const previous = approvalsRef.current.find((request) => request.id === id);
+    if (!previous) return;
+    if (approvalSendingRef.current === id) approvalSendingRef.current = null;
+    if (previous)
+      void forgetApprovalDraft(
+        machineRef.current.id,
+        initialSession.id,
+        previous,
+      ).catch(() => {});
+    updateApprovals(resolveApproval(approvalsRef.current, id));
+    setApprovalSending((current) => (current === id ? null : current));
+    setApprovalError(undefined);
+  };
   const [models, setModels] = useState<ModelOption[] | null>(null);
   const [levels, setLevels] = useState<string[] | null>(null);
   const [picker, setPicker] = useState(false);
@@ -178,7 +205,8 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   /** What the current socket was opened with, and the window that described: a snapshot is merged against exactly these. */
   const sentRef = useRef<{ held: Held | undefined; window: TranscriptWindow }>({ held: undefined, window: { offset: 0, messages: [] } });
   /** What a snapshot brought that is not saved yet: saved once the whole transcript is known. */
-  const unsavedRef = useRef<{ updatedAt: number; session: SessionSummary; state: SessionState | null } | null>(null);
+  const unsavedRef = useRef<{ updatedAt: number; session: SessionSummary; state: SessionState | null;
+  } | null>(null);
   /** Older rows are joining the list (the whole copy under its tail): they appear without an entrance. */
   const quietRef = useRef(false);
   /** A snapshot did not fit the copy: the next connect asks for the whole transcript. */
@@ -301,6 +329,16 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       (message: ServerMessage) => {
         switch (message.type) {
           case "snapshot": {
+            if (Array.isArray(message.approvals)) {
+              const ids = new Set(
+                message.approvals.map((request) => request.id),
+              );
+              for (const previous of approvalsRef.current)
+                if (!ids.has(previous.id)) retireApproval(previous.id);
+              updateApprovals(message.approvals);
+              approvalSendingRef.current = null;
+              setApprovalSending(null);
+            }
             // A snapshot replaces the transcript wholesale; drop events still waiting
             // for their frame so they cannot be replayed on top of the newer copy.
             cancelPendingEvents();
@@ -340,7 +378,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             // A run is many turns (each tool call ends one): it starts at agent_start, from any client, and ends at agent_end.
             const running = message.event.type === "agent_start" ? true : message.event.type === "agent_end" ? false : undefined;
             if (running !== undefined) {
-              setState((current) => (current === null ? current : { ...current, isStreaming: running }));
+              setState((current) =>
+                current === null ? current : { ...current, isStreaming: running },
+              );
             }
             break;
           }
@@ -357,19 +397,31 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           case "approval":
             // The keyboard would cover the sheet: OMP is waiting on this answer, not on a message.
             Keyboard.dismiss();
-            setApproval(message.request);
+            updateApprovals(
+              queueApproval(approvalsRef.current, message.request),
+            );
+            setApprovalHidden(false);
             haptic.ask();
             break;
           case "approval_resolved":
-            setApproval((current) => (current?.id === message.id ? null : current));
+            retireApproval(message.id);
             break;
           case "notice":
             setItems((current) => [
               ...current,
-              { kind: "notice", id: `notice-${Date.now()}`, level: message.level, text: message.message },
+              { kind: "notice", id: `notice-${Date.now()}`, level: message.level, text: message.message,
+                ...(typeof message.url === "string" &&
+                /^https?:\/\//i.test(message.url)
+                  ? { url: message.url }
+                  : {}),
+              },
             ]);
             break;
           case "accepted":
+            if (message.command === "approval") {
+              // On old daemons the acknowledgement may not carry its request ID.
+              if (message.id) retireApproval(message.id);
+            }
             if (message.command === "prompt") pending.current = null;
             break;
           case "closed":
@@ -377,6 +429,22 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
             setError(t("chat.stopped", { reason: message.reason }));
             break;
           case "error": {
+            if (message.command === "approval") {
+              if (
+                message.id &&
+                !approvalsRef.current.some(
+                  (request) => request.id === message.id,
+                )
+              )
+                break;
+              approvalSendingRef.current = null;
+              setApprovalSending(null);
+              setApprovalError(message.error);
+              // A lost acknowledgement is reconciled against the computer's authoritative pending list.
+              if (/unknown extension request/i.test(message.error))
+                socket.restart();
+              break;
+            }
             const refused = pending.current;
             // OMP's refusal of a prompt while it runs: daemons before 0.6 do not send it as a steer.
             const busy = /already processing/i.test(message.error);
@@ -386,9 +454,13 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
               pending.current = null;
               setItems((current) => dropEchoed(current, refused.text));
               setDraft((current) => (current === "" ? refused.text : current));
-              setAttachments((current) => (current.length === 0 ? refused.attachments : current));
+              setAttachments((current) =>
+                current.length === 0 ? refused.attachments : current,
+              );
               // Refused because it is busy: it still runs.
-              if (!busy) setState((current) => (current === null ? current : { ...current, isStreaming: false }));
+              if (!busy) setState((current) =>
+                  current === null ? current : { ...current, isStreaming: false },
+                );
             }
             setError(busy ? t("chat.steerNeedsUpdate") : message.error);
             setPickerError(message.error);
@@ -452,11 +524,14 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     // size), then the whole copy underneath. The socket connects once the first read settles,
     // so it asks for only what is new and the snapshot never lands before what it extends.
     let disposed = false;
-    const paint = (saved: { session: SessionSummary; state: SessionState | null }) => {
+    const paint = (saved: { session: SessionSummary; state: SessionState | null;
+    }) => {
       savedStateRef.current = JSON.stringify(saved.state ?? null);
       // A copy saved mid-turn says "streaming"; whether it still is, only the daemon knows: not working until it says so.
       if (saved.state !== null) setState({ ...saved.state, isStreaming: false });
-      setSession((current) => (saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current));
+      setSession((current) =>
+        saved.session.updatedAt > current.updatedAt ? { ...current, ...saved.session } : current,
+      );
       markViewed(machine.id, initialSession.id);
     };
     /**
@@ -584,7 +659,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
     setItems((current) => [...current, localUserMessage(text, attachments.map((item) => ({ data: item.data, mimeType: item.mimeType })))]);
     setDraft("");
     setAttachments([]);
-    setState((current) => (current === null ? current : { ...current, isStreaming: true }));
+    setState((current) =>
+      current === null ? current : { ...current, isStreaming: true },
+    );
     // A flight aims at the row's place now: the list must not glide under it.
     listRef.current?.scrollToOffset({ offset: 0, animated: !fly });
     // awayUI and flight are stable (declared below / created once).
@@ -614,12 +691,34 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   }, []);
 
   const answer = useCallback(
-    (value: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
-      if (approval === null) return;
-      socketRef.current?.send({ type: "approval", id: approval.id, ...value });
-      setApproval(null);
+    (value: ApprovalAnswer) => {
+      if (approval === null ||
+        approvalsRef.current[0]?.id !== approval.id ||
+        approvalSendingRef.current !== null
+      ) return;
+      if (
+        !connected ||
+        !socketRef.current?.send({ type: "approval", id: approval.id, ...value })
+      ) {
+        setApprovalError(t("approval.offline"));
+        return;
+      }
+      approvalSendingRef.current = approval.id;
+      setApprovalSending(approval.id);
+      setApprovalError(undefined);
     },
-    [approval],
+    [approval, approvalSending, connected],
+  );
+  useEffect(() => {
+    if (approvalSending === null) return;
+    const timer = setTimeout(() => {
+      approvalSendingRef.current = null;
+      setApprovalSending(null);
+      setApprovalError(t("approval.offline"));
+      socketRef.current?.restart();
+    }, 10_000);
+    return () => clearTimeout(timer);
+  }, [approvalSending],
   );
 
   const openPicker = useCallback(() => {
@@ -644,7 +743,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   }, []);
 
   const selectLevel = useCallback((level: string) => {
-    setState((current) => (current === null ? current : { ...current, thinkingLevel: level }));
+    setState((current) =>
+      current === null ? current : { ...current, thinkingLevel: level },
+    );
     socketRef.current?.send({ type: "set_thinking_level", level });
   }, []);
 
@@ -866,7 +967,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       if (animate === undefined) animate = map !== null;
       // Once only: a live row that leaves the render window and comes back is remounted, and must not play again.
       map?.set(item.id, false);
-      return <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />;
+      return (
+        <TranscriptRow row={item} machine={machine} cwd={session.cwd} animate={animate} onOpenStep={setStep} />
+      );
     },
     [machine, session.cwd],
   );
@@ -1046,7 +1149,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           </Pressable>
         </View>
 
-        {error !== null ? <Banner text={error} onPress={() => setError(null)} /> : null}
+        {error !== null ? (
+                <Banner text={error} onPress={() => setError(null)} />
+              ) : null}
         {status === "offline" ? (
           <View style={styles.offline} accessibilityLiveRegion="polite">
             <Text style={styles.offlineText}>
@@ -1081,7 +1186,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           <View style={styles.failure}>
             <WarningGlyph size={20} color={colors.warn} />
             <Text style={styles.failureTitle}>{failed.title}</Text>
-            {failed.body !== undefined ? <Text style={styles.failureBody}>{failed.body}</Text> : null}
+            {failed.body !== undefined ? (
+                    <Text style={styles.failureBody}>{failed.body}</Text>
+                  ) : null}
             <View style={styles.failureCode}>
               <Text style={styles.failureCodeText} selectable>
                 {failure.status} · {failure.error}
@@ -1126,7 +1233,40 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         </View>
       </KeyboardAvoidingView>
 
-      {approval !== null ? <ApprovalSheet request={approval} onAnswer={answer} /> : null}
+      {approval !== null && !approvalHidden ? (
+          <ApprovalSheet
+            key={`${approval.id}:${approval.receivedAt ?? ""}`}
+            request={approval} onAnswer={answer}
+            onDismiss={() => {
+              if (approvalsRef.current[0]?.id === approval.id)
+                setApprovalHidden(true);
+            }}
+            machine={machineRef.current}
+            sessionId={initialSession.id}
+            connected={connected}
+            busy={approvalSending === approval.id}
+            error={approvalError}
+            canValidate={features.includes("approval-validation")}
+          />
+        ) : null}
+        {approval !== null && approvalHidden ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setApprovalHidden(false)}
+            style={{
+              position: "absolute",
+              bottom: 130 + insets.bottom,
+              alignSelf: "center",
+              backgroundColor: colors.inset,
+              padding: 14,
+              borderRadius: 12,
+            }}
+          >
+            <Text style={{ color: colors.tint }}>
+              {t("approval.waiting")} · {approvals.length}
+            </Text>
+          </Pressable>
+        ) : null}
       <ModelSheet
         visible={picker}
         models={models}

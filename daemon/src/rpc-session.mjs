@@ -1,3 +1,4 @@
+import { validateApproval } from "./approvals.mjs";
 /**
  * One OMP process in RPC mode (`omp --mode rpc`).
  *
@@ -258,6 +259,14 @@ export class RpcSession extends EventEmitter {
         });
         return;
       }
+      const receivedAt = Date.now();
+      message = {
+        ...message,
+        receivedAt,
+        ...(Number.isFinite(message.timeout) && message.timeout >= 0
+          ? { expiresAt: receivedAt + message.timeout }
+          : {}),
+      };
       this.extensionRequests.set(message.id, message);
       this.emit("approval", message);
       return;
@@ -441,6 +450,11 @@ export class RpcSession extends EventEmitter {
   respondExtension(id, answer) {
     if (this.closed || this.child === undefined) throw new Error("omp session is closed");
     if (!this.extensionRequests.has(id)) throw new Error("unknown extension request");
+    try {
+      validateApproval(this.extensionRequests.get(id), answer);
+    } catch (error) {
+      throw Object.assign(error, { status: 400 });
+    }
     const response = { type: "extension_ui_response", id, ...answer };
     this.child.stdin.write(`${JSON.stringify(response)}\n`);
     this.#settle(id, answer.cancelled === true ? "cancelled" : "answered");
