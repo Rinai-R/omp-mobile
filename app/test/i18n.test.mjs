@@ -41,6 +41,7 @@ test("no message is empty, and a counted message uses {count}", () => {
 test("the Chinese catalog is translated, not copied", () => {
   // Product names, technical terms and pure formats read the same in both languages.
   const allowed = new Set([
+    "session.viaHerdr",
     "settings.about.app",
     "machine.daemon",
     "machines.addSheet.token",

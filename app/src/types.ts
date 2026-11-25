@@ -45,6 +45,10 @@ export interface SessionSummary {
   openElsewhere?: boolean;
   /** That process, from daemons that offer the `takeover` feature. */
   owner?: SessionOwner;
+  /** `herdr`: its omp runs in a herdr terminal and opens through herdr, without a takeover. */
+  via?: "rpc" | "herdr";
+  capabilities?: SessionCapabilities;
+  herdrTerminal?: string;
   /** OMP questions and tool approvals waiting for an answer (live sessions, newer daemons). */
   waiting?: number;
   /** The oldest of them (daemons with the `answer` feature): the home answers it without opening the session. */
@@ -74,7 +78,25 @@ export interface SearchResult {
   match: SearchMatch;
 }
 
+/**
+ * What the phone may do in a session (daemons with the `herdr` feature). A
+ * session whose omp runs in a herdr terminal has the owner's omp, reached
+ * through herdr: whole messages instead of a word-by-word stream, no model
+ * switching or photos, and terminal dialogs answered with keys.
+ */
+export interface SessionCapabilities {
+  stream: "delta" | "message";
+  models: boolean;
+  images: boolean;
+  approvals: "structured" | "keys";
+}
+
 export interface SessionState {
+  /** `herdr`: the omp in the owner's herdr terminal; absent: the daemon's own omp. */
+  via?: "rpc" | "herdr";
+  capabilities?: SessionCapabilities;
+  /** The herdr terminal (`t7`) when `via` is `herdr`. */
+  herdrTerminal?: string;
   model?: { provider?: string; id?: string; name?: string };
   thinkingLevel?: string;
   isStreaming?: boolean;
@@ -183,6 +205,11 @@ export interface ApprovalRequest {
   optionDetails?: { description?: string }[];
   placeholder?: string;
   prefill?: string;
+  /** `keys` requests (a dialog in a herdr terminal): the terminal's screen, and the keys that may answer it. */
+  screen?: string;
+  keys?: string[];
+  /** permission, question or auth, as omp told herdr. */
+  kind?: string;
 }
 
 export interface Hello {
