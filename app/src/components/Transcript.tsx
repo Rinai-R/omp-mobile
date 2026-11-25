@@ -60,6 +60,8 @@ import {
 } from "../rows";
 import { MONO, SANS, SCALE, radius, type, useColors, useStyles, type Palette } from "../theme";
 import type { ImagePart, Machine, MessageItem, NoticeItem, ToolItem } from "../types";
+import { isAgentCall } from "../subagents";
+import { SubagentLinks } from "./SubagentLinks";
 import { BrandMark, GradientFill, Orb, ShimmerText, Spinner, useEnter, usePulse } from "./brand";
 import {
   AgentsGlyph,
@@ -989,6 +991,8 @@ function ToolRow({ tool, cwd, onOpen }: { tool: ToolItem; cwd: string; onOpen: (
           <ToolBody tool={tool} cwd={cwd} onDetails={details} />
         </Reveal>
       ) : null}
+      {/* The subagents a delegation started or waits on, always in view: each opens its transcript. */}
+      {isAgentCall(tool.name) ? <SubagentLinks tool={tool} /> : null}
     </View>
   );
 }

@@ -29,6 +29,9 @@ import { Glass } from "../components/Glass";
 import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
+import { SubagentLinksContext, useSessionSubagents } from "../components/SubagentLinks";
+import { SubagentScreen } from "../components/Subagents";
+import { isAgentCall } from "../subagents";
 import { ToolSheet } from "../components/ToolSheet";
 import { SendFlightLayer, TranscriptFolds, TranscriptRow } from "../components/Transcript";
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
@@ -54,6 +57,7 @@ import type {
   ServerMessage,
   SessionState,
   SessionSummary,
+  Subagent,
 } from "../types";
 
 interface Props {
@@ -132,7 +136,21 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [step, setStep] = useState<Step | null>(null);
+  const agentCalls = useMemo(() => {
+    let any = false;
+    let running = false;
+    for (const item of items) {
+      if (item.kind !== "tool" || !isAgentCall(item.name)) continue;
+      any = true;
+      if (item.status === "running") running = true;
+    }
+    return { any, running };
+  }, [items]);
   const [features, setFeatures] = useState<string[]>([]);
+  /** The subagent opened from its row in the chat. */
+  const [openSubagent, setOpenSubagent] = useState<Subagent | null>(null);
+  const subagentList = useSessionSubagents(machine, initialSession.id, agentCalls.any, agentCalls.running, features);
+  const subagentLinks = useMemo(() => ({ list: subagentList, parent: null, open: setOpenSubagent }), [subagentList]);
   /** A takeover of a session held on the computer is in flight, or what it failed with. */
   const [taking, setTaking] = useState(false);
   /** The socket is up but the daemon is still opening the session (an omp starts, the snapshot follows). */
@@ -881,6 +899,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
               : "quiet";
 
   return (
+    <SubagentLinksContext.Provider value={subagentLinks}>
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
@@ -1132,7 +1151,18 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       </Sheet>
       <ToolSheet step={openStep} machine={machine} cwd={session.cwd} sessionId={initialSession.id} onClose={() => setStep(null)} />
       <SendFlightLayer flight={flight} />
+      <SubagentScreen
+        machine={machine}
+        sessionId={initialSession.id}
+        subagent={openSubagent}
+        cwd={session.cwd}
+        onClose={() => setOpenSubagent(null)}
+        renderStep={(inner, close, parent) => (
+          <ToolSheet step={inner} machine={machine} cwd={session.cwd} sessionId={initialSession.id} subagentParent={parent} onClose={close} />
+        )}
+      />
     </View>
+    </SubagentLinksContext.Provider>
   );
 }
 

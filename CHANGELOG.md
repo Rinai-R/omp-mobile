@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty.
+
+### 中文
+
+- 委派给子代理的步骤下方直接显示子代理：对话里每个 `task` 行和 `wait` 行（子代理在后台工作时回合停在这里）都会列出它启动或等待的子代理，并实时显示运行中 / 已完成 / 失败；点一下即打开该子代理的记录，子代理自己再委派的也一样。以前只在步骤的「Details」面板里、且只对 `task` 显示，而 OMP 现在派发后立即返回，那里常常是空的。
+
 ## v0.8.6
 
 Adding a computer starts from an account: sign in once on the phone, and each computer joins with a code instead of a password.

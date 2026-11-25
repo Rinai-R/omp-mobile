@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mergeSubagent, subagentsOf, taskNames } from "../src/subagents.ts";
+import { callSubagents, isAgentCall, mergeSubagent, subagentsOf, taskNames } from "../src/subagents.ts";
 
 const sub = (id, extra = {}) => {
   const parts = id.split("/");
@@ -40,4 +40,31 @@ test("a subagent's messages grow by a delta that lines up, else are replaced", (
   assert.deepEqual(mergeSubagent(held, at, { from: 2, messages: [{ role: "assistant", timestamp: 3 }] }).length, 3);
   assert.deepEqual(mergeSubagent(held, at, { from: 0, messages: [{ role: "user", timestamp: 9 }] }), [{ role: "user", timestamp: 9 }]);
   assert.deepEqual(mergeSubagent([], undefined, { from: 0, messages: held }), held);
+});
+
+const call = (name, extra = {}) => ({ kind: "tool", id: `${name}-call`, name, args: {}, status: "done", ...extra });
+const waitText = (ids) => ({ content: [{ type: "text", text: ids.map((id) => `### ${id} [task] — completed\n<task-result id="${id}" agent="task" status="completed">`).join("\n") }] });
+
+test("a wait call shows the subagents it waited for, named in its result", () => {
+  const list = [sub("Ticker"), sub("Ticker-2"), sub("Other"), sub("Ticker/Inner")];
+  // The stored result is the text only; a live one also carries details.jobs.
+  assert.deepEqual(callSubagents(list, null, call("wait", { result: waitText(["Ticker"]) })).map((entry) => entry.id), ["Ticker"]);
+  const live = { content: [], details: { jobs: [{ id: "Other", type: "task" }, { id: "svc", type: "bash" }] } };
+  assert.deepEqual(callSubagents(list, null, call("wait", { result: live })).map((entry) => entry.id), ["Other"]);
+});
+
+test("a running wait shows what is running at its level; a finished one without names shows nothing", () => {
+  const list = [sub("Ticker", { status: "running" }), sub("Done"), sub("Ticker/Inner", { status: "running" })];
+  assert.deepEqual(callSubagents(list, null, call("wait", { status: "running" })).map((entry) => entry.id), ["Ticker"]);
+  assert.deepEqual(callSubagents(list, "Ticker", call("wait", { status: "running" })).map((entry) => entry.id), ["Ticker/Inner"]);
+  assert.deepEqual(callSubagents(list, null, call("wait", { result: { content: [{ type: "text", text: "nothing to wait for" }] } })), []);
+});
+
+test("a task call keeps matching by its names; other tools have no subagents", () => {
+  const list = [sub("Scout"), sub("Fixer", { status: "running", parentToolCallId: "task-call" })];
+  assert.deepEqual(callSubagents(list, null, call("task", { args: { tasks: [{ name: "Scout" }] } })).map((entry) => entry.id), ["Scout", "Fixer"]);
+  assert.deepEqual(callSubagents(list, null, call("bash", { args: { command: "ls" } })), []);
+  assert.equal(isAgentCall("task"), true);
+  assert.equal(isAgentCall("wait"), true);
+  assert.equal(isAgentCall("bash"), false);
 });

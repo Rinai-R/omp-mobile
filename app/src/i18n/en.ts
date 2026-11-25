@@ -510,6 +510,7 @@ export const en = {
   "subagents.starting": "Starting subagents…",
   "subagents.empty": "No messages yet",
   "subagents.messages": { one: "{count} message", other: "{count} messages" },
+  "subagents.openA11y": "{name}, {status}. Open its transcript",
   "subagents.status.running": "Running",
   "subagents.status.completed": "Done",
   "subagents.status.failed": "Failed",

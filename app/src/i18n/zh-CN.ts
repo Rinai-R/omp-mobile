@@ -509,6 +509,7 @@ export const zhCN: Record<Key, Message> = {
   "subagents.starting": "正在启动子代理…",
   "subagents.empty": "还没有消息",
   "subagents.messages": "{count} 条消息",
+  "subagents.openA11y": "{name}，{status}。打开它的记录",
   "subagents.status.running": "运行中",
   "subagents.status.completed": "已完成",
   "subagents.status.failed": "失败",
