@@ -830,7 +830,7 @@ class SessionEntry {
     this.approvalViews ??= new WeakMap();
     let view = this.approvalViews.get(request);
     if (view === undefined) {
-      view = approvalImages(request, this.cwd);
+      view = approvalImages(request, this.cwd, this.ompBlobDir);
       if (view.images && this.blobDir) {
         view = {
           ...view,
@@ -1395,6 +1395,7 @@ class Daemon {
       await rpc.start();
       const entry = new SessionEntry(stored.cwd, rpc);
       entry.blobDir = this.blobDir;
+      entry.ompBlobDir = join(this.options.ompHome ?? DEFAULT_OMP_HOME, "agent", "blobs");
       await entry.hydrate(this.registry.has(id) ? dormantActivity(this.registry.get(id), this.ompSessions.get(id)) : stored.updatedAt);
       entry.id = id;
       // Idle from now for the reaper, until a phone attaches: its last activity may be long ago.
@@ -1559,6 +1560,7 @@ class Daemon {
       await rpc.start();
       const entry = new SessionEntry(cwd, rpc);
       entry.blobDir = this.blobDir;
+      entry.ompBlobDir = join(this.options.ompHome ?? DEFAULT_OMP_HOME, "agent", "blobs");
       await entry.hydrate();
       if (entry.id === "") throw new Error("omp returned no session id");
       await ready?.(entry);

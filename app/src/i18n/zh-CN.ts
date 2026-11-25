@@ -172,6 +172,7 @@ export const zhCN: Record<Key, Message> = {
   "approval.expired": "已到截止时间，正在等待电脑确认结果。",
   "approval.remoteTimeout": "倒计时由电脑控制，关闭此页面不会暂停计时。",
   "approval.licenses": "开源许可",
+  "approval.remoteImage": "远程图片不会自动加载。",
   "approval.imageFailed": "图片加载失败，请先在电脑核对图片内容再回答。",
   "approval.waiting": "有问题等待回答",
   // OMP's questions

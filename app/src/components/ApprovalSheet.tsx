@@ -30,6 +30,7 @@ import {
   useSheet,
   sheetSurface,
 } from "./ui";
+import { remoteFormImage } from "../approvalMedia";
 import { ApprovalBlock, ApprovalSpans } from "./ApprovalContent";
 
 /** Native presentation of OMP's six dialog methods. Closing the view never answers the question. */
@@ -145,7 +146,10 @@ export function ApprovalSheet({
   const mediaPending =
     form?.sections.some((section) =>
       section.blocks.some(
-        (block) => block.kind === "image" && !loadedImages[block.src],
+        (block) =>
+          block.kind === "image" &&
+          !remoteFormImage(block.src) &&
+          !loadedImages[block.src],
       ),
     ) === true;
   const mediaFailure = useCallback(() => setImageFailed(true), []);

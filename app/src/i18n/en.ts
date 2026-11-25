@@ -173,6 +173,7 @@ export const en = {
   "approval.expired": "The deadline has passed. Waiting for the computer to confirm the outcome.",
   "approval.remoteTimeout": "The computer controls the deadline. Closing this page does not stop it.",
   "approval.licenses": "Open-source licenses",
+  "approval.remoteImage": "Remote image is not loaded automatically.",
   "approval.imageFailed": "Image could not be loaded. Check it on the computer before answering.",
   "approval.waiting": "Question waiting",
   // OMP's questions

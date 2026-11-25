@@ -31,6 +31,15 @@
 
 复验命令：`npm test`、`npm run typecheck`。Android 使用项目现有的 Expo/Gradle release 构建流程；实际操作按上表依次覆盖。
 
+## 图片评审修复复验
+
+- 在同一基线完成图片修复后，重跑 `npm test`：daemon **143** 项、app **208** 项，共 **351 项通过，0 失败**；类型检查、Android arm64 release 构建及 `git diff --check` 通过。
+- 新增真实文件测试：拒绝工作目录外的绝对路径、file URL、父路径及越界符号链接，允许工作目录和显式 OMP blob 目录内的图片。
+- 两项变异验证分别临时删除 select 选项成员检查和 remote URL skip：新增运行时测试均失败，恢复检查后通过。远程 URL 测试在工作目录中实际创建 URL 形状的本地文件，确保跳过分支被执行。
+- 使用未修改的 OMP 19.1.1、Android 15 和独立测试包，打开包含远程 PNG/SVG、内联 SVG 外部引用、xlink/大小写/实体/控制空白变体、data SVG 及嵌套 data SVG 的表单。真实 HTTP logger 收到主机端控制请求，但手机打开、滚动和提交表单全过程没有图片请求。
+- 本地 SVG 的 `viewBox`、渐变和文字仍正常显示；远程资源显示显式链接，点击后交给浏览器。浏览器首次启动页没有继续配置，因此不宣称完成浏览器实际下载。
+- 远程占位没有禁用 Submit，提交后真实 OMP 收到 `{"data":{"answer":"Reviewed"}}`。Android crash buffer 为空。临时服务和测试包已移除，恢复正式应用，并关闭本轮启动的模拟器。
+
 
 ## 明确延后
 

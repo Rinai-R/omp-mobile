@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
-import { Image, Pressable, ScrollView, Text, View } from "react-native";
-import { SvgUri, SvgXml } from "react-native-svg";
+import { useEffect, useMemo, useState } from "react";
+import { Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
+import { parse, SvgAst, type JsxAST, type XmlAST } from "react-native-svg";
 import {
-  type FormSpan,
-  type FormBlock,
-} from "../../vendor/omp-form/parse.ts";
+  remoteFormImage,
+  sanitizeSvgTree,
+  svgDataMarkup,
+  svgTreeMarkup,
+} from "../approvalMedia";
+import { type FormSpan, type FormBlock } from "../../vendor/omp-form/parse.ts";
 import { imageUri, relayImageUri } from "../media";
 import { useColors, MONO } from "../theme";
 import { t } from "../i18n/index.ts";
@@ -32,6 +35,111 @@ export function ApprovalSpans({ spans }: { spans: FormSpan[] }) {
     </Text>
   );
 }
+function ResourceLinks({ links }: { links: string[] }) {
+  const c = useColors();
+  return (
+    <>
+      {links.map((url) => (
+        <Text key={url} style={{ color: c.fgMuted }}>
+          {t("approval.remoteImage")}
+          <Text
+            accessibilityRole="link"
+            style={{ color: c.tint, textDecorationLine: "underline" }}
+            onPress={() => {
+              void Linking.openURL(url).catch(() => undefined);
+            }}
+          >{`\n${t("common.open")} · ${url}`}</Text>
+        </Text>
+      ))}
+    </>
+  );
+}
+
+function safeSvg(markup: string): { ast: JsxAST | null; links: string[] } {
+  const links = new Set<string>();
+  const clean = (tree: XmlAST, depth: number): XmlAST => {
+    const result = sanitizeSvgTree(tree, (uri) => {
+      if (depth >= 4) return;
+      const nested = svgDataMarkup(uri);
+      if (nested === undefined) return;
+      let serialized: string | undefined;
+      parse(nested, (nestedTree) => {
+        clean(nestedTree, depth + 1);
+        serialized = svgTreeMarkup(nestedTree);
+        return nestedTree;
+      });
+      return serialized
+        ? `data:image/svg+xml,${encodeURIComponent(serialized)}`
+        : undefined;
+    });
+    for (const link of result.links) links.add(link);
+    return tree;
+  };
+  return { ast: parse(markup, (tree) => clean(tree, 0)), links: [...links] };
+}
+function SafeSvg({
+  markup,
+  onFailure,
+  height = 220,
+}: {
+  markup: string;
+  onFailure: () => void;
+  height?: number;
+}) {
+  const result = useMemo(() => {
+    try {
+      return safeSvg(markup);
+    } catch {
+      return undefined;
+    }
+  }, [markup]);
+  useEffect(() => {
+    if (!result) onFailure();
+  }, [result, onFailure]);
+  return result ? (
+    <>
+      <SvgAst ast={result.ast} override={{ width: "100%", height }} />
+      <ResourceLinks links={result.links} />
+    </>
+  ) : null;
+}
+function SvgImage({
+  uri,
+  onReady,
+  onFailure,
+  src,
+  height,
+}: {
+  uri: string;
+  height: number;
+  src: string;
+  onReady: (src: string) => void;
+  onFailure: () => void;
+}) {
+  const [markup, setMarkup] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const xml = svgDataMarkup(uri) ?? (await (await fetch(uri)).text());
+        const result = safeSvg(xml);
+        if (!result.ast) throw new Error("Invalid SVG");
+        if (live) {
+          setMarkup(xml);
+          onReady(src);
+        }
+      } catch {
+        if (live) onFailure();
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [uri]);
+  return markup ? (
+    <SafeSvg markup={markup} onFailure={onFailure} height={height} />
+  ) : null;
+}
 function FormImage({
   src,
   alt,
@@ -47,6 +155,7 @@ function FormImage({
   onFailure: () => void;
   onReady: (src: string) => void;
 }) {
+  const remote = remoteFormImage(src);
   const part =
     (request.images && Object.hasOwn(request.images, src)
       ? request.images[src]
@@ -55,17 +164,17 @@ function FormImage({
       ? { type: "image" as const, data: src, mimeType: undefined }
       : undefined);
   const [uri, setUri] = useState(
-    part
-      ? imageUri(machine, part)
-      : /^(https?:|data:)/i.test(src)
-        ? src
-        : undefined,
+    part ? imageUri(machine, part) : /^data:/i.test(src) ? src : undefined,
   );
   const [failed, setFailed] = useState(false);
   const [large, setLarge] = useState(false);
   const c = useColors();
   useEffect(() => {
     let live = true;
+    if (remote) {
+      onReady(src);
+      return;
+    }
     if (part && uri === undefined) {
       const pending = relayImageUri(machine, part);
       if (pending)
@@ -90,6 +199,13 @@ function FormImage({
     setFailed(true);
     onFailure();
   };
+  if (remote)
+    return (
+      <View style={{ gap: 6 }}>
+        {alt ? <Text style={{ color: c.fgMuted }}>{alt}</Text> : null}
+        <ResourceLinks links={[remote]} />
+      </View>
+    );
   return (
     <View style={{ gap: 6 }}>
       {alt ? <Text style={{ color: c.fgMuted }}>{alt}</Text> : null}
@@ -103,12 +219,12 @@ function FormImage({
         >
           {part?.mimeType === "image/svg+xml" ||
           /^data:image\/svg\+xml/i.test(uri) ? (
-            <SvgUri
+            <SvgImage
               uri={uri}
-              width="100%"
               height={large ? 440 : 220}
-              onError={failure}
-              onLoad={() => onReady(src)}
+              src={src}
+              onReady={onReady}
+              onFailure={failure}
             />
           ) : (
             <Image
@@ -210,12 +326,7 @@ export function ApprovalBlock({
           {block.alt ? (
             <Text style={{ color: c.fgMuted }}>{block.alt}</Text>
           ) : null}
-          <SvgXml
-            xml={block.markup}
-            width="100%"
-            height={220}
-            onError={onFailure}
-          />
+          <SafeSvg markup={block.markup} onFailure={onFailure} />
         </View>
       );
   }

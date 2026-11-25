@@ -245,3 +245,15 @@ test("structured ask is enabled only by a capable socket and disabled when it le
     await d.close();
   }
 });
+
+test("a fabricated select value never reaches OMP, while a valid choice settles the same request", () => {
+  const rpc = new RpcSession({ cwd: process.cwd() }), writes = [];
+  rpc.child = { stdin: { write: (s) => writes.push(JSON.parse(s)) } };
+  rpc.extensionRequests.set("select", { id: "select", method: "select", options: ["Allow", "Deny"] });
+  assert.throws(() => rpc.respondExtension("select", { value: "fabricated" }), /offered options/);
+  assert.equal(writes.length, 0);
+  assert.ok(rpc.extensionRequests.has("select"));
+  rpc.respondExtension("select", { value: "Deny" });
+  assert.deepEqual(writes, [{ type: "extension_ui_response", id: "select", value: "Deny" }]);
+  assert.equal(rpc.extensionRequests.has("select"), false);
+});
