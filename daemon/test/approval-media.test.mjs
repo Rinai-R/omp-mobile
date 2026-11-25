@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -70,4 +72,43 @@ test("realpath confinement rejects absolute, file-URL, parent and symlink escape
   ]);
   const noBlobPermission = approvalImages(form([blob]), cwd);
   assert.equal(noBlobPermission.images, undefined);
+});
+
+test("non-file image paths are rejected before attempting to read bytes", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "omp-form-directory-"));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const directory = join(cwd, "directory.png");
+  mkdirSync(directory);
+  const resolvedDirectory = fs.realpathSync(directory);
+  const reads = [];
+  const originalRead = fs.readFileSync;
+  // Reading directories already throws on some platforms. Observe the attempted
+  // read directly so that removing isFile() cannot hide behind that exception.
+  const read = t.mock.method(fs, "readFileSync", (path, ...args) => {
+    if (path === resolvedDirectory) {
+      reads.push(path);
+      return Buffer.from("a directory must never be read as an image");
+    }
+    return originalRead(path, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    const request = form(["directory.png"]);
+    assert.equal(approvalImages(request, cwd), request);
+    assert.deepEqual(reads, []);
+  } finally {
+    read.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test("the 8 MiB image limit accepts the boundary and rejects one byte above it", (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "omp-form-size-"));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const limit = 8 * 1024 * 1024;
+  writeFileSync(join(cwd, "boundary.png"), Buffer.alloc(limit, 42));
+  writeFileSync(join(cwd, "oversize.png"), Buffer.alloc(limit + 1, 43));
+  const view = approvalImages(form(["boundary.png", "oversize.png"]), cwd);
+  assert.deepEqual(Object.keys(view.images), ["boundary.png"]);
+  assert.equal(Buffer.from(view.images["boundary.png"].data, "base64").length, limit);
 });
