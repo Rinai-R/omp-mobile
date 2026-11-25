@@ -4,11 +4,17 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
-- A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty.
+## v0.8.7
+
+- A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty. (#98)
+- An approval request without a title (an `ask` form) no longer crashes the app when opened, from the home card or the chat. Requests the phone cannot answer, such as forms, show a title and say to answer them on the computer (#97, fixes #85).
+- An APK update keeps downloading after you switch apps or lock the screen, and picks the download up again if Android stopped the app; once it finishes, only a private copy checked against the release's SHA-256 is offered for install (#100, thanks @tingQian).
 
 ### 中文
 
-- 委派给子代理的步骤下方直接显示子代理：对话里每个 `task` 行和 `wait` 行（子代理在后台工作时回合停在这里）都会列出它启动或等待的子代理，并实时显示运行中 / 已完成 / 失败；点一下即打开该子代理的记录，子代理自己再委派的也一样。以前只在步骤的「Details」面板里、且只对 `task` 显示，而 OMP 现在派发后立即返回，那里常常是空的。
+- 委派给子代理的步骤下方直接显示子代理：对话里每个 `task` 行和 `wait` 行（子代理在后台工作时回合停在这里）都会列出它启动或等待的子代理，并实时显示运行中 / 已完成 / 失败；点一下即打开该子代理的记录，子代理自己再委派的也一样。以前只在步骤的「Details」面板里、且只对 `task` 显示，而 OMP 现在派发后立即返回，那里常常是空的。（#98）
+- 没有标题的审批请求（如 `ask` 表单）在首页卡片或对话里打开时不再闪退；手机无法作答的请求（如表单）会显示标题，并提示到电脑上回答（#97，修复 #85）。
+- APK 更新在切到其他应用或锁屏后会继续下载，应用被系统关掉后重新打开也能接上；下载完成后，只有按发布的 SHA-256 校验过的私有副本才会交给安装（#100，感谢 @tingQian）。
 
 ## v0.8.6
 
