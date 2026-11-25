@@ -218,19 +218,21 @@ test("dialog keys go in only while the same dialog is up, once per dialog", asyn
     assert.match(request.screen, /Allow bash\?/);
     assert.equal(entry.openRequests().length, 1);
 
-    // The screen moved on under the phone: no keys.
+    // The screen moved on under the phone: no keys, and the old request is gone.
     fake.set((world) => {
       world.screens.t1 = "Allow edit?\n> Yes\n  No";
     });
+    const fresh = new Promise((resolveAsk) => entry.rpc.once("approval", resolveAsk));
     await assert.rejects(entry.rpc.respondExtension(request.id, { keys: ["enter"] }), /changed/);
     assert.equal(fake.calls("terminal.keys").length, 0);
-
-    fake.set((world) => {
-      world.screens.t1 = "Allow bash?\n> Yes\n  No";
-    });
-    await entry.rpc.respondExtension(request.id, { keys: ["enter"] });
-    assert.deepEqual(fake.calls("terminal.keys").map((call) => call.params.keys), [["enter"]]);
     await assert.rejects(entry.rpc.respondExtension(request.id, { keys: ["enter"] }), /unknown|answered/);
+
+    // The phone answers the dialog as it is now, once.
+    const current = await fresh;
+    assert.match(current.screen, /Allow edit\?/);
+    await entry.rpc.respondExtension(current.id, { keys: ["enter"] });
+    assert.deepEqual(fake.calls("terminal.keys").map((call) => call.params.keys), [["enter"]]);
+    await assert.rejects(entry.rpc.respondExtension(current.id, { keys: ["enter"] }), /unknown|answered/);
     assert.equal(fake.calls("terminal.keys").length, 1, "the panel works once");
 
     // Not blocked any more: no dialog is left open.
@@ -324,6 +326,131 @@ test("messages omp appends to the session file reach the phone, and its run stat
       world.terminals[0].status_ms = 500;
     });
     await until(() => events.some((event) => event.type === "agent_end"), "agent_end");
+  } finally {
+    await daemon.close();
+  }
+});
+
+/** The screen as omp draws it a moment before its dialog: only the tool's preview box. */
+const previewScreen = (tick) => ["Warning: an extension failed to load", "╭─── $ touch /tmp/FIRST │", "│ preparing", "╰──────────", "", `⠙ ${tick}s  Opus · tmp ── 4% ──`, "╰─"].join("\n");
+
+/** Opens `s1` through herdr on a fake with terminal t1 = omp 4242, then puts it in `blocked` with `screens`. */
+async function blockedSession(fake, status = { app: "omp", state: "blocked", kind: "permission" }) {
+  const { daemon } = daemonHeldBy(fake, 4242);
+  await daemon.herdr.start();
+  const entry = await daemon.ensureLive("s1");
+  const asked = new Promise((resolveAsk) => entry.rpc.once("approval", resolveAsk));
+  fake.set((world) => {
+    world.terminals[0].status = status;
+    world.terminals[0].status_ms = 200;
+  });
+  return { daemon, entry, request: await asked };
+}
+
+test("a dialog read before omp drew it is read again: the phone gets the dialog, not the tool preview", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)], { t1: dialogScreen(9) });
+  fake.set((world) => {
+    world.screenSeq = { t1: [previewScreen(7), previewScreen(8)] };
+  });
+  const { daemon, entry, request } = await blockedSession(fake);
+  try {
+    assert.match(request.screen, /Allow tool: bash/, "the request shows the dialog");
+    await entry.rpc.respondExtension(request.id, { keys: ["enter"] });
+    assert.deepEqual(fake.calls("terminal.keys").map((call) => call.params.keys), [["enter"]]);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("a dialog that no longer matches the phone's copy is sent again as a new request, and that one can be answered", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)], { t1: dialogScreen(8) });
+  const { daemon, entry, request } = await blockedSession(fake);
+  try {
+    const again = new Promise((resolveAsk) => entry.rpc.once("approval", resolveAsk));
+    fake.set((world) => {
+      world.screens.t1 = dialogScreen(9).replace("Command: date", "Command: rm -rf build");
+    });
+    await assert.rejects(entry.rpc.respondExtension(request.id, { keys: ["enter"] }), /changed/);
+    const fresh = await again;
+    assert.notEqual(fresh.id, request.id);
+    assert.match(fresh.screen, /rm -rf build/);
+    await entry.rpc.respondExtension(fresh.id, { keys: ["enter"] });
+    assert.equal(fake.calls("terminal.keys").length, 1);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("another omp process in the same terminal is not this session's: nothing is typed and the session closes", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)]);
+  const { daemon } = daemonHeldBy(fake, 4242);
+  try {
+    await daemon.herdr.start();
+    const entry = await daemon.ensureLive("s1");
+    fake.set((world) => {
+      world.terminals[0].foreground = { pid: 9999, name: "omp", argv: ["omp"], cwd: "/tmp" };
+      world.terminals[0].pid = 9999;
+    });
+    await until(() => entry.closed, "the session to close for another omp");
+    await assert.rejects(entry.rpc.prompt("hello"), /not running omp/);
+    assert.equal(fake.calls("terminal.send").length, 0);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("omp's status with a shell in the foreground is not an omp terminal", async () => {
+  const fake = fakeHerdr([omp("t1", 4242, { app: "omp", state: "idle" }, { foreground: { pid: 4242, name: "zsh", argv: ["zsh"], cwd: "/tmp" } })]);
+  const herdr = new Herdr({ bin: fake.bin, env: fake.env });
+  try {
+    await herdr.start();
+    assert.equal(herdr.ompTerminal(4242), undefined);
+  } finally {
+    herdr.close();
+  }
+});
+
+test("a dialog whose status time changed is a new dialog, even with the same box", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)], { t1: dialogScreen(8) });
+  const { daemon, entry, request } = await blockedSession(fake);
+  try {
+    // Answered in the terminal and asked again with the same words: the phone's answer was for the first one.
+    entry.rpc.follow = () => undefined;
+    fake.set((world) => {
+      world.terminals[0].status_ms = 900;
+    });
+    await assert.rejects(entry.rpc.respondExtension(request.id, { keys: ["enter"] }), /changed/);
+    assert.equal(fake.calls("terminal.keys").length, 0);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("one dialog takes one answer, even when two arrive together", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)], { t1: dialogScreen(8) });
+  const { daemon, entry, request } = await blockedSession(fake);
+  try {
+    const answers = await Promise.allSettled([
+      entry.rpc.respondExtension(request.id, { keys: ["enter"] }),
+      entry.rpc.respondExtension(request.id, { keys: ["enter"] }),
+    ]);
+    assert.deepEqual(answers.map((answer) => answer.status).sort(), ["fulfilled", "rejected"]);
+    assert.equal(fake.calls("terminal.keys").length, 1);
+  } finally {
+    await daemon.close();
+  }
+});
+
+test("only dialog keys are pressed: ctrl+c, letters or text are refused", async () => {
+  const fake = fakeHerdr([omp("t1", 4242)], { t1: dialogScreen(8) });
+  const { daemon, entry, request } = await blockedSession(fake);
+  try {
+    for (const keys of [["ctrl+c"], ["a"], ["rm -rf /"], [], ["enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter", "enter"]]) {
+      await assert.rejects(entry.rpc.respondExtension(request.id, { keys }), /a dialog takes keys/, JSON.stringify(keys));
+    }
+    assert.equal(fake.calls("terminal.keys").length, 0);
+    await entry.rpc.respondExtension(request.id, { keys: ["down", "enter"] });
+    assert.deepEqual(fake.calls("terminal.keys").map((call) => call.params.keys), [["down", "enter"]]);
   } finally {
     await daemon.close();
   }

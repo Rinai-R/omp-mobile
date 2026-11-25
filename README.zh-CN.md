@@ -56,6 +56,8 @@ omp plugin install omp-mobile
 
 电脑上运行 herdr-core 终端（`hc`）时，在其中运行的 omp 会话会经 herdr 在手机上打开，不再接管：omp 留在它的终端里；手机发的消息会等你在终端里的草稿发出或清空后再输入；「停止」会中断它；工具审批和提问显示终端里的对话框和按键，只有对话框没变时按键才生效。消息按整条显示（omp 写入后）。`omp-mobile --herdr off` 关闭；`--herdr on` 时 herdr 不在线也不会退回接管。
 
+两个限制：herdr 的按键没有「比较后再写」，如果你在手机校验完、按键还没送达的一瞬间在终端里回答了同一个对话框，手机的按键会落到 omp 接下来显示的界面上。手机发的消息会等你在已 attach 的终端里正在打的草稿（你发出或清空后它单独输入）；用 `hc keys` 送进去的文字不算打字，可能会和它拼在一起。
+
 #### 通过中继（不用 Tailscale）
 
 守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码（**其他方式 → 扫码配对**），或把链接粘贴到 **直连地址**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。

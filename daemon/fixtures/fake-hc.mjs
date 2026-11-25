@@ -7,7 +7,7 @@
  * terminal it sees in the file as an event, with a heartbeat.
  * Never talks to a real herdr-core.
  */
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 if (process.argv[2] !== "connect") {
@@ -42,8 +42,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const terminal = find(params.terminal);
       return terminal ? ok(terminal) : fail("not_found", `no terminal ${params.terminal}`);
     }
-    case "terminal.read":
+    case "terminal.read": {
+      // `screenSeq[t]`: the next reads of t, one each, before `screens[t]` (a screen omp is still drawing).
+      const queue = state.screenSeq?.[params.terminal];
+      if (Array.isArray(queue) && queue.length > 0) {
+        const text = queue.shift();
+        writeFileSync(stateFile, JSON.stringify(state));
+        return ok({ text, complete: true, how: "screen" });
+      }
       return ok({ text: state.screens?.[params.terminal] ?? "", complete: true, how: "screen" });
+    }
     case "terminal.send": {
       const terminal = find(params.terminal);
       if (terminal?.status?.state === "blocked" && params.force !== true) return fail("blocked", "it is blocked");

@@ -25,6 +25,10 @@ const TAIL_MS = 250;
 const OWNER_CHECK_MS = 5_000;
 /** After keys went in, when to look at the screen again: a dialog that is still up may show something new. */
 const AFTER_KEYS_MS = 400;
+/** A dialog is taken once two reads this far apart agree: omp reports `blocked` before it has drawn the box. */
+const SETTLE_MS = 150;
+/** Reads before giving up on a dialog that keeps changing (it is shown as it is then). */
+const SETTLE_READS = 12;
 /** Where model and thinking-level changes are looked for when the session opens. */
 const SETTINGS_TAIL_BYTES = 4 * 1024 * 1024;
 
@@ -44,6 +48,18 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
  * The whole screen when there is no box.
  * @param {string} screen
  */
+/**
+ * Whether a box is omp's dialog rather than a tool's preview: it has choices,
+ * one marked (`›`, `>`, or omp's arrow glyph), and a line of key hints.
+ * @param {string} box
+ */
+export function isDialog(box) {
+  const lines = box.split("\n");
+  const marked = lines.some((line) => /^│\s*(?:›|>|\u{F054})\s+\S/u.test(line));
+  const hints = lines.some((line) => /choose|select|approve|deny/i.test(line) && /[↑↓]|enter|esc/i.test(line));
+  return marked || hints;
+}
+
 export function dialogOf(screen) {
   const lines = screen.split("\n");
   for (let top = lines.length - 1; top >= 0; top -= 1) {
@@ -190,14 +206,8 @@ export class HerdrSession extends EventEmitter {
 
   /** Show the dialog on the screen now as one request; it replaces any earlier one. */
   async openDialog(terminal) {
-    let screen;
-    try {
-      screen = await this.herdr.screen(this.address);
-    } catch {
-      return;
-    }
-    if (this.closed || this.terminal?.status?.state !== "blocked") return;
-    const dialog = dialogOf(screen);
+    const dialog = await this.settledDialog();
+    if (dialog === undefined || this.closed || this.terminal?.status?.state !== "blocked") return;
     const open = [...this.dialogs.values()].find((item) => item.statusMs === terminal.status_ms && item.hash === hash(dialog));
     if (open !== undefined) return;
     this.settleDialogs("cancelled");
@@ -215,6 +225,30 @@ export class HerdrSession extends EventEmitter {
     this.dialogs.set(id, { statusMs: terminal.status_ms, hash: hash(dialog) });
     this.extensionRequests.set(id, request);
     this.emit("approval", request);
+  }
+
+  /**
+   * The dialog box once omp has finished drawing it: a box with choices
+   * (lines below its title) that two reads `SETTLE_MS` apart agree on. Read
+   * too early, the last box on the screen is the tool's preview above where
+   * the dialog is about to appear. Undefined when the screen cannot be read
+   * or the terminal stopped asking meanwhile.
+   */
+  async settledDialog() {
+    let previous;
+    for (let read = 0; read < SETTLE_READS; read += 1) {
+      let dialog;
+      try {
+        dialog = dialogOf(await this.herdr.screen(this.address));
+      } catch {
+        return undefined;
+      }
+      if (this.closed || this.terminal?.status?.state !== "blocked") return undefined;
+      if (dialog === previous && isDialog(dialog)) return dialog;
+      previous = dialog;
+      await new Promise((resolveWait) => setTimeout(resolveWait, SETTLE_MS));
+    }
+    return previous;
   }
 
   settleDialogs(reason) {
@@ -352,7 +386,14 @@ export class HerdrSession extends EventEmitter {
     if (!this.isOurs(now) || now.status?.state !== "blocked" || now.status_ms !== dialog.statusMs) {
       throw new Error("The dialog in the terminal changed; look at it again.");
     }
-    if (hash(dialogOf(await this.herdr.screen(this.address))) !== dialog.hash) throw new Error("The dialog in the terminal changed; look at it again.");
+    if (hash(dialogOf(await this.herdr.screen(this.address))) !== dialog.hash) {
+      // The phone holds an old copy (or one read before omp finished drawing): send the dialog as it is now.
+      this.dialogs.delete(id);
+      this.extensionRequests.delete(id);
+      this.emit("approval-resolved", { id, reason: "cancelled" });
+      void this.openDialog(now);
+      throw new Error("The dialog in the terminal changed; look at it again.");
+    }
     if (!this.dialogs.delete(id)) throw new Error("unknown or already answered dialog");
     this.extensionRequests.delete(id);
     await this.herdr.keys(this.address, keys);
