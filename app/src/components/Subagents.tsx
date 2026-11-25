@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FlatList, Modal, StyleSheet, Text, View, useWindowDimensions, type ListRenderItem } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { Extrapolation, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
@@ -9,11 +9,12 @@ import { heldOf } from "../cache";
 import { t } from "../i18n/index.ts";
 import { snapshotItems } from "../messages";
 import { layoutRows, type Row, type Step } from "../rows";
-import { mergeSubagent, subagentsOf } from "../subagents";
+import { callSubagents, mergeSubagent } from "../subagents";
 import { SPRING_SCREEN } from "../motion";
 import { MONO, SANS, useColors, useStyles, type Palette } from "../theme";
-import type { AgentMessage, Machine, Subagent } from "../types";
+import type { AgentMessage, Machine, Subagent, ToolItem } from "../types";
 import { Spinner } from "./brand";
+import { SubagentLinksContext } from "./SubagentLinks";
 import { TranscriptFolds, TranscriptRow } from "./Transcript";
 import { Banner, FADE_REDUCED, Group, Header, Row as ListRow, StatusDot } from "./ui";
 
@@ -34,8 +35,7 @@ export function SubagentList({
   machine,
   sessionId,
   parent,
-  toolCallId,
-  names,
+  tool,
   running,
   onOpen,
 }: {
@@ -43,8 +43,8 @@ export function SubagentList({
   sessionId: string;
   /** The subagent whose transcript holds the call; null for the session's own. */
   parent: string | null;
-  toolCallId: string;
-  names: readonly string[];
+  /** The `task` or `wait` call the subagents belong to. */
+  tool: ToolItem;
   /** The call still runs: its subagents may not have started yet. */
   running: boolean;
   onOpen: (subagent: Subagent) => void;
@@ -53,7 +53,7 @@ export function SubagentList({
   const colors = useColors();
   const [list, setList] = useState<Subagent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const mine = useMemo(() => (list === null ? [] : subagentsOf(list, parent, toolCallId, names)), [list, names, parent, toolCallId]);
+  const mine = useMemo(() => (list === null ? [] : callSubagents(list, parent, tool)), [list, parent, tool]);
   const busy = running || mine.some((subagent) => subagent.status === "running");
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +179,9 @@ export function SubagentScreen({
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<Step | null>(null);
+  /** A subagent this one started, opened from its rows: shown over this one. */
+  const [child, setChild] = useState<Subagent | null>(null);
+  const outer = useContext(SubagentLinksContext);
   const messagesRef = useRef<AgentMessage[]>([]);
   const id = subagent?.id;
 
@@ -190,6 +193,7 @@ export function SubagentScreen({
     setInfo(subagent);
     setError(null);
     setStep(null);
+    setChild(null);
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () => {
@@ -242,9 +246,11 @@ export function SubagentScreen({
           <Header title={info?.agentId ?? ""} subtitle={subtitle} onBack={onClose} />
           {error !== null ? <Banner text={error} /> : null}
           <View style={styles.listWrap}>
-            <TranscriptFolds>
-              <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
-            </TranscriptFolds>
+            <SubagentLinksContext.Provider value={outer === null || id === undefined ? null : { list: outer.list, parent: id, open: setChild }}>
+              <TranscriptFolds>
+                <FlatList inverted data={rows} keyExtractor={(row) => row.id} renderItem={renderItem} contentContainerStyle={styles.list} initialNumToRender={14} windowSize={11} />
+              </TranscriptFolds>
+            </SubagentLinksContext.Provider>
             {rows.length === 0 && error === null ? (
               <View style={styles.empty} pointerEvents="none">
                 <Text style={styles.note}>{t("subagents.empty")}</Text>
@@ -254,6 +260,9 @@ export function SubagentScreen({
         </Animated.View>
       </GestureHandlerRootView>
       {id !== undefined ? renderStep(openStep, () => setStep(null), id) : null}
+      {id !== undefined ? (
+        <SubagentScreen machine={machine} sessionId={sessionId} subagent={child} cwd={cwd} onClose={() => setChild(null)} renderStep={renderStep} />
+      ) : null}
     </Modal>
   );
 }

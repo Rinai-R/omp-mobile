@@ -4,7 +4,7 @@ import { SUBAGENTS_FEATURE, knownFeatures } from "../api";
 import { editDiff } from "../diff";
 import { resultText } from "../messages";
 import { stepStat, stepTarget, stepTitle, thoughtLabel, toolKind, type Step } from "../rows";
-import { taskNames } from "../subagents";
+import { isAgentCall } from "../subagents";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
 import type { Machine, Subagent } from "../types";
 import { t } from "../i18n/index.ts";
@@ -97,13 +97,12 @@ export function ToolSheet({
               {stat !== undefined ? ` · ${stat}` : tool.status === "running" ? ` · ${t("step.status.running")}` : ""}
             </Text>
           </View>
-          {sessionId !== undefined && tool.name === "task" && knownFeatures(machine).includes(SUBAGENTS_FEATURE) ? (
+          {sessionId !== undefined && isAgentCall(tool.name) && knownFeatures(machine).includes(SUBAGENTS_FEATURE) ? (
             <SubagentList
               machine={machine}
               sessionId={sessionId}
               parent={subagentParent}
-              toolCallId={tool.id}
-              names={taskNames(tool.args)}
+              tool={tool}
               running={tool.status === "running"}
               onOpen={setSubagent}
             />
