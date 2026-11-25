@@ -52,6 +52,10 @@ omp plugin install omp-mobile
 - **用账号（推荐）：** 在 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 公共中继上用 GitHub、Google、知乎（或邮箱密码）登录。面板会列出账号下的电脑；点 **添加一台新电脑** 会显示一次性码（`ABCD-EFGH`，10 分钟有效，只能用一次）。在电脑的 OMP 里输入 `/mobile login ABCD-EFGH`，或在终端运行 `omp-mobile relay login ABCD-EFGH`：电脑无需自己的密码即加入该账号（daemon 没开中继时会自动打开），手机随后自动添加它。
 - **其他方式：** **扫码配对** 扫描电脑显示的二维码；**直连地址** 填 Tailscale / 局域网地址和 Token（也可粘贴配对链接）；**自建中继** 连接你自己的服务器。
 
+#### herdr 里的会话
+
+电脑上运行 herdr-core 终端（`hc`）时，在其中运行的 omp 会话会经 herdr 在手机上打开，不再接管：omp 留在它的终端里；手机发的消息会等你在终端里的草稿发出或清空后再输入；「停止」会中断它；工具审批和提问显示终端里的对话框和按键，只有对话框没变时按键才生效。消息按整条显示（omp 写入后）。`omp-mobile --herdr off` 关闭；`--herdr on` 时 herdr 不在线也不会退回接管。
+
 #### 通过中继（不用 Tailscale）
 
 守护进程也可以通过 [ds-harness-remote](https://github.com/liguobao/ds-harness-remote) 的公共中继 `https://dsh.r2049.cn` 连接，不需要 Tailscale，也不需要账号。在 OMP 里运行 `/mobile relay`（或用 `omp-mobile --relay` 启动守护进程后运行 `omp-mobile relay pair`）。扫描显示的二维码（**其他方式 → 扫码配对**），或把链接粘贴到 **直连地址**；手机会显示电脑的密钥指纹和 8 位验证码，在电脑提示处输入即可。手机与守护进程之间端到端加密（Noise IK，双方密钥固定），中继只转发密文。功能与 Tailscale 下完全一样。`omp-mobile relay status` 列出已配对手机，`omp-mobile relay revoke <id>` 移除其中一部，在手机上移除这台电脑也会解除配对。

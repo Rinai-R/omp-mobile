@@ -180,7 +180,7 @@ export function SessionRow({
   const locked = session.openElsewhere === true;
   const when = age(session.updatedAt);
   // A waiting session says so in its group and its badge; its detail stays the folder and the model.
-  const detail = [folderOf(session.cwd), locked ? heldDetail(session.owner) : when].filter(Boolean).join(" · ");
+  const detail = [folderOf(session.cwd), session.via === "herdr" ? t("session.viaHerdr") : undefined, locked ? heldDetail(session.owner) : when].filter(Boolean).join(" · ");
   return (
     <PressableScale
       onPress={() => onPress(session)}

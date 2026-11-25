@@ -24,6 +24,8 @@ import { TranscriptStore, deltaBody, deltaQuery } from "./transcripts.mjs";
 import { SessionSearchIndex, matchOf, rankRecords, searchTokens, sessionFilesUnder } from "./session-search.mjs";
 import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
+import { Herdr } from "./herdr.mjs";
+import { HerdrSession } from "./herdr-session.mjs";
 import { DEFAULT_RELAY, hostCode, runRelayCli } from "./relay-control.mjs";
 import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
 import { runRestartCli } from "./restart.mjs";
@@ -187,6 +189,8 @@ function answerOf(message) {
   if (typeof message.data === "object" && message.data !== null && !Array.isArray(message.data)) answer.data = message.data;
   if (typeof message.confirmed === "boolean") answer.confirmed = message.confirmed;
   if (message.cancelled === true) answer.cancelled = true;
+  // A terminal dialog in a herdr session is answered with key names (`HerdrSession.respondExtension` checks them).
+  if (Array.isArray(message.keys) && message.keys.every((key) => typeof key === "string")) answer.keys = message.keys;
   return answer;
 }
 
@@ -209,6 +213,7 @@ function parseArgs(argv) {
     qr: true,
     relay: "",
     relayDir: DEFAULT_RELAY_DIR,
+    herdr: "auto",
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
@@ -280,6 +285,15 @@ function parseArgs(argv) {
           options.relay = DEFAULT_RELAY;
         }
         break;
+      case "--herdr":
+        if (!["auto", "on", "off"].includes(value)) throw new Error("--herdr is auto, on or off");
+        options.herdr = value;
+        i += 1;
+        break;
+      case "--hc":
+        options.hc = value;
+        i += 1;
+        break;
       case "--relay-dir":
         options.relayDir = resolve(value);
         i += 1;
@@ -325,6 +339,10 @@ user (403 otherwise), before the token is checked. Loopback hosts skip admission
                          end-to-end encrypted; pair with \`omp-mobile relay pair\` or /mobile relay.
                          Or join the phone's account: \`omp-mobile relay login <code>\` (or /mobile login <code>)
   --relay-dir <dir>      Relay identity and device tokens (default ~/.omp-mobile/relay)
+  --herdr auto|on|off    A session whose omp runs in a herdr terminal opens through herdr: the phone types
+                         into that omp (herdr waits for your draft), stops it, and answers its dialogs with
+                         keys, without taking it over. auto (default): when herdr answers; on: refuse a
+                         herdr-less takeover; off: never. --hc <path> picks the hc binary (default hc).
 
 Restart (after \`omp plugin upgrade omp-mobile\`; same --state-file):
   omp-mobile restart          Restart the running daemon on the installed code, with its arguments, once no
@@ -678,7 +696,8 @@ class SessionEntry {
     const [state, messages] = await Promise.all([this.rpc.getState(), this.rpc.getMessages()]);
     this.state = state;
     this.messages = Array.isArray(messages.messages) ? messages.messages.map((message) => phoneMessage(message, this.blobDir)) : [];
-    this.base = 0;
+    // A herdr session's messages are the file's tail: its first one has an index.
+    this.base = Number.isSafeInteger(messages.base) && messages.base > 0 ? messages.base : 0;
     this.id = state.sessionId ?? "";
     this.title = titleOf(this.messages, state, this.cwd);
     // Opening a session is not using it: it is as recent as its last message (a new one: now).
@@ -698,6 +717,9 @@ class SessionEntry {
       updatedAt: this.updatedAt,
       sessionFile: this.state?.sessionFile,
       origin: "daemon",
+      // How the phone reaches its omp: the daemon's own process, or a herdr terminal the owner keeps.
+      via: this.rpc.via ?? "rpc",
+      ...(this.rpc.capabilities !== undefined ? { capabilities: this.rpc.capabilities, herdrTerminal: this.rpc.address } : {}),
       // OMP questions and tool approvals still waiting for an answer: the session needs the user.
       waiting: this.openRequests().length,
       // The oldest of them, so a list can answer it without opening the session.
@@ -906,6 +928,9 @@ class Daemon {
     /** @type {RelayHost | undefined} */
     this.relay = undefined;
     if (options.relay) this.buildRelay(options.relay);
+    /** @type {Herdr | undefined} */
+    // `auto` (the command line's default) and `on` look for herdr; `off`, or a daemon built without the option (tests), never does.
+    this.herdr = options.herdr !== "auto" && options.herdr !== "on" ? undefined : new Herdr({ bin: options.hc, env: options.hcEnv, log: (line) => this.log(line) });
   }
 
   /** The relay host and its loopback tunnel listener; `listen()` or `enableRelay()` starts them. */
@@ -1013,7 +1038,7 @@ class Daemon {
         sessionCount: this.sessions.size,
         cwd: this.options.cwd,
         user: this.user || null,
-        features: FEATURES,
+        features: this.herdr === undefined ? FEATURES : [...FEATURES, "herdr"],
       });
       return;
     }
@@ -1124,7 +1149,7 @@ class Daemon {
         if (typeof body.id !== "string" || !live.openRequests().some((request) => request.id === body.id)) {
           throw httpError(409, "that question was already answered");
         }
-        live.rpc.respondExtension(body.id, answerOf(body));
+        await live.rpc.respondExtension(body.id, answerOf(body));
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -1187,6 +1212,12 @@ class Daemon {
       [...dormant, ...others].map(async (session) => {
         const pid = owners?.get(session.id);
         if (pid === undefined) return session;
+        // Held by an omp in a herdr terminal: it opens through herdr, as running or waiting as herdr reports.
+        const terminal = this.herdr?.ompTerminal(pid);
+        if (terminal !== undefined) {
+          const state = terminal.status?.state;
+          return { ...session, via: "herdr", herdrTerminal: terminal.address, status: state === "working" ? "streaming" : "idle", waiting: state === "blocked" ? 1 : 0 };
+        }
         return { ...session, openElsewhere: true, owner: await this.ownerOf(pid, session.sessionFile) };
       }),
     );
@@ -1348,6 +1379,12 @@ class Daemon {
     // a broken one, and the phone's Take over button needs the 409.
     const owner = (await this.owners())?.get(id);
     if (owner !== undefined) {
+      // An omp the owner runs in herdr: drive it through herdr, nothing is taken over.
+      const terminal = this.herdr?.ompTerminal(owner);
+      if (terminal !== undefined) return this.openThroughHerdr(id, stored, terminal);
+      if (this.options.herdr === "on" && this.herdr?.online !== true) {
+        throw httpError(503, "herdr is not reachable (the daemon runs with --herdr on); start herdr, or take the session over.");
+      }
       throw httpError(409, `This session is open in another omp process (pid ${owner}). Close it there to continue here.`, {
         owner: await this.ownerOf(owner, stored.sessionFile),
       });
@@ -1383,6 +1420,46 @@ class Daemon {
       return entry;
     } catch (error) {
       rpc.close();
+      throw error;
+    }
+  }
+
+  /**
+   * A session whose omp runs in a herdr terminal: the phone joins it through
+   * herdr; the omp, and the owner's terminal, stay as they are.
+   * @param {string} id
+   * @param {any} stored
+   * @param {any} terminal
+   */
+  async openThroughHerdr(id, stored, terminal) {
+    const pid = terminal.foreground.pid;
+    const rpc = new HerdrSession({
+      herdr: this.herdr,
+      address: terminal.address,
+      pid,
+      sessionId: id,
+      sessionFile: stored.sessionFile,
+      owns: async () => {
+        this.forgetOwners();
+        const owners = await this.owners();
+        return owners === undefined ? undefined : owners.get(id) === pid;
+      },
+    });
+    try {
+      await rpc.start();
+      const entry = new SessionEntry(stored.cwd, rpc);
+      entry.blobDir = this.blobDir;
+      await entry.hydrate(stored.updatedAt);
+      entry.id = id;
+      if (typeof stored.title === "string" && stored.title !== "") entry.title = stored.title;
+      entry.idleSince = Date.now();
+      entry.onBroadcast = (source, payload) => this.attention.observe(source, payload);
+      // Not saved as this daemon's: the session stays the terminal's, and listed as such.
+      entry.bind();
+      this.sessions.set(id, entry);
+      return entry;
+    } catch (error) {
+      await rpc.close();
       throw error;
     }
   }
@@ -1649,7 +1726,7 @@ class Daemon {
           return;
         case "approval": {
           if (typeof message.id !== "string") throw new Error("missing approval id");
-          entry.rpc.respondExtension(message.id, answerOf(message));
+          await entry.rpc.respondExtension(message.id, answerOf(message));
           ws.send(JSON.stringify({ type: "accepted", command: "approval" }));
           return;
         }
@@ -1820,6 +1897,8 @@ class Daemon {
   async listen() {
     await new Promise((resolveListen) => this.server.listen(this.options.port, this.options.host, () => resolveListen()));
     if (this.relay !== undefined) await this.startRelay();
+    // In the background: a missing herdr only means sessions open the old way.
+    void this.herdr?.start();
     this.startTimers();
   }
 
@@ -1878,6 +1957,7 @@ class Daemon {
     const stuck = outcomes.filter((outcome) => outcome === "running").length;
     if (stuck > 0) console.error(`omp-mobile: ${stuck} omp process(es) ignored SIGINT and SIGTERM and are still running`);
     await this.relay?.close();
+    this.herdr?.close();
     this.wsServer.close();
     this.tunnelServer?.close();
     await new Promise((resolveClose) => this.server.close(() => resolveClose()));

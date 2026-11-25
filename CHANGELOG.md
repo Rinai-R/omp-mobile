@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- A session whose omp runs in a herdr terminal now opens on the phone through herdr instead of a takeover: the owner's omp keeps running in its terminal and the phone is one more way into it. The list marks it "herdr" (running and waiting as herdr reports), the chat says "via herdr t7". A message is typed into that omp once the owner's own draft is sent or cleared, Stop interrupts it, and a tool approval or question shows its dialog box with keys (↑ ↓ Enter Esc y n), which go in only while that same dialog is still up. Messages arrive whole, as omp writes them; photos and model switching wait for the omp-mobile extension bridge. Sessions outside herdr open as before. `omp-mobile --herdr auto|on|off` (default auto).
+
+### 中文
+
+- 在 herdr 终端里运行的 omp 会话，手机现在经 herdr 打开，不再接管：电脑上的 omp 照常在终端里跑，手机只是多一个入口。列表里标「herdr」（运行中 / 等你 按 herdr 上报的状态），对话页显示「经 herdr t7」。手机发的消息会等你在终端里的草稿发出或清空后再输入；「停止」会中断它；工具审批或提问会显示终端里的对话框和按键（↑ ↓ Enter Esc y n），只有终端里仍是同一个对话框时按键才会生效。消息按整条显示（omp 写入会话文件后）；发图片和切换模型要等 omp-mobile 扩展桥接。不在 herdr 里的会话照旧。`omp-mobile --herdr auto|on|off`（默认 auto）。
+
 - A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty.
 
 ### 中文

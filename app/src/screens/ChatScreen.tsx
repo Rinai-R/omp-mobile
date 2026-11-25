@@ -590,21 +590,30 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         setError(t("chat.photosNeedUpdate"));
         return;
       }
+      if (state?.capabilities?.images === false) {
+        setError(t("chat.herdr.noImages"));
+        return;
+      }
       void pickPhotos(source, MAX_ATTACHMENTS - attachments.length)
         .then((picked) => {
           if (picked.length > 0) setAttachments((current) => [...current, ...picked].slice(0, MAX_ATTACHMENTS));
         })
         .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)));
     },
-    [attachments.length, features],
+    [attachments.length, features, state?.capabilities?.images],
   );
   const removeAttachment = useCallback((id: string) => {
     setAttachments((current) => current.filter((item) => item.id !== id));
   }, []);
 
   const answer = useCallback(
-    (value: { value?: string; confirmed?: boolean; cancelled?: boolean }) => {
+    (value: { value?: string; confirmed?: boolean; cancelled?: boolean; keys?: string[]; dismiss?: boolean }) => {
       if (approval === null) return;
+      // A terminal dialog left alone: it stays up in the terminal, to be answered there or later.
+      if (value.dismiss === true) {
+        setApproval(null);
+        return;
+      }
       socketRef.current?.send({ type: "approval", id: approval.id, ...value });
       setApproval(null);
     },
@@ -616,13 +625,17 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
       setError(t("chat.notConnected"));
       return;
     }
+    if (state?.capabilities?.models === false) {
+      setError(t("chat.herdr.noModels"));
+      return;
+    }
     Keyboard.dismiss();
     setPickerError(null);
     setPicker(true);
     setPickerLoading(models === null);
     if (models === null) socketRef.current?.send({ type: "models" });
     socketRef.current?.send({ type: "thinking_levels" });
-  }, [connected, models]);
+  }, [connected, models, state?.capabilities?.models]);
 
   const selectModel = useCallback((model: ModelOption) => {
     setPicker(false);
@@ -1010,7 +1023,9 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
                       ? t("chat.offline")
                       : status === "failed"
                       ? t("chat.cannotOpen")
-                      : `${folder} · ${model}`}
+                      : state?.via === "herdr"
+                        ? `${folder} · ${t("chat.viaHerdr", { terminal: state.herdrTerminal ?? "" })}`
+                        : `${folder} · ${model}`}
               </Text>
             </View>
           </Pressable>

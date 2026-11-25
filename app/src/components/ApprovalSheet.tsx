@@ -16,7 +16,10 @@ import { approvalText, optionLabel } from "../ompText";
 import { BrandMark, GradientFill } from "./brand";
 import { SheetGrab, SheetHost, SheetSurface, useSheet } from "./ui";
 
-type Answer = { value?: string; confirmed?: boolean; cancelled?: boolean };
+type Answer = { value?: string; confirmed?: boolean; cancelled?: boolean; keys?: string[]; dismiss?: boolean };
+
+/** How a terminal key reads on its button. */
+const KEY_LABELS: Record<string, string> = { up: "↑", down: "↓", left: "←", right: "→", enter: "Enter", esc: "Esc", tab: "Tab", space: "Space", y: "y", n: "n" };
 
 /** Answers that refuse: drawn in the system red, like a destructive action. */
 const REFUSAL = /^(?:(?:deny|reject|no|cancel|abort)\b|否|拒绝)/i;
@@ -62,7 +65,9 @@ export function ApprovalSheet({
   const styles = useStyles(createStyles);
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const cancel = useCallback(() => onAnswer({ cancelled: true }), [onAnswer]);
+  // A terminal dialog is not refused by closing the sheet: it stays up in the terminal.
+  const keysMode = request.method === "keys";
+  const cancel = useCallback(() => onAnswer(keysMode ? { dismiss: true } : { cancelled: true }), [keysMode, onAnswer]);
   // Dragging (by the handle only) or tapping the scrim cancels, once the sheet has left.
   const sheet = useSheet(true, cancel);
   const [value, setValue] = useState(request.prefill ?? "");
@@ -77,7 +82,7 @@ export function ApprovalSheet({
     [styles],
   );
   const input = request.method === "input" || request.method === "editor";
-  const supported = input || request.method === "select" || request.method === "confirm";
+  const supported = input || keysMode || request.method === "select" || request.method === "confirm";
   const options = request.options ?? [];
   const text = approvalText(request.title, request.message);
   return (
@@ -112,6 +117,18 @@ export function ApprovalSheet({
               </View>
             ) : null}
             {!supported ? <Text style={styles.unsupported}>{t("approval.unsupported")}</Text> : null}
+            {keysMode ? (
+              <>
+                <View style={styles.screen}>
+                  <ScrollView horizontal bounces={false}>
+                    <Text style={styles.screenText} selectable>
+                      {request.screen ?? ""}
+                    </Text>
+                  </ScrollView>
+                </View>
+                <Text style={styles.unsupported}>{t("approval.keys.hint")}</Text>
+              </>
+            ) : null}
             {input ? (
               <View style={[focused ? styles.haloOn : styles.halo, styles.inputWrap]}>
                 <TextInput
@@ -153,10 +170,26 @@ export function ApprovalSheet({
           ) : null}
 
           {input ? <Option label={t("approval.submit")} primary onPress={() => onAnswer({ value })} /> : null}
+
+          {keysMode ? (
+            <View style={styles.keys}>
+              {(request.keys ?? ["up", "down", "enter", "esc"]).map((key) => (
+                <Pressable
+                  key={key}
+                  onPress={() => onAnswer({ keys: [key] })}
+                  style={({ pressed }) => [styles.key, pressed && styles.optionPressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={key}
+                >
+                  <Text style={key === "enter" ? styles.keyPrimary : styles.keyText}>{KEY_LABELS[key] ?? key}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         <Pressable onPress={cancel} style={cancelStyle} accessibilityRole="button">
-          <Text style={styles.cancelText}>{t("common.cancel")}</Text>
+          <Text style={styles.cancelText}>{keysMode ? t("approval.keys.later") : t("common.cancel")}</Text>
         </Pressable>
       </SheetSurface>
     </SheetHost>
@@ -197,6 +230,12 @@ function createStyles(c: Palette) {
     cmdPrompt: { color: c.cyan },
     cmdLabel: { color: c.dark ? "#8a8b91" : "#9a9ba3" },
     inputWrap: { alignSelf: "stretch" },
+    screen: { alignSelf: "stretch", maxHeight: 260, padding: 12, borderRadius: 12, backgroundColor: c.term },
+    screenText: { fontFamily: MONO, fontSize: 11.5, lineHeight: 16, color: c.termFg },
+    keys: { flexDirection: "row", flexWrap: "wrap", gap: 8, padding: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.separator },
+    key: { minWidth: 56, minHeight: 44, paddingHorizontal: 12, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: c.inset },
+    keyText: { fontFamily: MONO, fontSize: 15, lineHeight: 20, color: c.fg },
+    keyPrimary: { fontFamily: MONO, fontSize: 15, lineHeight: 20, fontWeight: "600", color: c.tint },
     options: { flexGrow: 0, maxHeight: 340 },
     separator: { height: StyleSheet.hairlineWidth, backgroundColor: c.separator },
     option: { minHeight: 56, paddingVertical: 14, paddingHorizontal: 16, justifyContent: "center", gap: 2 },
