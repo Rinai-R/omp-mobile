@@ -68,3 +68,16 @@ test("a task call keeps matching by its names; other tools have no subagents", (
   assert.equal(isAgentCall("wait"), true);
   assert.equal(isAgentCall("bash"), false);
 });
+
+test("each stored wait text form names its subagents on its own", () => {
+  const list = [sub("Pacer"), sub("Pacer-2"), sub("Other")];
+  const text = (body) => call("wait", { result: { content: [{ type: "text", text: body }] } });
+  assert.deepEqual(callSubagents(list, null, text("## Completed (1)\n\n### Pacer-2 [task] — completed\nLabel: Pacer-2")).map((entry) => entry.id), ["Pacer-2"]);
+  assert.deepEqual(callSubagents(list, null, text('<task-result id="Pacer" agent="task" status="completed">done</task-result>')).map((entry) => entry.id), ["Pacer"]);
+});
+
+test("a wait job that is not a task is not a subagent, even when a subagent has its id", () => {
+  const list = [sub("Ticker"), sub("Fixer")];
+  const live = { content: [], details: { jobs: [{ id: "Ticker", type: "bash" }, { id: "Fixer", type: "task" }] } };
+  assert.deepEqual(callSubagents(list, null, call("wait", { result: live })).map((entry) => entry.id), ["Fixer"]);
+});
