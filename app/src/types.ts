@@ -249,6 +249,25 @@ export interface SubagentTranscript {
   messages: AgentMessage[];
 }
 
+/** A file a session wrote or named in a reply, as `GET /sessions/:id/files` lists it (`files` feature). */
+export interface SessionFile {
+  /** Absolute, on the computer. */
+  path: string;
+  name: string;
+  /** `written`: a write or edit call of the session's own; `mentioned`: named in a reply, under the session's directory. */
+  source: "written" | "mentioned";
+  exists: boolean;
+  size?: number;
+  /** Last modified (epoch ms). */
+  mtime?: number;
+}
+
+export interface SessionFiles {
+  cwd: string;
+  /** Newest first. */
+  files: SessionFile[];
+}
+
 export interface ServerEvent {
   type: "event";
   event: { type: string; [key: string]: unknown };

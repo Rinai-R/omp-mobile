@@ -17,7 +17,7 @@ import Reanimated, { useAnimatedScrollHandler, useReducedMotion, useSharedValue 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
 import * as Attention from "../../modules/omp-attention/src";
-import { FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, fetchTranscript, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
+import { FILES_FEATURE, FORK_FEATURE, HttpError, SessionSocket, daemonFeatures, fetchTranscript, forkSession, knownFeatures, openSession, takeOverSession, type OpenFailure } from "../api";
 import { attachHead, heldOfWindow, mergeWindow, type Held, type TranscriptWindow } from "../cache";
 import { t } from "../i18n/index.ts";
 import { MAX_ATTACHMENTS, pickPhotos, type Attachment } from "../attachments";
@@ -26,7 +26,8 @@ import { GradientDot, LiveDot, PulseDot, Spinner } from "../components/brand";
 import { EmptyHero } from "../components/EmptyHero";
 import { Composer } from "../components/Composer";
 import { Glass } from "../components/Glass";
-import { BackGlyph, ChevronDownGlyph, CopyGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
+import { BackGlyph, ChevronDownGlyph, CopyGlyph, FileGlyph, ForkGlyph, WarningGlyph } from "../components/icons";
+import { FileLinksContext, SessionFilesSheet, useSessionFiles } from "../components/FileCards";
 import { ModelSheet } from "../components/ModelSheet";
 import { TodoPanel } from "../components/TodoPanel";
 import { SubagentLinksContext, useSessionSubagents } from "../components/SubagentLinks";
@@ -552,6 +553,16 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
   }, [connected, opening, failure]);
 
   const streaming = state?.isStreaming === true;
+  /** Turns seen ending here: each may have written files, so the file list is asked again. */
+  const [turnsEnded, setTurnsEnded] = useState(0);
+  const wasStreaming = useRef(streaming);
+  useEffect(() => {
+    if (wasStreaming.current && !streaming) setTurnsEnded((value) => value + 1);
+    wasStreaming.current = streaming;
+  }, [streaming]);
+  const canFiles = features.includes(FILES_FEATURE) || knownFeatures(machine).includes(FILES_FEATURE);
+  const sessionFiles = useSessionFiles(machine, initialSession.id, session.cwd, canFiles, turnsEnded);
+  const [filesOpen, setFilesOpen] = useState(false);
 
   const send = useCallback(() => {
     const text = draft.trim();
@@ -900,6 +911,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
 
   return (
     <SubagentLinksContext.Provider value={subagentLinks}>
+    <FileLinksContext.Provider value={sessionFiles.value}>
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.root}
@@ -977,6 +989,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           <Pressable onPress={onBack} hitSlop={10} style={({ pressed }) => [styles.back, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("common.back")}>
             <BackGlyph size={24} color={colors.tint} />
           </Pressable>
+          {canFiles ? <View style={styles.headerSpacer} /> : null}
           <Pressable
             onPress={onSwitch}
             style={({ pressed }) => [styles.title, pressed && styles.titlePressed]}
@@ -1014,6 +1027,20 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
               </Text>
             </View>
           </Pressable>
+          {canFiles ? (
+            <Pressable
+              onPress={() => {
+                sessionFiles.refresh();
+                setFilesOpen(true);
+              }}
+              hitSlop={6}
+              style={({ pressed }) => [styles.headerFiles, pressed && styles.titlePressed]}
+              accessibilityRole="button"
+              accessibilityLabel={t("files.title")}
+            >
+              <FileGlyph size={20} color={colors.tint} />
+            </Pressable>
+          ) : null}
           <Pressable onPress={onSwitch} hitSlop={10} style={({ pressed }) => [styles.headerEnd, pressed && styles.titlePressed]} accessibilityRole="button" accessibilityLabel={t("chat.switchA11y", { title })}>
             <ChevronDownGlyph size={22} color={colors.tint} />
           </Pressable>
@@ -1150,6 +1177,13 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         />
       </Sheet>
       <ToolSheet step={openStep} machine={machine} cwd={session.cwd} sessionId={initialSession.id} onClose={() => setStep(null)} />
+      <SessionFilesSheet
+        visible={filesOpen}
+        links={sessionFiles.value}
+        loading={sessionFiles.loading}
+        error={sessionFiles.error}
+        onClose={() => setFilesOpen(false)}
+      />
       <SendFlightLayer flight={flight} />
       <SubagentScreen
         machine={machine}
@@ -1162,6 +1196,7 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
         )}
       />
     </View>
+    </FileLinksContext.Provider>
     </SubagentLinksContext.Provider>
   );
 }
@@ -1192,6 +1227,8 @@ function createStyles(c: Palette) {
     header: { height: 54, flexDirection: "row", alignItems: "center", paddingHorizontal: 6 },
     back: { width: 48, height: 44, justifyContent: "center", paddingLeft: 4 },
     headerEnd: { width: 48, height: 44, alignItems: "flex-end", justifyContent: "center", paddingRight: 8 },
+    headerFiles: { width: 40, height: 44, alignItems: "center", justifyContent: "center" },
+    headerSpacer: { width: 40 },
     title: { flex: 1, minWidth: 0, alignItems: "center", paddingVertical: 4, gap: 1 },
     titlePressed: { opacity: 0.6 },
     titleText: { maxWidth: "100%", fontFamily: SANS, fontSize: 16, lineHeight: 21, fontWeight: "600", letterSpacing: -0.3, color: c.fg, textAlign: "center" },

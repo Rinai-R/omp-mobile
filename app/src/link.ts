@@ -43,6 +43,16 @@ export interface RelayTransport {
   socket(link: RelayLink, path: string): MachineSocket;
   /** An image the daemon serves (`/blobs`), as a data URI. */
   image(link: RelayLink, path: string): Promise<string | undefined>;
+  /** A file the daemon serves, read whole: its body as base64 (a JSON error as text), with progress as its parts arrive. */
+  download(link: RelayLink, path: string, onProgress: (received: number, total: number | undefined) => void): Promise<RelayDownload>;
+}
+
+/** A relayed download's answer: a binary body arrives as base64. */
+export interface RelayDownload {
+  status: number;
+  ok: boolean;
+  base64: string;
+  text(): Promise<string>;
 }
 
 let relay: RelayTransport | undefined;
@@ -79,4 +89,9 @@ export function machineSocket(machine: MachineAddress, path: string): MachineSoc
 /** An image on a relay machine as a data URI: `<Image>` cannot load through the tunnel itself. */
 export function relayImage(link: RelayLink, path: string): Promise<string | undefined> {
   return relayOf().image(link, path);
+}
+
+/** A file on a relay machine, whole, as base64: the tunnel carries a binary body in base64 parts. */
+export function relayDownload(link: RelayLink, path: string, onProgress: (received: number, total: number | undefined) => void): Promise<RelayDownload> {
+  return relayOf().download(link, path, onProgress);
 }

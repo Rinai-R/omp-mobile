@@ -6,7 +6,7 @@
  * keys). The relay only forwards ciphertext; nothing of DSH runs here.
  *
  * Over the encrypted channel the phone speaks a small tunnel (`createTunnelRouter`):
- *   rpc `omp.http.open` {id, method, path, headers?, body? (text)} -> {status, headers}
+ *   rpc `omp.http.open` {id, method, path, headers?, body? (text)} -> {status, headers: {content-type, content-length?}}
  *   rpc `omp.ws.open`   {id, path}                            -> {}
  *   rpc `omp.ws.send`   {id, text}                            -> {}
  *   rpc `omp.close`     {id}                                  -> {}
@@ -36,7 +36,7 @@ export const RELAY_HEADER = "x-omp-mobile-relay";
 /** Characters per text part and bytes per base64 part (a multiple of 3): well under the 4 MiB secure message cap. */
 const TEXT_CHUNK_CHARS = 1024 * 1024;
 const BINARY_PART_BYTES = 3 * 256 * 1024;
-/** A binary answer (an image) is sent whole: at most this large. */
+/** A binary answer is at most this large: the phone holds it whole until it ends. */
 const MAX_BINARY_BODY = 32 * 1024 * 1024;
 const MAX_HANDLES = 64;
 const MAX_REQUEST_BODY = 16 * 1024 * 1024;
@@ -100,35 +100,57 @@ export function createTunnelRouter(target, send) {
       const request = httpRequest({ host: "127.0.0.1", port: target.port, method, path: `${url.pathname}${url.search}`, headers, agent: false }, (response) => {
         settled = true;
         const type = String(response.headers["content-type"] ?? "");
-        resolveOpen({ status: response.statusCode ?? 502, headers: { "content-type": type } });
+        // The length too, when the daemon gave one: the phone shows a download's progress from it.
+        const length = response.headers["content-length"];
+        resolveOpen({ status: response.statusCode ?? 502, headers: { "content-type": type, ...(length === undefined ? {} : { "content-length": String(length) }) } });
         let ended = false;
         // Text (JSON, the `/events` stream) goes as text, whole characters only; anything
-        // else (an image from `/blobs`) is collected and sent as base64 in 3-byte-aligned parts,
-        // so the phone can join the parts without decoding them.
+        // else (an image from `/blobs`, a session's file) as base64 in 3-byte-aligned parts as
+        // the bytes arrive, so the phone joins them without decoding and shows a download's progress.
         const text = /^(text\/|application\/json)/.test(type) ? new StringDecoder("utf8") : undefined;
-        const bytes = [];
+        /** Binary bytes not yet sent, fewer than one part, and how many. */
+        let pending = [];
+        let pendingBytes = 0;
         let total = 0;
+        /** Send `parts`, holding the response until they are out. */
+        const forward = (parts) => {
+          if (parts.length === 0) return;
+          response.pause();
+          let sent = Promise.resolve();
+          for (const part of parts) sent = emit({ id, ...part });
+          void sent.then(() => response.resume());
+        };
         response.on("data", (chunk) => {
           if (text === undefined) {
             total += chunk.length;
-            if (total > MAX_BINARY_BODY) request.destroy();
-            else bytes.push(chunk);
+            if (total > MAX_BINARY_BODY) {
+              request.destroy();
+              return;
+            }
+            pending.push(chunk);
+            pendingBytes += chunk.length;
+            if (pendingBytes < BINARY_PART_BYTES) return;
+            const all = Buffer.concat(pending, pendingBytes);
+            const whole = all.length - (all.length % BINARY_PART_BYTES);
+            const parts = [];
+            for (let at = 0; at < whole; at += BINARY_PART_BYTES) parts.push({ data: all.subarray(at, at + BINARY_PART_BYTES).toString("base64") });
+            pending = whole < all.length ? [all.subarray(whole)] : [];
+            pendingBytes = all.length - whole;
+            forward(parts);
             return;
           }
           const part = text.write(chunk);
           if (part === "") return;
-          response.pause();
-          let sent = Promise.resolve();
-          for (let at = 0; at < part.length; at += TEXT_CHUNK_CHARS) sent = emit({ id, text: part.slice(at, at + TEXT_CHUNK_CHARS) });
-          void sent.then(() => response.resume());
+          const parts = [];
+          for (let at = 0; at < part.length; at += TEXT_CHUNK_CHARS) parts.push({ text: part.slice(at, at + TEXT_CHUNK_CHARS) });
+          forward(parts);
         });
         response.on("end", () => {
           ended = true;
           handles.delete(id);
           const rest = text?.end() ?? "";
           if (rest !== "") void emit({ id, text: rest });
-          const all = Buffer.concat(bytes);
-          for (let at = 0; at < all.length; at += BINARY_PART_BYTES) void emit({ id, data: all.subarray(at, at + BINARY_PART_BYTES).toString("base64") });
+          if (pendingBytes > 0) void emit({ id, data: Buffer.concat(pending, pendingBytes).toString("base64") });
           void emit({ id, done: true });
         });
         response.on("close", () => {
