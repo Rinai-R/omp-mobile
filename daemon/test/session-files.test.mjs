@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import fs, { linkSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { test } from "node:test";
 import { Daemon, FEATURES, SessionEntry } from "../src/server.mjs";
-import { MAX_DIRECT_FILE_BYTES, MAX_RELAY_FILE_BYTES, mentionedPaths, sessionFileCandidates } from "../src/session-files.mjs";
+import { MAX_DIRECT_FILE_BYTES, MAX_RELAY_FILE_BYTES, isSensitive, mentionedPaths, sessionFileCandidates } from "../src/session-files.mjs";
 
 const TOKEN = "{{SECRET_wt6skrba}}";
 
@@ -296,6 +297,234 @@ test("a session no omp runs serves its files from its session file", async () =>
     assert.equal(await (await f.file("old", join(f.cwd, "docs", "out.txt"))).text(), "from the file");
     assert.equal(f.daemon.sessions.size, 0, "no omp was started");
   } finally {
+    await f.close();
+  }
+});
+
+/** Replace `fs[name]` (seen by the daemon's named imports too) until the returned undo runs. */
+function hookFs(name, wrap) {
+  const original = fs[name];
+  fs[name] = wrap(original);
+  syncBuiltinESMExports();
+  return () => {
+    fs[name] = original;
+    syncBuiltinESMExports();
+  };
+}
+
+test("sensitive names and directories match in any case or Unicode compatibility form", () => {
+  for (const path of [
+    "/w/.GIT/config",
+    "/w/.Git/config",
+    "/w/.SSH/config",
+    "/w/.\u212Aube/config", // KELVIN SIGN, which APFS takes for K
+    "/w/api-to\u212Aen.txt",
+    "/w/.ENV",
+    "/w/\uFF0Eenv", // FULLWIDTH FULL STOP
+    "/w/SERVER.PEM",
+    "/w/ID_RSA",
+    "/h/.Config/GH/hosts.yml",
+  ]) {
+    assert.ok(isSensitive(path), path);
+  }
+  assert.ok(!isSensitive("/w/.Github/workflows/ci.yml"));
+});
+
+test("sensitive names: credential words wherever they sit in a name, and the agents', keychains' and browsers' stores", () => {
+  for (const path of [
+    "/w/tokenFile.txt",
+    "/w/secretValues.yaml",
+    "/w/PasswordList.csv",
+    "/w/githubToken.txt",
+    "/w/accessToken.json",
+    "/w/GITHUB_TOKEN",
+    "/w/githubtoken",
+    "/w/apikey.txt",
+    "/w/api_key",
+    "/w/apiKeys.json",
+    "/w/private_key",
+    "/w/privateKey.txt",
+    "/w/dbPassword.txt",
+    "/w/client-secret.json",
+    "/w/auth.json",
+    "/w/auth.db",
+    "/w/login.keychain-db",
+    "/w/kubeconfig",
+    "/w/.claude.json",
+    "/h/.zsh_history",
+    "/h/.bash_history",
+    "/h/.omp/agent/mcp.json",
+    "/h/.codex/config.toml",
+    "/h/.claude/settings.json",
+    "/h/Library/Keychains/x.db",
+    "/h/Library/Cookies/Cookies.binarycookies",
+    "/h/Library/Safari/History.db",
+    "/h/Library/Application Support/Google/Chrome/Default/Preferences",
+    "/h/Library/Application Support/Firefox/Profiles/x/places.sqlite",
+    "/h/Library/Application Support/BraveSoftware/Brave-Browser/Default/Bookmarks",
+    "/h/Library/Application Support/Microsoft Edge/Default/History",
+    "/h/.mozilla/firefox/x/prefs.js",
+    "/h/.config/google-chrome/Default/Bookmarks",
+    "/h/.password-store/x.gpg",
+    "/h/.local/share/keyrings/login.keyring",
+  ]) {
+    assert.ok(isSensitive(path), path);
+  }
+  for (const path of ["/w/tokenizer.ts", "/w/keyboard.md", "/w/hotkey.json", "/w/author.md", "/w/authentication.md", "/w/passwordless.md", "/w/report/summary.md", "/h/Library/Application Support/Code/User/settings.json"]) {
+    assert.ok(!isSensitive(path), path);
+  }
+});
+
+test("GET /sessions/:id/file refuses secrets asked for in another case or Unicode form", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.cwd, ".git"));
+    writeFileSync(join(f.cwd, ".git", "config"), "url = https://user:not-a-real-password@example.com/x.git");
+    writeFileSync(join(f.cwd, ".ssh", "config"), "Host x");
+    mkdirSync(join(f.cwd, ".kube"));
+    writeFileSync(join(f.cwd, ".kube", "config"), "token: x");
+    writeFileSync(join(f.cwd, "api-token.txt"), "t");
+    writeFileSync(join(f.cwd, "githubToken.txt"), "t");
+    mkdirSync(join(f.outside, ".omp", "agent"), { recursive: true });
+    writeFileSync(join(f.outside, ".omp", "agent", "mcp.json"), '{"key":"x"}');
+    await liveSession(f.daemon, "s1", f.cwd, [
+      ...step([call("edit", { path: join(f.outside, ".omp", "agent", "mcp.json") })]),
+      reply("See .GIT/config, .Git/config, .SSH/config, .\u212Aube/config, api-to\u212Aen.txt and githubToken.txt"),
+    ]);
+    for (const path of [".GIT/config", ".Git/config", ".SSH/config", ".\u212Aube/config", "api-to\u212Aen.txt", "githubToken.txt"]) {
+      await refusal(await f.file("s1", join(f.cwd, path)), 403, "sensitive");
+    }
+    await refusal(await f.file("s1", join(f.outside, ".omp", "agent", "mcp.json")), 403, "sensitive");
+    assert.deepEqual((await (await f.get("/sessions/s1/files")).json()).files, [], "none of them is listed");
+  } finally {
+    await f.close();
+  }
+});
+
+test("GET /sessions/:id/file refuses a written file once a directory on its way became a link elsewhere", async () => {
+  const f = await fixture();
+  try {
+    mkdirSync(join(f.cwd, "build"));
+    writeFileSync(join(f.cwd, "build", "data.txt"), "the session's");
+    mkdirSync(join(f.outside, "out"));
+    writeFileSync(join(f.outside, "out", "report.txt"), "the session's");
+    mkdirSync(join(f.outside, "other"));
+    writeFileSync(join(f.outside, "other", "data.txt"), "someone else's");
+    writeFileSync(join(f.outside, "other", "report.txt"), "someone else's");
+    mkdirSync(join(f.cwd, "gen"));
+    writeFileSync(join(f.cwd, "gen", "a.txt"), "the session's");
+    writeFileSync(join(f.cwd, "docs", "a.txt"), "also in the project");
+    writeFileSync(join(f.outside, "sys.txt"), "through the system's own links");
+    // The same file by a path that goes through the OS's links (macOS: /var -> /private/var).
+    const viaSystem = join(realpathSync(tmpdir()) === tmpdir() ? f.root : join(tmpdir(), basename(f.root)), "outside", "sys.txt");
+    await liveSession(f.daemon, "s1", f.cwd, [
+      ...step([
+        call("write", { path: join(f.cwd, "build", "data.txt") }),
+        call("write", { path: join(f.outside, "out", "report.txt") }),
+        call("write", { path: join(f.cwd, "gen", "a.txt") }),
+        call("write", { path: viaSystem }),
+      ]),
+    ]);
+    rmSync(join(f.cwd, "build"), { recursive: true });
+    symlinkSync(join(f.outside, "other"), join(f.cwd, "build"));
+    rmSync(join(f.outside, "out"), { recursive: true });
+    symlinkSync(join(f.outside, "other"), join(f.outside, "out"));
+    rmSync(join(f.cwd, "gen"), { recursive: true });
+    symlinkSync(join(f.cwd, "docs"), join(f.cwd, "gen"));
+
+    await refusal(await f.file("s1", join(f.cwd, "build", "data.txt")), 403, "outside_cwd");
+    await refusal(await f.file("s1", join(f.outside, "out", "report.txt")), 403, "outside_cwd");
+    const listed = (await (await f.get("/sessions/s1/files")).json()).files.map((file) => file.path);
+    assert.ok(!listed.includes(join(f.cwd, "build", "data.txt")) && !listed.includes(join(f.outside, "out", "report.txt")), "not listed either");
+    // A link that stays in the project serves what lies there, as a named file would.
+    assert.equal(await (await f.file("s1", join(f.cwd, "gen", "a.txt"))).text(), "also in the project");
+    assert.equal(await (await f.file("s1", viaSystem)).text(), "through the system's own links");
+  } finally {
+    await f.close();
+  }
+});
+
+test("GET /sessions/:id/file refuses a named file with other hard links; a written one is still served", async () => {
+  const f = await fixture();
+  try {
+    writeFileSync(join(f.outside, "secret.txt"), "outside the project");
+    linkSync(join(f.outside, "secret.txt"), join(f.cwd, "notes.txt"));
+    writeFileSync(join(f.outside, "made.txt"), "written by the session");
+    linkSync(join(f.outside, "made.txt"), join(f.cwd, "made.txt"));
+    await liveSession(f.daemon, "s1", f.cwd, [...step([call("write", { path: join(f.cwd, "made.txt") })]), reply("See notes.txt")]);
+    await refusal(await f.file("s1", join(f.cwd, "notes.txt")), 403, "outside_cwd");
+    assert.equal(await (await f.file("s1", join(f.cwd, "made.txt"))).text(), "written by the session");
+  } finally {
+    await f.close();
+  }
+});
+
+test("GET /sessions/:id/file does not serve a file swapped between its checks and its opening", async () => {
+  const f = await fixture();
+  const target = join(f.cwd, "docs", "report.md");
+  let undo = () => {};
+  try {
+    writeFileSync(target, "checked");
+    const named = join(f.cwd, "docs", "named.md");
+    writeFileSync(named, "named in the reply");
+    await liveSession(f.daemon, "s1", f.cwd, [...step([call("write", { path: target })]), reply("See docs/named.md")]);
+    const swapBeforeOpen = (swap, at = target) =>
+      hookFs("openSync", (original) => (path, ...rest) => {
+        if (path === at) {
+          undo();
+          swap();
+        }
+        return original(path, ...rest);
+      });
+
+    // Another file renamed over it: a different inode.
+    writeFileSync(join(f.outside, "other.md"), "swapped in");
+    undo = swapBeforeOpen(() => renameSync(join(f.outside, "other.md"), target));
+    let answer = await f.file("s1", target);
+    undo();
+    assert.equal(answer.status, 404);
+    assert.doesNotMatch(await answer.text(), /swapped in/);
+
+    // A link put in its place, to the very file that was checked (moved away): links are not followed.
+    writeFileSync(target, "checked");
+    undo = swapBeforeOpen(() => {
+      renameSync(target, join(f.outside, "moved.md"));
+      symlinkSync(join(f.outside, "moved.md"), target);
+    });
+    answer = await f.file("s1", target);
+    undo();
+    assert.equal(answer.status, 404);
+    assert.doesNotMatch(await answer.text(), /checked/);
+
+    // A hard link made to a named file after its checks: it is no longer only the project's.
+    undo = swapBeforeOpen(() => linkSync(named, join(f.outside, "named-link.md")), named);
+    answer = await f.file("s1", named);
+    undo();
+    assert.equal(answer.status, 404);
+    assert.doesNotMatch(await answer.text(), /named in the reply/);
+  } finally {
+    undo();
+    await f.close();
+  }
+});
+
+test("GET /sessions/:id/file answers gone for a file removed while it is checked", async () => {
+  const f = await fixture();
+  const target = join(f.cwd, "docs", "brief.md");
+  let undo = () => {};
+  try {
+    writeFileSync(target, "soon gone");
+    await liveSession(f.daemon, "s1", f.cwd, [...step([call("write", { path: target })])]);
+    const removeFirst = (original) => (path, ...rest) => {
+      if (path === target) rmSync(target, { force: true });
+      return original(path, ...rest);
+    };
+    undo = hookFs("realpathSync", (original) => Object.assign(removeFirst(original), { native: removeFirst(original.native) }));
+    const answer = await f.file("s1", target);
+    undo();
+    await refusal(answer, 404, "gone");
+  } finally {
+    undo();
     await f.close();
   }
 });

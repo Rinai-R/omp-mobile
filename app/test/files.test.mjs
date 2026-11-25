@@ -66,6 +66,16 @@ test("written paths: write, legacy and hashline edits with renames; failed calls
   assert.deepEqual(writtenPaths(tool("bash", { command: "cat > made.txt" })), []);
   assert.deepEqual(writtenPaths(tool("write", null)), []);
   assert.deepEqual(writtenPaths(tool("edit", { input: "not a header\n[x.ts#12]\n" })), [], "a header needs four hex digits");
+  assert.deepEqual(
+    writtenPaths(
+      tool("apply_patch", {
+        input: "*** Begin Patch\n*** Add File: docs/new.md\n+hello\n*** Update File: src/old.ts\n*** Move to: src/moved.ts\n@@\n-a\n+b\n*** Delete File: gone.txt\n*** End Patch\n",
+      }),
+    ),
+    ["docs/new.md", "src/old.ts", "src/moved.ts"],
+    "apply_patch: added, updated and moved files, as the daemon counts them",
+  );
+  assert.deepEqual(writtenPaths(tool("apply_patch", { input: "*** Add File: a.md\n" }, { status: "error" })), []);
 });
 
 test("paths resolve against the cwd, POSIX-normalized; home paths stay unresolved", () => {

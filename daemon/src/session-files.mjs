@@ -10,7 +10,7 @@
  */
 import { closeSync, constants, createReadStream, fstatSync, lstatSync, openSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, normalize, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, normalize, resolve, sep } from "node:path";
 
 /** A file is sent whole: at most this large straight to the phone, and through the relay (which holds it in memory). */
 export const MAX_DIRECT_FILE_BYTES = 100 * 1024 * 1024;
@@ -23,19 +23,51 @@ const WRITE_TOOLS = new Set(["write", "edit", "multi_edit", "apply_patch"]);
 
 /**
  * File names never served, whoever wrote them: environment files, keys and
- * certificates, credential stores, token files. Extend here.
+ * certificates, credential stores and keychains, shell histories. Matched
+ * against the folded name (see `fold`). Extend here.
  */
 export const SENSITIVE_NAMES = [
-  /^\.env(\..*)?$/i,
-  /\.(pem|key|p12|pfx|jks|keystore|kdbx)$/i,
-  /^id_(rsa|dsa|ecdsa|ed25519)/i,
-  /^[._]?netrc$/i,
-  /^\.(npmrc|pypirc|git-credentials|pgpass)$/i,
-  /(^|[^a-z])(tokens?|secrets?|credentials?|passwords?)([^a-z]|$)/i,
+  /^\.env(\..*)?$/,
+  /\.(pem|key|p12|pfx|jks|keystore|kdbx|keychain|keychain-db|ppk)$/,
+  /^id_(rsa|dsa|ecdsa|ed25519)/,
+  /^[._]?netrc$/,
+  /^\.(npmrc|pypirc|git-credentials|pgpass|claude\.json)$/,
+  /^(auth|oauth|kubeconfig|cookies)(\.[^.]+)?$/,
+  /^\.[a-z0-9_-]*history$/,
+  /^\.histfile$/,
 ];
 
-/** Directories (as consecutive path segments) nothing is served from. Extend here. */
-export const SENSITIVE_DIRS = [[".ssh"], [".aws"], [".gnupg"], [".kube"], [".docker"], [".azure"], [".config", "gh"], [".config", "gcloud"], [".omp-mobile"], [".git"]];
+/**
+ * Words that mark a credential, wherever they sit in a name: a word of a
+ * camelCase or separated name (`tokenFile`, `GITHUB_TOKEN`), or how a run
+ * between separators ends (`githubtoken`, `accessToken`, `apikey`). Extend here.
+ */
+const SECRET_WORDS = new Set(["token", "tokens", "secret", "secrets", "credential", "credentials", "password", "passwords", "passwd", "apikey", "apikeys"]);
+const SECRET_ENDINGS = /(tokens?|secrets?|credentials?|passwords?|passwd|apikeys?|privatekeys?|secretkeys?|accesskeys?)$/;
+/** `api_key`, `private-key`: a key word after one of these. */
+const KEY_KINDS = new Set(["api", "private", "secret", "access", "signing", "master", "encryption"]);
+
+/**
+ * Directories (as consecutive folded path segments) nothing is served from:
+ * credential and agent homes, keychains, browser profiles. Extend here.
+ */
+export const SENSITIVE_DIRS = [
+  [".ssh"], [".aws"], [".gnupg"], [".kube"], [".docker"], [".azure"], [".password-store"],
+  [".config", "gh"], [".config", "gcloud"], [".config", "op"], [".local", "share", "keyrings"],
+  [".git"], [".omp"], [".omp-mobile"], [".codex"], [".claude"], [".gemini"],
+  ["library", "keychains"], ["library", "cookies"], ["library", "safari"], ["library", "containers", "com.apple.safari"],
+  ...["google", "chromium", "bravesoftware", "microsoft edge", "firefox", "arc", "vivaldi", "1password", "bitwarden"].map((app) => ["library", "application support", app]),
+  [".mozilla"], [".config", "google-chrome"], [".config", "chromium"], [".config", "bravesoftware"], [".config", "microsoft-edge"],
+];
+
+/**
+ * A path segment as the sensitive lists compare it: NFKC (U+212A KELVIN SIGN
+ * is K, fullwidth `．` is `.`), then lower case, as a case-insensitive disk
+ * such as APFS treats names alike.
+ */
+function fold(segment) {
+  return segment.normalize("NFKC").toLowerCase();
+}
 
 /** Characters of a path in prose: letters of any script, digits, and `_@+%=.~/-`. */
 const PATH_RUN = /[\p{L}\p{N}_@+%=.~/-]+/gu;
@@ -57,11 +89,24 @@ function under(path, dir) {
   return path === dir || path.startsWith(dir.endsWith(sep) ? dir : `${dir}${sep}`);
 }
 
-/** Whether a path names a secret: a sensitive file name, or a file inside a sensitive directory. */
+/** Whether a name holds a credential word (`SECRET_WORDS`, `SECRET_ENDINGS`, `KEY_KINDS`). */
+function namesSecret(name) {
+  const runs = name.normalize("NFKC").split(/[^\p{L}\p{N}]+/u).filter((run) => run !== "");
+  const folded = runs.map((run) => run.toLowerCase());
+  if (folded.some((run, at) => SECRET_ENDINGS.test(run) || ((run === "key" || run === "keys") && KEY_KINDS.has(folded[at - 1] ?? "")))) return true;
+  const words = runs.flatMap((run) => run.split(/(?<=\p{Ll})(?=\p{Lu})|(?<=\p{Lu})(?=\p{Lu}\p{Ll})/u)).map((word) => word.toLowerCase());
+  return words.some((word) => SECRET_WORDS.has(word));
+}
+
+/**
+ * Whether a path names a secret: a sensitive file name, a credential word in
+ * the name, or a file inside a sensitive directory; in any case or Unicode form.
+ */
 export function isSensitive(path) {
-  const segments = path.split(sep).filter((segment) => segment !== "");
+  const raw = path.split(sep).filter((segment) => segment !== "");
+  const segments = raw.map(fold);
   const name = segments.at(-1) ?? "";
-  if (SENSITIVE_NAMES.some((pattern) => pattern.test(name))) return true;
+  if (SENSITIVE_NAMES.some((pattern) => pattern.test(name)) || namesSecret(raw.at(-1) ?? "")) return true;
   const dirs = segments.slice(0, -1);
   return SENSITIVE_DIRS.some((run) => dirs.some((_, at) => run.every((segment, offset) => dirs[at + offset] === segment)));
 }
@@ -154,26 +199,67 @@ export function sessionFileCandidates(messages, cwd) {
   return files;
 }
 
+/** The canonical path the disk knows `path` by (its own case on a case-insensitive disk); undefined when it cannot be resolved. */
+function onDisk(path) {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Check that `path` (one of the candidates) may be served: not a secret, not a
- * symbolic link, and for a named file still under the session's directory once
- * links are resolved. Answers its `stat`, or throws the refusal.
+ * Whether a directory on the way to `path` is a symbolic link that a user
+ * could have made (or replaced a directory with) since the file was written.
+ * The system's own links (macOS's /tmp, /var) belong to root and do not count;
+ * one that cannot be read counts.
+ */
+function userLinkOnTheWay(path) {
+  const segments = path.split(sep).filter((segment) => segment !== "");
+  let at = sep;
+  for (const segment of segments.slice(0, -1)) {
+    at = join(at, segment);
+    try {
+      const info = lstatSync(at);
+      if (info.isSymbolicLink() && info.uid !== 0) return true;
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check that `path` (one of the candidates) may be served: not a secret by its
+ * name as asked or as on disk, not a symbolic link, a regular file, and, when
+ * it is held to the session's directory, inside it once links are resolved and
+ * with no other hard link. A named file is always held to it; a written one
+ * (which may lie anywhere) only when a user's link on its way may have moved
+ * it since. Answers its `stat` and whether it is held, or throws the refusal.
  */
 function inspect(path, source, cwd) {
-  if (isSensitive(path)) throw refusal(403, "sensitive", "this file may hold secrets and is not served");
+  const secret = () => refusal(403, "sensitive", "this file may hold secrets and is not served");
+  if (isSensitive(path)) throw secret();
   let link;
+  let real;
+  let info;
   try {
     link = lstatSync(path);
+    real = realpathSync.native(path);
+    info = statSync(real);
   } catch {
     throw refusal(404, "gone", "the file no longer exists");
   }
   if (link.isSymbolicLink()) throw refusal(403, "outside_cwd", "the file is a symbolic link");
-  const real = realpathSync(path);
-  if (isSensitive(real)) throw refusal(403, "sensitive", "this file may hold secrets and is not served");
-  if (source === "mentioned" && !under(real, realpathSync(cwd))) throw refusal(403, "outside_cwd", "the file lies outside the session's directory");
-  const info = statSync(real);
+  if (isSensitive(real)) throw secret();
   if (!info.isFile()) throw refusal(400, "not_file", "not a regular file");
-  return info;
+  const held = source === "mentioned" || userLinkOnTheWay(path);
+  if (held) {
+    const root = onDisk(cwd);
+    if (root === undefined || !under(real, root)) throw refusal(403, "outside_cwd", "the file lies outside the session's directory");
+    if (info.nlink > 1) throw refusal(403, "outside_cwd", "the file has other hard links, which may lie outside the session's directory");
+  }
+  return { info, held };
 }
 
 /**
@@ -186,7 +272,7 @@ export function listSessionFiles(messages, cwd) {
   for (const [path, source] of [...sessionFileCandidates(messages, cwd)].reverse()) {
     if (files.length >= LIST_LIMIT) break;
     try {
-      const info = inspect(path, source, cwd);
+      const { info } = inspect(path, source, cwd);
       files.push({ path, name: basename(path), source, exists: true, size: info.size, mtime: Math.round(info.mtimeMs) });
     } catch (error) {
       if (source === "written" && error?.detail?.code === "gone") files.push({ path, name: basename(path), source, exists: false });
@@ -216,7 +302,7 @@ export function sendSessionFile(res, messages, cwd, requested, relayed) {
   const source = sessionFileCandidates(messages, cwd).get(requested);
   if (source === undefined) throw refusal(403, "not_session_file", "this session did not write or name that file");
   const limit = relayed ? MAX_RELAY_FILE_BYTES : MAX_DIRECT_FILE_BYTES;
-  const checked = inspect(requested, source, cwd);
+  const { info: checked, held } = inspect(requested, source, cwd);
   const tooLarge = (size) => refusal(413, "too_large", relayed ? "the file is too large for the relay" : "the file is too large", { limit, size, relay: relayed });
   // Opened without following a link, and checked again by descriptor: a swap after `inspect` is not served.
   let fd;
@@ -226,7 +312,7 @@ export function sendSessionFile(res, messages, cwd, requested, relayed) {
     throw refusal(404, "gone", "the file no longer exists");
   }
   const info = fstatSync(fd);
-  if (!info.isFile() || info.ino !== checked.ino || info.dev !== checked.dev) {
+  if (!info.isFile() || info.ino !== checked.ino || info.dev !== checked.dev || (held && info.nlink > 1)) {
     closeSync(fd);
     throw refusal(404, "gone", "the file changed while it was being opened");
   }

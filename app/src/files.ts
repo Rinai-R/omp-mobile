@@ -25,12 +25,14 @@ function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
-/** The tools that write files: their target is `path` (or `file_path`). */
-const WRITERS: Record<string, true> = { write: true, edit: true, multi_edit: true };
+/** The tools that write files: their target is `path` (or `file_path`), or what an `input` patch names. */
+const WRITERS: Record<string, true> = { write: true, edit: true, multi_edit: true, apply_patch: true };
 /** A hashline edit's file header: `[src/app.ts#7D03]`. */
 const HASHLINE_HEADER = /^\[(.+)#[0-9A-Fa-f]{4}\]\s*$/;
 /** A hashline rename of the file above it: `MV dest`, the destination optionally quoted. */
 const HASHLINE_MOVE = /^MV\s+(?:"([^"]+)"|'([^']+)'|(.+?))\s*$/;
+/** An apply_patch file header that writes its path: added, updated, or the destination of a move. */
+const PATCH_TARGET = /^\*\*\* (?:Add File|Update File|Move to): (.+?)\s*$/;
 
 /** The paths a call wrote, as it named them (maybe relative to the session's directory); none for a failed call. */
 export function writtenPaths(tool: ToolItem): string[] {
@@ -39,6 +41,13 @@ export function writtenPaths(tool: ToolItem): string[] {
   if (args === undefined) return [];
   const path = str(args.path) ?? str(args.file_path);
   if (path !== undefined) return [path];
+  if (tool.name === "apply_patch") {
+    if (typeof args.input !== "string") return [];
+    return args.input.split("\n").flatMap((line) => {
+      const target = PATCH_TARGET.exec(line);
+      return target === null ? [] : [target[1] as string];
+    });
+  }
   if (tool.name !== "edit" || typeof args.input !== "string") return [];
   const paths: string[] = [];
   let current = false;
