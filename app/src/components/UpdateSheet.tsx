@@ -9,7 +9,7 @@ import type { ApkUpdateState, UpdateStatus } from "../useApkUpdate";
 import { BrandMark, GradientFill, Spinner } from "./brand";
 import { CheckGlyph, WarningGlyph } from "./icons";
 import { Markdown } from "./Markdown";
-import { Button, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
+import { ConfirmSheet, Button, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
 
 /**
  * The update sheet: what changed in every release the phone skipped, newest
@@ -28,28 +28,46 @@ export function UpdateSheet({ sheet, installed }: { sheet: ApkUpdateState["sheet
   if (sheet.visible) shown.current = sheet.status;
   const status = shown.current;
   const offer = "offer" in status ? status.offer : null;
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const openReleases = useCallback(() => void Linking.openURL(RELEASES_PAGE).catch(() => undefined), []);
 
   return (
-    <SheetHost sheet={controller} backdropLabel={t("common.close")}>
-      <SheetSurface style={[styles.surface, { paddingBottom: 14 + insets.bottom, maxHeight: height - insets.top - 24 }]} skirt={colors.overlay}>
-        <SheetGrab style={styles.grabArea}>
-          <View style={styles.grab} />
-          <Header status={status} installed={installed} />
-        </SheetGrab>
-        {offer !== null ? (
-          <SheetScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
-            {offer.versions.map((entry, index) => (
-              <Entry key={entry.version} entry={entry} latest={index === 0} last={index === offer.versions.length - 1} />
-            ))}
-            <Text style={styles.allReleases} onPress={openReleases} accessibilityRole="link">
-              {t("settings.updates.allReleases")}
-            </Text>
-          </SheetScrollView>
-        ) : null}
-        <Footer status={status} onPrimary={sheet.onPrimary} onClose={sheet.onClose} onReleases={openReleases} />
-      </SheetSurface>
-    </SheetHost>
+    <>
+      <SheetHost sheet={controller} backdropLabel={t("common.close")}>
+        <SheetSurface style={[styles.surface, { paddingBottom: 14 + insets.bottom, maxHeight: height - insets.top - 24 }]} skirt={colors.overlay}>
+          <SheetGrab style={styles.grabArea}>
+            <View style={styles.grab} />
+            <Header status={status} installed={installed} />
+          </SheetGrab>
+          {offer !== null ? (
+            <SheetScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+              {offer.versions.map((entry, index) => (
+                <Entry key={entry.version} entry={entry} latest={index === 0} last={index === offer.versions.length - 1} />
+              ))}
+              <Text style={styles.allReleases} onPress={openReleases} accessibilityRole="link">
+                {t("settings.updates.allReleases")}
+              </Text>
+            </SheetScrollView>
+          ) : null}
+          <Footer
+            status={status}
+            onPrimary={sheet.onPrimary}
+            onClose={sheet.onClose}
+            onReleases={openReleases}
+            onAskCancel={() => setConfirmCancel(true)}
+          />
+        </SheetSurface>
+      </SheetHost>
+      <ConfirmSheet
+        visible={confirmCancel}
+        title={t("settings.updates.cancelTitle")}
+        body={t("settings.updates.cancelBody")}
+        action={t("settings.updates.cancelAction")}
+        danger
+        onConfirm={() => { setConfirmCancel(false); sheet.onCancel?.(); }}
+        onClose={() => setConfirmCancel(false)}
+      />
+    </>
   );
 }
 
@@ -142,11 +160,13 @@ function Footer({
   onPrimary,
   onClose,
   onReleases,
+  onAskCancel,
 }: {
   status: UpdateStatus;
   onPrimary: () => void;
   onClose: () => void;
   onReleases: () => void;
+  onAskCancel: () => void;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -165,7 +185,11 @@ function Footer({
         <Button label={primaryLabel(status)} onPress={status.kind === "current" ? onClose : onPrimary} />
       )}
       {"offer" in status ? (
-        <Button label={t("settings.updates.later")} kind="plain" onPress={onClose} />
+        <Button
+          label={status.kind === "downloading" ? t("settings.updates.cancelDownload") : t("settings.updates.later")}
+          kind="plain"
+          onPress={status.kind === "downloading" ? onAskCancel : onClose}
+        />
       ) : status.kind === "checking" ? null : (
         <Button label={t("settings.updates.releases")} kind="plain" onPress={onReleases} />
       )}

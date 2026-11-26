@@ -90,7 +90,7 @@ function mount(env) {
       if (name === "react-native") return { AppState: env.app, Platform: { OS: "android" } };
       if (name === "expo") return { requireOptionalNativeModule: () => native };
       if (name === "@react-native-async-storage/async-storage") return {
-        __esModule: true, default: { getItem: async (key) => env.saved.get(key) ?? null, setItem: async (key, value) => { env.saved.set(key, value); } },
+        __esModule: true, default: { getItem: async (key) => env.saved.get(key) ?? null, setItem: async (key, value) => { env.saved.set(key, value); }, removeItem: async (key) => { env.saved.delete(key); }, multiRemove: async (keys) => { keys.forEach((key) => env.saved.delete(key)); } },
       };
       if (name === "expo-file-system/legacy") return { cacheDirectory: "file:///cache/", getInfoAsync: async () => ({ exists: false }) };
       if (name === "./i18n/index.ts") return { t: (key) => key };
@@ -109,6 +109,7 @@ function mount(env) {
   return {
     get status() { return result.sheet.status; },
     primary() { result.sheet.onPrimary(); },
+    cancel() { result.sheet.onCancel?.(); },
     tick() { timers.forEach((fn) => fn()); },
     unmount() { active = false; slots.forEach((slot) => slot?.cleanup?.()); },
   };
@@ -163,6 +164,31 @@ test("repeated taps while a download is being queued start one transfer", async 
   await settle();
   assert.equal(env.starts, 1);
   assert.equal(app.status.kind, "downloading");
+  app.unmount();
+});
+
+test("cancelling a download discards the APK and its saved offer, then offers it again", async () => {
+  const env = environment();
+  const app = mount(env);
+  await settle();
+  app.primary();
+  await settle();
+  assert.equal(app.status.kind, "downloading");
+  assert.equal(env.saved.size, 1);
+  app.cancel();
+  await settle();
+  assert.equal(env.discarded, 1);
+  assert.equal(env.saved.size, 0);
+  assert.equal(app.status.kind, "offer");
+  const restored = mount(env);
+  await settle();
+  assert.equal(restored.status.kind, "offer", "a cancelled download is not restored after a restart");
+  assert.equal(env.starts, 1);
+  restored.primary();
+  await settle();
+  assert.equal(env.starts, 2, "a cancelled download can be started again");
+  assert.equal(restored.status.kind, "downloading");
+  restored.unmount();
   app.unmount();
 });
 

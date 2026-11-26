@@ -2,6 +2,11 @@
 
 CI publishes the section that matches a pushed `v<version>` tag as the description of its GitHub Release. Write the section before tagging.
 
+## Unreleased
+
+- Cancel an APK update download after confirmation, removing its system task, partial file, and saved offer.
+- 更新下载支持二次确认后取消，清理系统任务、未完成文件及已保存的下载记录。
+
 ## v0.8.8
 
 - Files the agent wrote or named in a reply can be downloaded on the phone. A finished turn lists them under the reply, a write step's Details sheet lists its file, and the file icon in the chat header opens every file of the session. Tap one to download it and open the share sheet (save, open in another app, send); tap it again later to share the copy on the phone. Only files the session wrote, or named under its directory, are served; files that may hold secrets (`.env*`, keys, `.ssh`, `.git`, …) never are. Downloads are capped at 100 MB on a direct connection and 20 MB through the relay, with progress on both. Needs omp-mobile on the computer from this version. (#102)

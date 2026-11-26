@@ -42,7 +42,7 @@ export interface ApkUpdateState {
   waiting: boolean;
   /** The Settings row's action: check now, or open the sheet when something is waiting. */
   action?: () => void;
-  sheet: { visible: boolean; status: UpdateStatus; onClose: () => void; onPrimary: () => void };
+  sheet: { visible: boolean; status: UpdateStatus; onClose: () => void; onPrimary: () => void; onCancel?: () => void };
 }
 
 /**
@@ -132,10 +132,29 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     }
   }, []);
 
+  const cancelling = useRef(false);
+  const downloadGeneration = useRef(0);
+  const cancel = useCallback(async (offer: UpdateOffer) => {
+    if (installer === null || cancelling.current) return;
+    cancelling.current = true;
+    downloadGeneration.current++;
+    try {
+      await installer.discardDownload();
+      await AsyncStorage.removeItem(DOWNLOAD_OFFER_KEY);
+      setStatus({ kind: "offer", offer });
+    } catch {
+      setStatus({ kind: "downloadFailed", offer });
+    } finally {
+      downloading.current = false;
+      cancelling.current = false;
+    }
+  }, []);
+
   // Poll only while visible. The system task continues independently of JS.
   useEffect(() => {
     if (status?.kind !== "downloading" || installer === null) return;
     const offer = status.offer;
+    const generation = downloadGeneration.current;
     let current = true;
     let polling = false;
     const poll = async () => {
@@ -143,23 +162,25 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
       polling = true;
       try {
         const result = await installer.downloadStatus(offer.target.sha256);
-        if (!current) return;
+        if (!current || generation !== downloadGeneration.current) return;
         if (result.kind === "downloading") {
           setStatus({ kind: "downloading", offer, percent: result.percent ?? null });
           return;
         }
         if (result.kind === "complete") {
-          if (!(await installer.verifyApk(offer.target.sha256))) {
+          const valid = await installer.verifyApk(offer.target.sha256);
+          if (!current || generation !== downloadGeneration.current) return;
+          if (!valid) {
             await installer.discardDownload();
             throw new Error("Invalid APK");
           }
-          if (current) setStatus({ kind: "ready", offer });
+          if (current && generation === downloadGeneration.current) setStatus({ kind: "ready", offer });
         } else {
           setStatus({ kind: "downloadFailed", offer });
         }
         downloading.current = false;
       } catch {
-        if (current) {
+        if (current && generation === downloadGeneration.current) {
           downloading.current = false;
           setStatus({ kind: "downloadFailed", offer });
         }
@@ -283,7 +304,10 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     busy: status?.kind === "checking" || status?.kind === "downloading",
     waiting,
     action: supported ? () => (waiting ? setVisible(true) : void check(true)) : undefined,
-    sheet: { visible, status: status ?? { kind: "checking" }, onClose: close, onPrimary },
+    sheet: { visible, status: status ?? { kind: "checking" }, onClose: close, onPrimary, onCancel: () => {
+      const current = statusRef.current;
+      if (current?.kind === "downloading") void cancel(current.offer);
+    } },
   };
 }
 
