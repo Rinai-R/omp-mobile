@@ -18,7 +18,7 @@ const release = {
 function environment() {
   const saved = new Map();
   return {
-    saved, starts: 0, discarded: 0, paused: 0, resumed: 0, valid: true, checks: 0, statusReads: 0,
+    saved, starts: 0, discarded: 0, valid: true, checks: 0, statusReads: 0,
     task: { kind: "downloading", percent: 42 },
     app: { currentState: "active", addEventListener: () => ({ remove() {} }) },
   };
@@ -76,8 +76,6 @@ function mount(env) {
     async downloadStatus() { env.statusReads++; return env.task; },
     async verifyApk() { return env.valid; },
     async discardDownload() { env.discarded++; },
-    async pauseDownload() { env.paused++; },
-    async resumeDownload() { env.resumed++; },
   };
   vm.runInNewContext(source, {
     exports, __DEV__: false, AbortController, setTimeout, clearTimeout,
@@ -111,8 +109,6 @@ function mount(env) {
   return {
     get status() { return result.sheet.status; },
     primary() { result.sheet.onPrimary(); },
-    pause() { result.sheet.onPause?.(); },
-    resume() { result.sheet.onResume?.(); },
     cancel() { result.sheet.onCancel?.(); },
     tick() { timers.forEach((fn) => fn()); },
     unmount() { active = false; slots.forEach((slot) => slot?.cleanup?.()); },
@@ -188,50 +184,11 @@ test("cancelling a download discards the APK and its saved offer, then offers it
   await settle();
   assert.equal(restored.status.kind, "offer", "a cancelled download is not restored after a restart");
   assert.equal(env.starts, 1);
-  restored.unmount();
-  app.unmount();
-});
-
-test("pausing keeps the partial APK and resuming restarts the transfer from it", async () => {
-  const env = environment();
-  const first = mount(env);
+  restored.primary();
   await settle();
-  first.primary();
-  await settle();
-  first.pause();
-  await settle();
-  assert.equal(env.paused, 1);
-  assert.equal(first.status.kind, "paused");
-  assert.equal(first.status.percent, 42);
-  assert.equal(env.saved.size, 2, "the offer and the resume point are both saved");
-  first.unmount();
-  // The native task is gone once paused; the JS mock must reflect that.
-  env.task = { kind: "missing" };
-  const restored = mount(env);
-  await settle();
-  assert.equal(restored.status.kind, "paused", "a paused transfer survives a restart");
-  env.task = { kind: "downloading", percent: 42 };
-  assert.equal(restored.status.offer.target.version, "0.8.7", "the paused offer is restored for use");
-  restored.resume();
-  await settle();
-  assert.equal(env.resumed, 1);
+  assert.equal(env.starts, 2, "a cancelled download can be started again");
   assert.equal(restored.status.kind, "downloading");
   restored.unmount();
-});
-
-test("cancelling a paused download removes the saved partial APK", async () => {
-  const env = environment();
-  const app = mount(env);
-  await settle();
-  app.primary();
-  await settle();
-  app.pause();
-  await settle();
-  app.cancel();
-  await settle();
-  assert.equal(env.discarded, 1);
-  assert.equal(env.saved.size, 0);
-  assert.equal(app.status.kind, "offer");
   app.unmount();
 });
 

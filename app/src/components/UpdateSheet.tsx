@@ -9,7 +9,7 @@ import type { ApkUpdateState, UpdateStatus } from "../useApkUpdate";
 import { BrandMark, GradientFill, Spinner } from "./brand";
 import { CheckGlyph, WarningGlyph } from "./icons";
 import { Markdown } from "./Markdown";
-import { ConfirmSheet, Button, PressableScale, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
+import { ConfirmSheet, Button, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
 
 /**
  * The update sheet: what changed in every release the phone skipped, newest
@@ -51,13 +51,9 @@ export function UpdateSheet({ sheet, installed }: { sheet: ApkUpdateState["sheet
           ) : null}
           <Footer
             status={status}
-            onPrimary={status.kind === "paused" ? sheet.onResume ?? sheet.onPrimary : sheet.onPrimary}
+            onPrimary={sheet.onPrimary}
             onClose={sheet.onClose}
             onReleases={openReleases}
-            onAskPause={() => {
-              const current = status;
-              if (current.kind === "downloading") sheet.onPause?.();
-            }}
             onAskCancel={() => setConfirmCancel(true)}
           />
         </SheetSurface>
@@ -164,14 +160,12 @@ function Footer({
   onPrimary,
   onClose,
   onReleases,
-  onAskPause,
   onAskCancel,
 }: {
   status: UpdateStatus;
   onPrimary: () => void;
   onClose: () => void;
   onReleases: () => void;
-  onAskPause: () => void;
   onAskCancel: () => void;
 }): ReactNode {
   const styles = useStyles(createStyles);
@@ -185,20 +179,16 @@ function Footer({
           <Text style={note.tone === "ok" ? styles.noteOk : note.tone === "warn" ? styles.noteWarn : styles.noteText}>{note.text}</Text>
         </View>
       ) : null}
-      {status.kind === "downloading" || status.kind === "paused" ? (
-        <Progress
-          percent={status.percent}
-          paused={status.kind === "paused"}
-          onPress={status.kind === "downloading" ? onAskPause : onPrimary}
-        />
+      {status.kind === "downloading" ? (
+        <Progress percent={status.percent} />
       ) : status.kind === "checking" ? null : (
         <Button label={primaryLabel(status)} onPress={status.kind === "current" ? onClose : onPrimary} />
       )}
       {"offer" in status ? (
         <Button
-          label={status.kind === "downloading" || status.kind === "paused" ? t("settings.updates.cancelDownload") : t("settings.updates.later")}
+          label={status.kind === "downloading" ? t("settings.updates.cancelDownload") : t("settings.updates.later")}
           kind="plain"
-          onPress={status.kind === "downloading" || status.kind === "paused" ? onAskCancel : onClose}
+          onPress={status.kind === "downloading" ? onAskCancel : onClose}
         />
       ) : status.kind === "checking" ? null : (
         <Button label={t("settings.updates.releases")} kind="plain" onPress={onReleases} />
@@ -212,7 +202,7 @@ function Footer({
  * label drawn twice and clipped to the fill, so the text inverts exactly where
  * the fill passes under it instead of fading through a grey nobody can read.
  */
-function Progress({ percent, paused, onPress }: { percent: number | null; paused: boolean; onPress: () => void }): ReactNode {
+function Progress({ percent }: { percent: number | null }): ReactNode {
   const styles = useStyles(createStyles);
   const reduced = useReducedMotion();
   const [width, setWidth] = useState(0);
@@ -223,30 +213,18 @@ function Progress({ percent, paused, onPress }: { percent: number | null; paused
   }, [fraction, percent, reduced]);
   const fill = useAnimatedStyle(() => ({ width: fraction.get() * width }));
   const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
-  const label = percent === null
-    ? t(paused ? "settings.updates.pausedUnknown" : "settings.updates.downloadingUnknown")
-    : t(paused ? "settings.updates.pausedLabel" : "settings.updates.downloading", { percent });
-  const action = t(paused ? "settings.updates.resumeDownload" : "settings.updates.pauseDownload");
-  const shown = `${label} · ${action}`;
+  const label = percent === null ? t("settings.updates.downloadingUnknown") : t("settings.updates.downloading", { percent });
   return (
-    <PressableScale
-      style={styles.track}
-      accessibilityRole="button"
-      accessibilityLabel={shown}
-      accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
-      onPress={onPress}
-    >
-      <View style={styles.trackInner} onLayout={onLayout}>
-        <View style={styles.trackLabelBox}>
-          <Text style={styles.trackLabel}>{shown}</Text>
-        </View>
-        <Reanimated.View style={[styles.fill, fill]}>
-          <View style={[styles.trackLabelBox, { width }]}>
-            <Text style={styles.fillLabel}>{shown}</Text>
-          </View>
-        </Reanimated.View>
+    <View style={styles.track} onLayout={onLayout} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}>
+      <View style={styles.trackLabelBox}>
+        <Text style={styles.trackLabel}>{label}</Text>
       </View>
-    </PressableScale>
+      <Reanimated.View style={[styles.fill, fill]}>
+        <View style={[styles.trackLabelBox, { width }]}>
+          <Text style={styles.fillLabel}>{label}</Text>
+        </View>
+      </Reanimated.View>
+    </View>
   );
 }
 
@@ -263,8 +241,6 @@ function primaryLabel(status: UpdateStatus): string {
       return t("settings.updates.openSettings");
     case "checkFailed":
       return t("common.tryAgain");
-    case "paused":
-      return t("settings.updates.resumeDownload");
     case "current":
       return t("settings.updates.done");
     case "checking":
@@ -349,7 +325,6 @@ function createStyles(c: Palette) {
     allReleases: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.fgFaint, paddingLeft: 28, paddingTop: 4, paddingBottom: 6 },
 
     footer: { gap: 8, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, marginTop: 4 },
-    trackInner: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, overflow: "hidden" },
     note: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 2, paddingBottom: 4 },
     noteText: { ...noteBase, color: c.fgMuted },
     noteOk: { ...noteBase, color: c.ok },

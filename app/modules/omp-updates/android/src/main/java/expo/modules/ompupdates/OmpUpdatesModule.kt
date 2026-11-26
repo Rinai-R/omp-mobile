@@ -41,10 +41,8 @@ class OmpUpdatesModule : Module() {
         }
         if (id != -1L) manager.remove(id)
         val destination = File(requireNotNull(context.getExternalFilesDir(null)), "omp-update-$sha256.apk")
-        val partial = if (prefs.getBoolean("paused", false) && destination.isFile) destination.length() else 0L
-        if (partial == 0L && destination.exists()) check(destination.delete())
+        if (destination.exists()) check(destination.delete())
         val request = DownloadManager.Request(source)
-          .let { if (partial > 0L) it.addRequestHeader("Range", "bytes=$partial-") else it }
           .setTitle("OMP")
           .setMimeType("application/vnd.android.package-archive")
           .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
@@ -52,7 +50,7 @@ class OmpUpdatesModule : Module() {
           .setAllowedOverRoaming(true)
           .setDestinationUri(Uri.fromFile(destination))
         val nextId = manager.enqueue(request)
-        if (!prefs.edit().putLong("id", nextId).putString("sha256", sha256).putBoolean("cached", false).putBoolean("paused", false).commit()) {
+        if (!prefs.edit().putLong("id", nextId).putString("sha256", sha256).putBoolean("cached", false).commit()) {
           manager.remove(nextId)
           error("Could not save download")
         }
@@ -101,26 +99,14 @@ class OmpUpdatesModule : Module() {
       }
     }
 
-    AsyncFunction("pauseDownload") {
-      synchronized(downloadLock) {
-        val context = requireNotNull(appContext.reactContext)
-        val prefs = context.getSharedPreferences("apk-download", Context.MODE_PRIVATE)
-        val id = prefs.getLong("id", -1)
-        if (id != -1L) (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id)
-        prefs.edit().putBoolean("paused", true).commit()
-      }
-    }
-
     AsyncFunction("discardDownload") {
       synchronized(downloadLock) {
         val context = requireNotNull(appContext.reactContext)
         val prefs = context.getSharedPreferences("apk-download", Context.MODE_PRIVATE)
         val id = prefs.getLong("id", -1)
-        val sha256 = prefs.getString("sha256", null)
         if (id != -1L) (context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).remove(id)
         prefs.edit().clear().commit()
         File(context.cacheDir, "omp-update.apk").delete()
-        sha256?.let { File(requireNotNull(context.getExternalFilesDir(null)), "omp-update-$it.apk").delete() }
       }
     }
 
