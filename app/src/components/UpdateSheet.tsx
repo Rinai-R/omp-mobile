@@ -9,7 +9,7 @@ import type { ApkUpdateState, UpdateStatus } from "../useApkUpdate";
 import { BrandMark, GradientFill, Spinner } from "./brand";
 import { CheckGlyph, WarningGlyph } from "./icons";
 import { Markdown } from "./Markdown";
-import { Button, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
+import { ConfirmSheet, Button, PressableScale, SheetGrab, SheetHost, SheetScrollView, SheetSurface, sheetSurface, useSheet } from "./ui";
 
 /**
  * The update sheet: what changed in every release the phone skipped, newest
@@ -28,28 +28,50 @@ export function UpdateSheet({ sheet, installed }: { sheet: ApkUpdateState["sheet
   if (sheet.visible) shown.current = sheet.status;
   const status = shown.current;
   const offer = "offer" in status ? status.offer : null;
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const openReleases = useCallback(() => void Linking.openURL(RELEASES_PAGE).catch(() => undefined), []);
 
   return (
-    <SheetHost sheet={controller} backdropLabel={t("common.close")}>
-      <SheetSurface style={[styles.surface, { paddingBottom: 14 + insets.bottom, maxHeight: height - insets.top - 24 }]} skirt={colors.overlay}>
-        <SheetGrab style={styles.grabArea}>
-          <View style={styles.grab} />
-          <Header status={status} installed={installed} />
-        </SheetGrab>
-        {offer !== null ? (
-          <SheetScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
-            {offer.versions.map((entry, index) => (
-              <Entry key={entry.version} entry={entry} latest={index === 0} last={index === offer.versions.length - 1} />
-            ))}
-            <Text style={styles.allReleases} onPress={openReleases} accessibilityRole="link">
-              {t("settings.updates.allReleases")}
-            </Text>
-          </SheetScrollView>
-        ) : null}
-        <Footer status={status} onPrimary={sheet.onPrimary} onClose={sheet.onClose} onReleases={openReleases} />
-      </SheetSurface>
-    </SheetHost>
+    <>
+      <SheetHost sheet={controller} backdropLabel={t("common.close")}>
+        <SheetSurface style={[styles.surface, { paddingBottom: 14 + insets.bottom, maxHeight: height - insets.top - 24 }]} skirt={colors.overlay}>
+          <SheetGrab style={styles.grabArea}>
+            <View style={styles.grab} />
+            <Header status={status} installed={installed} />
+          </SheetGrab>
+          {offer !== null ? (
+            <SheetScrollView style={styles.scroll} contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+              {offer.versions.map((entry, index) => (
+                <Entry key={entry.version} entry={entry} latest={index === 0} last={index === offer.versions.length - 1} />
+              ))}
+              <Text style={styles.allReleases} onPress={openReleases} accessibilityRole="link">
+                {t("settings.updates.allReleases")}
+              </Text>
+            </SheetScrollView>
+          ) : null}
+          <Footer
+            status={status}
+            onPrimary={status.kind === "paused" ? sheet.onResume ?? sheet.onPrimary : sheet.onPrimary}
+            onClose={sheet.onClose}
+            onReleases={openReleases}
+            onAskPause={() => {
+              const current = status;
+              if (current.kind === "downloading") sheet.onPause?.();
+            }}
+            onAskCancel={() => setConfirmCancel(true)}
+          />
+        </SheetSurface>
+      </SheetHost>
+      <ConfirmSheet
+        visible={confirmCancel}
+        title={t("settings.updates.cancelTitle")}
+        body={t("settings.updates.cancelBody")}
+        action={t("settings.updates.cancelAction")}
+        danger
+        onConfirm={() => { setConfirmCancel(false); sheet.onCancel?.(); }}
+        onClose={() => setConfirmCancel(false)}
+      />
+    </>
   );
 }
 
@@ -142,11 +164,15 @@ function Footer({
   onPrimary,
   onClose,
   onReleases,
+  onAskPause,
+  onAskCancel,
 }: {
   status: UpdateStatus;
   onPrimary: () => void;
   onClose: () => void;
   onReleases: () => void;
+  onAskPause: () => void;
+  onAskCancel: () => void;
 }): ReactNode {
   const styles = useStyles(createStyles);
   const colors = useColors();
@@ -159,13 +185,21 @@ function Footer({
           <Text style={note.tone === "ok" ? styles.noteOk : note.tone === "warn" ? styles.noteWarn : styles.noteText}>{note.text}</Text>
         </View>
       ) : null}
-      {status.kind === "downloading" ? (
-        <Progress percent={status.percent} />
+      {status.kind === "downloading" || status.kind === "paused" ? (
+        <Progress
+          percent={status.percent}
+          paused={status.kind === "paused"}
+          onPress={status.kind === "downloading" ? onAskPause : onPrimary}
+        />
       ) : status.kind === "checking" ? null : (
         <Button label={primaryLabel(status)} onPress={status.kind === "current" ? onClose : onPrimary} />
       )}
       {"offer" in status ? (
-        <Button label={t("settings.updates.later")} kind="plain" onPress={onClose} />
+        <Button
+          label={status.kind === "downloading" || status.kind === "paused" ? t("settings.updates.cancelDownload") : t("settings.updates.later")}
+          kind="plain"
+          onPress={status.kind === "downloading" || status.kind === "paused" ? onAskCancel : onClose}
+        />
       ) : status.kind === "checking" ? null : (
         <Button label={t("settings.updates.releases")} kind="plain" onPress={onReleases} />
       )}
@@ -178,7 +212,7 @@ function Footer({
  * label drawn twice and clipped to the fill, so the text inverts exactly where
  * the fill passes under it instead of fading through a grey nobody can read.
  */
-function Progress({ percent }: { percent: number | null }): ReactNode {
+function Progress({ percent, paused, onPress }: { percent: number | null; paused: boolean; onPress: () => void }): ReactNode {
   const styles = useStyles(createStyles);
   const reduced = useReducedMotion();
   const [width, setWidth] = useState(0);
@@ -189,18 +223,30 @@ function Progress({ percent }: { percent: number | null }): ReactNode {
   }, [fraction, percent, reduced]);
   const fill = useAnimatedStyle(() => ({ width: fraction.get() * width }));
   const onLayout = useCallback((event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width), []);
-  const label = percent === null ? t("settings.updates.downloadingUnknown") : t("settings.updates.downloading", { percent });
+  const label = percent === null
+    ? t(paused ? "settings.updates.pausedUnknown" : "settings.updates.downloadingUnknown")
+    : t(paused ? "settings.updates.pausedLabel" : "settings.updates.downloading", { percent });
+  const action = t(paused ? "settings.updates.resumeDownload" : "settings.updates.pauseDownload");
+  const shown = `${label} · ${action}`;
   return (
-    <View style={styles.track} onLayout={onLayout} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}>
-      <View style={styles.trackLabelBox}>
-        <Text style={styles.trackLabel}>{label}</Text>
-      </View>
-      <Reanimated.View style={[styles.fill, fill]}>
-        <View style={[styles.trackLabelBox, { width }]}>
-          <Text style={styles.fillLabel}>{label}</Text>
+    <PressableScale
+      style={styles.track}
+      accessibilityRole="button"
+      accessibilityLabel={shown}
+      accessibilityValue={{ min: 0, max: 100, now: percent ?? 0 }}
+      onPress={onPress}
+    >
+      <View style={styles.trackInner} onLayout={onLayout}>
+        <View style={styles.trackLabelBox}>
+          <Text style={styles.trackLabel}>{shown}</Text>
         </View>
-      </Reanimated.View>
-    </View>
+        <Reanimated.View style={[styles.fill, fill]}>
+          <View style={[styles.trackLabelBox, { width }]}>
+            <Text style={styles.fillLabel}>{shown}</Text>
+          </View>
+        </Reanimated.View>
+      </View>
+    </PressableScale>
   );
 }
 
@@ -217,6 +263,8 @@ function primaryLabel(status: UpdateStatus): string {
       return t("settings.updates.openSettings");
     case "checkFailed":
       return t("common.tryAgain");
+    case "paused":
+      return t("settings.updates.resumeDownload");
     case "current":
       return t("settings.updates.done");
     case "checking":
@@ -301,6 +349,7 @@ function createStyles(c: Palette) {
     allReleases: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: c.fgFaint, paddingLeft: 28, paddingTop: 4, paddingBottom: 6 },
 
     footer: { gap: 8, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border, marginTop: 4 },
+    trackInner: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, overflow: "hidden" },
     note: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 2, paddingBottom: 4 },
     noteText: { ...noteBase, color: c.fgMuted },
     noteOk: { ...noteBase, color: c.ok },

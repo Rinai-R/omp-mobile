@@ -10,11 +10,14 @@ import { findUpdates, isNewerVersion, isReleaseAssetUrl, RELEASES_URL, type Upda
 const CHECK_GAP_MS = 20_000;
 const REQUEST_TIMEOUT = 10_000;
 const DOWNLOAD_OFFER_KEY = "apk-download-offer";
+const PAUSED_KEY = "apk-download-paused";
 
 interface UpdatesModule extends NativeModule {
   startDownload(url: string, sha256: string): Promise<void>;
   downloadStatus(sha256: string): Promise<{ kind: "missing" | "downloading" | "complete" | "failed"; percent?: number | null }>;
   discardDownload(): Promise<void>;
+  pauseDownload(): Promise<void>;
+  resumeDownload(url: string, sha256: string): Promise<void>;
   verifyApk(sha256: string): Promise<boolean>;
   installApk(): Promise<boolean>;
   openInstallSettings(): Promise<void>;
@@ -29,6 +32,7 @@ export type UpdateStatus =
   | { kind: "current" }
   | { kind: "checkFailed" }
   | { kind: "downloading"; offer: UpdateOffer; percent: number | null }
+  | { kind: "paused"; offer: UpdateOffer; percent: number | null }
   | { kind: "downloadFailed"; offer: UpdateOffer }
   | { kind: "ready"; offer: UpdateOffer }
   | { kind: "permission"; offer: UpdateOffer }
@@ -42,7 +46,15 @@ export interface ApkUpdateState {
   waiting: boolean;
   /** The Settings row's action: check now, or open the sheet when something is waiting. */
   action?: () => void;
-  sheet: { visible: boolean; status: UpdateStatus; onClose: () => void; onPrimary: () => void };
+  sheet: {
+    visible: boolean;
+    status: UpdateStatus;
+    onClose: () => void;
+    onPrimary: () => void;
+    onPause?: () => void;
+    onResume?: () => void;
+    onCancel?: () => void;
+  };
 }
 
 /**
@@ -120,6 +132,7 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     if (installer === null || FileSystem.cacheDirectory === null || downloading.current) return;
     downloading.current = true;
     try {
+      await AsyncStorage.removeItem(PAUSED_KEY);
       if (!isReleaseAssetUrl(offer.target.url) || !/^[a-f0-9]{64}$/i.test(offer.target.sha256)) {
         throw new Error("Invalid APK source");
       }
@@ -129,6 +142,40 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     } catch {
       setStatus({ kind: "downloadFailed", offer });
       downloading.current = false;
+    }
+  }, []);
+
+  const pause = useCallback(async (offer: UpdateOffer, percent: number | null) => {
+    if (installer === null) return;
+    try {
+      await installer.pauseDownload();
+      await AsyncStorage.setItem(PAUSED_KEY, JSON.stringify({ percent }));
+      setStatus({ kind: "paused", offer, percent });
+    } finally {
+      downloading.current = false;
+    }
+  }, []);
+
+  const resume = useCallback(async (offer: UpdateOffer) => {
+    if (installer === null || downloading.current) return;
+    downloading.current = true;
+    try {
+      await installer.resumeDownload(offer.target.url, offer.target.sha256);
+      setStatus({ kind: "downloading", offer, percent: null });
+    } catch {
+      downloading.current = false;
+      setStatus({ kind: "downloadFailed", offer });
+    }
+  }, []);
+
+  const cancel = useCallback(async (offer: UpdateOffer) => {
+    if (installer === null) return;
+    try {
+      await installer.discardDownload();
+      await AsyncStorage.multiRemove([DOWNLOAD_OFFER_KEY, PAUSED_KEY]);
+    } finally {
+      downloading.current = false;
+      setStatus({ kind: "offer", offer });
     }
   }, []);
 
@@ -208,10 +255,16 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
         if (saved !== null) {
           const offer = JSON.parse(saved) as UpdateOffer;
           if (offer.target?.sha256 && isNewerVersion(offer.target.version, version)) {
+            const savedPause = JSON.parse((await AsyncStorage.getItem(PAUSED_KEY)) ?? "null") as { percent?: number } | null;
             const task = await installer!.downloadStatus(offer.target.sha256);
             if (mounted && (task.kind === "downloading" || task.kind === "complete")) {
               downloading.current = true;
               setStatus({ kind: "downloading", offer, percent: task.percent ?? null });
+              setVisible(true);
+              return;
+            }
+            if (mounted && task.kind === "missing" && savedPause !== null) {
+              setStatus({ kind: "paused", offer, percent: savedPause.percent ?? null });
               setVisible(true);
               return;
             }
@@ -233,6 +286,11 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
         // Back from Android's "install unknown apps" setting: carry on with the install.
         setVisible(true);
         void install(current.offer);
+        return;
+      }
+      if (wasAway && current?.kind === "paused") {
+        setVisible(true);
+        void check(false);
         return;
       }
       if (wasAway && dismissed.current && current !== null && "offer" in current) {
@@ -283,7 +341,25 @@ export function useApkUpdate(ready: boolean, version: string): ApkUpdateState {
     busy: status?.kind === "checking" || status?.kind === "downloading",
     waiting,
     action: supported ? () => (waiting ? setVisible(true) : void check(true)) : undefined,
-    sheet: { visible, status: status ?? { kind: "checking" }, onClose: close, onPrimary },
+    sheet: {
+      visible,
+      status: status ?? { kind: "checking" },
+      onClose: close,
+      onPrimary,
+      onPause: supported ? () => {
+        const current = statusRef.current;
+        if (current?.kind === "downloading") void pause(current.offer, current.percent);
+      } : undefined,
+      onResume: supported ? () => {
+        const current = statusRef.current;
+        if (current?.kind === "paused") void resume(current.offer);
+      } : undefined,
+      onCancel: supported ? () => {
+        const current = statusRef.current;
+        if (current?.kind === "downloading") void cancel(current.offer);
+        else if (current?.kind === "paused") void cancel(current.offer);
+      } : undefined,
+    },
   };
 }
 
