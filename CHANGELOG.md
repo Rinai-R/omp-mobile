@@ -4,6 +4,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
+- OMP's "Tool commands: added …" notice (the MCP/tool list it sends for the model when a session opens) no longer shows in the chat. The older `xd://: mounted …` notices were already hidden; the new wording arrived in a different frame and reached the app anyway.
+
+### 中文
+
+- 会话打开时 OMP 发给模型的「Tool commands: added …」（MCP/工具列表）通知不再出现在聊天里。旧的 `xd://: mounted …` 已经隐藏，新版换了措辞和通道后仍会漏到 App 上。
+
 ## v0.8.7
 
 - A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty. (#98)
