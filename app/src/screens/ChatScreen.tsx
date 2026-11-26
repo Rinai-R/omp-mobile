@@ -41,7 +41,7 @@ import { SendFlightLayer, TranscriptFolds, TranscriptRow } from "../components/T
 import { Banner, Button, ConfirmSheet, IconButton, Sheet } from "../components/ui";
 import { haptic } from "../haptics";
 import { popIn, popOut } from "../motion";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems, withStreaming } from "../messages";
+import { applyEvent, dropEchoed, localUserMessage, noticeItem, snapshotItems, withStreaming } from "../messages";
 import { displayName } from "../machines";
 import { layoutRows, rowAt, type Row, type Step } from "../rows";
 import { MONO, SANS, radius, useColors, useStyles, type Palette } from "../theme";
@@ -406,17 +406,11 @@ export function ChatScreen({ machine, session: initialSession, focus, onBack, on
           case "approval_resolved":
             retireApproval(message.id);
             break;
-          case "notice":
-            setItems((current) => [
-              ...current,
-              { kind: "notice", id: `notice-${Date.now()}`, level: message.level, text: message.message,
-                ...(typeof message.url === "string" &&
-                /^https?:\/\//i.test(message.url)
-                  ? { url: message.url }
-                  : {}),
-              },
-            ]);
+          case "notice": {
+            const notice = noticeItem(message.level, message.message, undefined, message.url);
+            if (notice !== undefined) setItems((current) => [...current, notice]);
             break;
+          }
           case "accepted":
             if (message.command === "approval") {
               // On old daemons the acknowledgement may not carry its request ID.

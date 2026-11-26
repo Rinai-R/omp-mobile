@@ -4,6 +4,23 @@ import { t } from "./i18n/index.ts";
 let counter = 0;
 const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${(counter += 1)}`;
 
+/**
+ * Notices OMP sends for the model, not the reader: mounted MCP/tool command
+ * lists. Old versions sent `xd://: mounted ...` with `source: "xdev"`; newer
+ * ones send `Tool commands: added ...` as RPC notices (source: toolCommands).
+ */
+export function noticeItem(level: unknown, message: unknown, source?: unknown, url?: unknown): NoticeItem | undefined {
+  const text = String(message ?? "");
+  if (level !== "warning" && level !== "error" && (source === "xdev" || text.startsWith("xd://: mounted ") || text.startsWith("Tool commands: "))) return undefined;
+  return {
+    kind: "notice",
+    id: nextId("notice"),
+    level: level === "warning" || level === "error" ? level : "info",
+    text,
+    ...(typeof url === "string" && /^https?:\/\//i.test(url) ? { url } : {}),
+  };
+}
+
 function partText(part: unknown): string {
   if (typeof part === "string") return part;
   if (part === null || part === undefined || typeof part !== "object") return "";
@@ -454,16 +471,8 @@ export function applyEvent(items: ChatItem[], event: Record<string, unknown>): C
     return [...items, { kind: "notice", id: nextId("notice"), level: failed ? "warning" : "info", text }];
   }
   if (type === "notice") {
-    // OMP announces the tools it mounts under xd:// (MCP servers) each time a session starts: for the model, not a reader.
-    if (event.source === "xdev" && event.level !== "warning" && event.level !== "error") return items;
-    const level = event.level === "warning" || event.level === "error" ? event.level : "info";
-    const notice: NoticeItem = {
-      kind: "notice",
-      id: nextId("notice"),
-      level,
-      text: String(event.message ?? ""),
-    };
-    return [...items, notice];
+    const notice = noticeItem(event.level, event.message, event.source);
+    return notice === undefined ? items : [...items, notice];
   }
   if (type === "turn_end" || type === "agent_end") {
     const now = Date.now();

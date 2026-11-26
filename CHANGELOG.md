@@ -12,6 +12,12 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 - 智能体写出或在回复里提到的文件可以在手机上下载。回合结束后回复下方列出这些文件，写文件步骤的「Details」面板列出它写的文件，对话标题栏的文件图标可打开整个会话的文件。点一下即下载并打开系统分享面板（保存、用其他应用打开、发送）；之后再点会直接分享手机上的副本。只提供该会话写过的文件，或回复里提到的、位于会话目录下的文件；可能含密钥的文件（`.env*`、密钥、`.ssh`、`.git` 等）一律不提供。直连单个文件上限 100 MB，经中继 20 MB，两种方式都显示进度。电脑上的 omp-mobile 也需要更新到此版本。（#102）
 - 手机支持 HTML 表单和结构化提问，保留字段校验、说明、表格及图片；多个问题按请求 ID 排队，普通草稿重启后恢复，区分稍后回答与取消问题，密码输入不落盘。需配套更新 daemon，无需修改 OMP。（#103，感谢 @tingQian）
 
+- OMP's "Tool commands: added …" notice (the MCP/tool list it sends for the model when a session opens) no longer shows in the chat. The older `xd://: mounted …` notices were already hidden; the new wording arrived in a different frame and reached the app anyway.
+
+### 中文
+
+- 会话打开时 OMP 发给模型的「Tool commands: added …」（MCP/工具列表）通知不再出现在聊天里。旧的 `xd://: mounted …` 已经隐藏，新版换了措辞和通道后仍会漏到 App 上。
+
 ## v0.8.7
 
 - A delegation's subagents show right under its step in the chat: each `task` row and each `wait` row (where the turn sits while subagents work in the background) lists the subagents it started or waits on, with a live Running / Done / Failed status; one tap opens the subagent's transcript, and a subagent's own delegations open the same way. Before, they were only in the step's Details sheet, and only for `task`, which OMP now returns from at once, so the list there was often empty. (#98)

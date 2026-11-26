@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary, withStreaming } from "../src/messages.ts";
+import { noticeItem, applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary, withStreaming } from "../src/messages.ts";
 
 const user = { role: "user", content: [{ type: "text", text: "List the files" }] };
 const toolTurn = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }] };
@@ -352,11 +352,21 @@ test("a message shown on send is replaced in place by OMP's copy; a refused one 
   assert.equal(dropEchoed(items, "Something else").some((item) => item.id === other.id), false);
 });
 
-test("OMP's xd:// mount announcements stay out of the chat; other notices show", () => {
-  const mounted = applyEvent([], { type: "notice", level: "info", source: "xdev", message: "xd://: mounted mcp__rea_xrefs" });
-  assert.deepEqual(mounted, []);
-  const shown = applyEvent([], { type: "notice", level: "warning", message: "Context is nearly full" });
-  assert.deepEqual(shown.map((item) => [item.kind, item.level, item.text]), [["notice", "warning", "Context is nearly full"]]);
+test("OMP's tool/mount notices stay out of the chat; other notices show", () => {
+  const mounts = [
+    { type: "notice", level: "info", source: "xdev", message: "xd://: mounted mcp__rea_xrefs" },
+    { type: "notice", level: "info", message: "Tool commands: added mcp__context7_query_docs, mcp__gongfeng_compare" },
+    { type: "notice", level: "info", message: "Tool commands: removed mcp__gongfeng_compare" },
+  ];
+  for (const event of mounts) assert.deepEqual(applyEvent([], event), [], event.message);
+  assert.deepEqual(
+    applyEvent([], { type: "notice", level: "info", message: "Context is nearly full" }).map((item) => [item.level, item.text]),
+    [["info", "Context is nearly full"]],
+  );
+  assert.deepEqual(
+    applyEvent([], { type: "notice", level: "warning", message: "Tool commands: mount failed" }).map((item) => [item.level, item.text]),
+    [["warning", "Tool commands: mount failed"]],
+  );
 });
 
 test("a reply joined mid-stream continues from the snapshot's part with the deltas that follow", () => {
@@ -366,4 +376,12 @@ test("a reply joined mid-stream continues from the snapshot's part with the delt
   const delta = (text) => ({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: text } });
   items = applyEvent(applyEvent(items, delta("ld")), delta("!"));
   assert.equal(items.at(-1).text, "Hello world!");
+});
+
+
+test("notices retain safe links and preserve error diagnostics", () => {
+  assert.equal(noticeItem("info", "Login", undefined, "https://example.com/login").url, "https://example.com/login");
+  assert.equal(noticeItem("info", "Login", undefined, "javascript:alert(1)").url, undefined);
+  assert.equal(noticeItem("info", "xd://: mounted tool"), undefined);
+  assert.equal(noticeItem("error", "Tool commands: failed").level, "error");
 });
