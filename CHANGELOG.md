@@ -4,8 +4,15 @@ CI publishes the section that matches a pushed `v<version>` tag as the descripti
 
 ## Unreleased
 
-- Cancel an APK update download after confirmation, removing its system task, partial file, and saved offer.
-- 更新下载支持二次确认后取消，清理系统任务、未完成文件及已保存的下载记录。
+## v0.8.9
+
+- An APK update download can be cancelled: after you confirm, its system download, partial file and saved offer are removed (#106, thanks @tingQian).
+- The lists of tool commands OMP 19 announces for the model no longer show as gray notice lines in the chat; warnings, errors and sign-in links still do (#107, thanks @tingQian).
+
+### 中文
+
+- APK 更新下载可以取消：确认后会移除系统下载任务、未完成的文件和保存的更新记录（#106，感谢 @tingQian）。
+- OMP 19 发给模型的工具命令列表不再在对话里显示成灰色提示；警告、错误和登录链接仍会显示（#107，感谢 @tingQian）。
 
 ## v0.8.8
 
