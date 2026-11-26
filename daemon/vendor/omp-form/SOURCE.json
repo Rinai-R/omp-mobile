@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/can1357/oh-my-pi",
+  "version": "19.1.1",
+  "files": {
+    "pi-utils/src/dom.ts": "b273484a4d0bdc94b1581639dcbcb83e5ed5e6782ca6eb679a46cc8c53ba5e3d",
+    "pi-utils/src/dom/core.ts": "11e4e3d4903f9949356e99e6da220a5c9d2aee957c4d7230e7558a72ecf52940",
+    "pi-utils/src/dom/parser.ts": "3567fb54087c40aac3e9a03dfc3acf27cfc177156ca253b418183da74e5b97d9",
+    "pi-utils/src/dom/selector.ts": "21463250eabd5477ce23ac4061fa2a6abd3407d0dc32a2905d716bf6d92d988c",
+    "pi-tui/src/html-form/parse.ts": "3651e8358a0fcf0da00e6b849d81bcee7ef641ef57ed714c6df220ac9ff2680a",
+    "pi-tui/src/html-form/data.ts": "41c9e59e100b5609dd7ad946fc0748e49a9d3161d789359759546eff238ade69"
+  },
+  "adaptations": [
+    "relative imports",
+    "erased image-only type import",
+    "daemon JavaScript transpilation",
+    "enum converted to an equivalent erasable constant object"
+  ]
+}

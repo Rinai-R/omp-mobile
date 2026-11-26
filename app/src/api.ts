@@ -1,4 +1,4 @@
-import type { Hello, Machine, MessagePoint, SearchResult, SessionOwner, SessionSummary, ServerMessage, Subagent, SubagentTranscript, Transcript } from "./types";
+import type { Hello, Machine, MessagePoint, SearchResult, SessionFiles, SessionOwner, SessionSummary, ServerMessage, Subagent, SubagentTranscript, Transcript } from "./types";
 import { heldQuery, type Held } from "./cache.ts";
 import { fetchSessions } from "./sessionsFetch.ts";
 import { t } from "./i18n/index.ts";
@@ -147,7 +147,7 @@ export async function answerRequest(
   machine: Machine,
   sessionId: string,
   id: string,
-  answer: { value?: string; confirmed?: boolean; cancelled?: boolean },
+  answer: import("./types").ApprovalAnswer,
 ): Promise<void> {
   await request<{ ok: true }>(machine, `/sessions/${encodeURIComponent(sessionId)}/answer`, {
     method: "POST",
@@ -159,6 +159,13 @@ export async function answerRequest(
 export const SEARCH_FEATURE = "session-search";
 export const FORK_FEATURE = "fork";
 export const SUBAGENTS_FEATURE = "subagents";
+export const FILES_FEATURE = "files";
+
+/** The files a session wrote or named in its replies (`files`), newest first, with the directory the daemon resolved them in. */
+export async function listSessionFiles(machine: Machine, sessionId: string): Promise<SessionFiles> {
+  const data = await request<Partial<SessionFiles>>(machine, `/sessions/${encodeURIComponent(sessionId)}/files`);
+  return { cwd: typeof data.cwd === "string" ? data.cwd : "", files: Array.isArray(data.files) ? data.files : [] };
+}
 
 /** The subagents a session delegated to (`subagents`), read from its files on the computer; nested ones name their `parent`. */
 export async function listSubagents(machine: Machine, sessionId: string): Promise<Subagent[]> {
@@ -254,7 +261,8 @@ export class SessionSocket {
     if (this.closed || this.failed) return;
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
-    const query = heldQuery(this.held());
+    const held = heldQuery(this.held());
+    const query = held ? `${held}&dialogs=1` : "dialogs=1";
     const path = `/sessions/${encodeURIComponent(this.sessionId)}/ws${query === "" ? "" : `?${query}`}`;
     const previous = this.socket;
     if (previous !== undefined) {

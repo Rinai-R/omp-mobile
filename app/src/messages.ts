@@ -7,9 +7,9 @@ const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}
 /**
  * Notices OMP sends for the model, not the reader: mounted MCP/tool command
  * lists. Old versions sent `xd://: mounted ...` with `source: "xdev"`; newer
- * ones send `Tool commands: added ...` through extension_ui_request.notify.
+ * ones send `Tool commands: added ...` as RPC notices (source: toolCommands).
  */
-export function noticeItem(level: unknown, message: unknown, source?: unknown): NoticeItem | undefined {
+export function noticeItem(level: unknown, message: unknown, source?: unknown, url?: unknown): NoticeItem | undefined {
   const text = String(message ?? "");
   if (level !== "warning" && level !== "error" && (source === "xdev" || text.startsWith("xd://: mounted ") || text.startsWith("Tool commands: "))) return undefined;
   return {
@@ -17,6 +17,7 @@ export function noticeItem(level: unknown, message: unknown, source?: unknown): 
     id: nextId("notice"),
     level: level === "warning" || level === "error" ? level : "info",
     text,
+    ...(typeof url === "string" && /^https?:\/\//i.test(url) ? { url } : {}),
   };
 }
 

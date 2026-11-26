@@ -24,6 +24,8 @@ export interface TunnelInit {
   headers?: Record<string, string>;
   body?: string;
   signal?: AbortSignal;
+  /** A binary body's bytes so far as its parts arrive, and the whole when the daemon sent `content-length`. */
+  onProgress?: (received: number, total: number | undefined) => void;
 }
 
 /** One HTTP request to the daemon behind `link`, read whole. */
@@ -31,6 +33,8 @@ export async function relayFetch(link: RelayLink, path: string, init: TunnelInit
   const connection = await relayConnection(link);
   const text: string[] = [];
   const binary: string[] = [];
+  let received = 0;
+  let total: number | undefined;
   // Not Promise.withResolvers: React Native's Promise polyfill lacks it.
   let resolve!: () => void;
   let reject!: (error: unknown) => void;
@@ -40,7 +44,12 @@ export async function relayFetch(link: RelayLink, path: string, init: TunnelInit
   });
   const handle = connection.open((data: TunnelData) => {
     if (data.text !== undefined) text.push(data.text);
-    if (data.data !== undefined) binary.push(data.data);
+    if (data.data !== undefined) {
+      binary.push(data.data);
+      // Parts are 3-byte aligned base64: four characters are three bytes (the last part's padding aside).
+      received += Math.floor((data.data.length * 3) / 4);
+      init.onProgress?.(received, total);
+    }
     if (data.done === true) {
       if (data.error === undefined) resolve();
       else reject(new Error(`The computer ended the answer (${data.error}).`));
@@ -53,13 +62,15 @@ export async function relayFetch(link: RelayLink, path: string, init: TunnelInit
   };
   init.signal?.addEventListener("abort", abort, { once: true });
   try {
-    const head = await connection.call<{ status: number; headers: { "content-type"?: string } }>("omp.http.open", {
+    const head = await connection.call<{ status: number; headers: { "content-type"?: string; "content-length"?: string } }>("omp.http.open", {
       id: handle.id,
       method: init.method ?? "GET",
       path,
       headers: init.headers ?? {},
       ...(init.body === undefined ? {} : { body: init.body }),
     });
+    const length = Number(head.headers["content-length"]);
+    if (head.headers["content-length"] !== undefined && Number.isFinite(length) && length > 0) total = length;
     await finished;
     const body = text.join("");
     return {
@@ -211,4 +222,5 @@ export const relayTransport: RelayTransport = {
     if (!response.ok || response.base64 === "") return undefined;
     return `data:${response.contentType.split(";")[0] || "image/png"};base64,${response.base64}`;
   },
+  download: (link, path, onProgress) => relayFetch(link, path, { onProgress }),
 };

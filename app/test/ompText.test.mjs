@@ -64,3 +64,9 @@ test("OMP's answers and levels are translated; unknown ones are shown as OMP nam
     setLanguage("en");
   }
 });
+
+test('option labels and detail values named after object properties remain plain text',()=>{
+ for(const value of ['__proto__','constructor','toString'])assert.equal(optionLabel(value),value);
+ assert.deepEqual(approvalText('Question','constructor: value').details,[{command:false,value:'constructor: value'}]);
+ assert.equal(approvalText('Question','Origin: __proto__').details[0].value,'__proto__');
+});

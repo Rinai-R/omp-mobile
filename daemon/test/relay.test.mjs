@@ -13,12 +13,21 @@ let port;
 /** What the daemon side saw of the last request. */
 let seen;
 const IMAGE = Buffer.from(Array.from({ length: 2_000_001 }, (_, index) => index % 251));
+/** `/slow` sends its first part, then waits for `finishSlow()` before the rest. */
+const SLOW = Buffer.from(Array.from({ length: 1_500_001 }, (_, index) => (index * 7) % 256));
+let finishSlow = () => {};
 
 before(async () => {
   server = createServer((req, res) => {
     seen = { url: req.url, authorization: req.headers.authorization, relay: req.headers[RELAY_HEADER] };
+    if (req.url === "/slow") {
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": SLOW.length });
+      res.write(SLOW.subarray(0, 1_000_000));
+      finishSlow = () => res.end(SLOW.subarray(1_000_000));
+      return;
+    }
     if (req.url === "/image") {
-      res.writeHead(200, { "content-type": "image/png" });
+      res.writeHead(200, { "content-type": "image/png", "content-length": IMAGE.length });
       res.end(IMAGE);
       return;
     }
@@ -35,7 +44,10 @@ before(async () => {
   port = server.address().port;
 });
 
-after(() => server.close());
+after(() => {
+  finishSlow();
+  server.close();
+});
 
 /** A router with its events collected per handle. */
 function phone() {
@@ -66,13 +78,27 @@ test("a request reaches the daemon with its token and the relay mark, never the 
   assert.deepEqual(JSON.parse(events.map((event) => event.text ?? "").join("")), { ok: true, text: "é".repeat(10) });
 });
 
-test("a binary answer arrives as base64 parts that join into the original bytes", async () => {
+test("a binary answer arrives as base64 parts that join into the original bytes, its length announced first", async () => {
   const { events, call, until } = phone();
-  await call("omp.http.open", { id: "b", method: "GET", path: "/image" });
+  const head = await call("omp.http.open", { id: "b", method: "GET", path: "/image" });
+  assert.deepEqual(head.headers, { "content-type": "image/png", "content-length": String(IMAGE.length) }, "the phone can show progress");
   await until(() => events.some((event) => event.done));
   const parts = events.filter((event) => event.data !== undefined);
   assert.ok(parts.length > 1);
   assert.deepEqual(Buffer.from(parts.map((event) => event.data).join(""), "base64"), IMAGE);
+});
+
+test("a binary answer's parts go out as they arrive, not after the whole body (relayed download progress)", async () => {
+  const { events, call, until } = phone();
+  await call("omp.http.open", { id: "s", method: "GET", path: "/slow" });
+  // The daemon is still sending: the first part must reach the phone before the end.
+  await until(() => events.some((event) => event.data !== undefined));
+  assert.ok(!events.some((event) => event.done), "not done yet");
+  finishSlow();
+  await until(() => events.some((event) => event.done));
+  const parts = events.filter((event) => event.data !== undefined).map((event) => event.data);
+  assert.ok(parts.slice(0, -1).every((part) => !part.includes("=")), "every part but the last is whole base64");
+  assert.deepEqual(Buffer.from(parts.join(""), "base64"), SLOW);
 });
 
 test("relay control and other origins are not reachable through the tunnel", async () => {

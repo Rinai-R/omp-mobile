@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary, withStreaming } from "../src/messages.ts";
+import { noticeItem, applyEvent, dropEchoed, localUserMessage, snapshotItems, textOf, toolSummary, withStreaming } from "../src/messages.ts";
 
 const user = { role: "user", content: [{ type: "text", text: "List the files" }] };
 const toolTurn = { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }] };
@@ -376,4 +376,12 @@ test("a reply joined mid-stream continues from the snapshot's part with the delt
   const delta = (text) => ({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: text } });
   items = applyEvent(applyEvent(items, delta("ld")), delta("!"));
   assert.equal(items.at(-1).text, "Hello world!");
+});
+
+
+test("notices retain safe links and preserve error diagnostics", () => {
+  assert.equal(noticeItem("info", "Login", undefined, "https://example.com/login").url, "https://example.com/login");
+  assert.equal(noticeItem("info", "Login", undefined, "javascript:alert(1)").url, undefined);
+  assert.equal(noticeItem("info", "xd://: mounted tool"), undefined);
+  assert.equal(noticeItem("error", "Tool commands: failed").level, "error");
 });

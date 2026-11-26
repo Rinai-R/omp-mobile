@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { approvalImages } from "./approval-media.mjs";
+import { approvalAnswer } from "./approvals.mjs";
 /**
  * omp-mobile daemon.
  *
@@ -26,6 +28,7 @@ import { copyArtifacts, isForkPoint, writeCut } from "./fork.mjs";
 import { RELAY_HEADER, RelayHost } from "./relay.mjs";
 import { DEFAULT_RELAY, hostCode, runRelayCli } from "./relay-control.mjs";
 import { listSubagents, subagentDir, subagentTranscript } from "./subagents.mjs";
+import { listSessionFiles, sendSessionFile } from "./session-files.mjs";
 import { runRestartCli } from "./restart.mjs";
 
 const { version: VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -120,7 +123,7 @@ export function promptImages(value) {
  * (`since`/`last` as `/transcript`); a live session's socket sends a `subagent`
  * frame as one starts or ends.
  */
-const FEATURES = ["prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork", "subagents"];
+const FEATURES = ["approval-forms", "approval-validation", "approval-snapshot", "prompt-images", "takeover", "heartbeat", "transcript-sync", "session-search", "fork", "subagents", "files"];
 /** Search results a phone is sent at most. */
 const SEARCH_LIMIT = 50;
 /** Who a phone continues a session on, as the terminal it leaves is told. */
@@ -179,16 +182,7 @@ function pendingOf(request) {
 }
 
 /** The answer fields a phone sends, over the session socket or `POST /sessions/:id/answer`. */
-function answerOf(message) {
-  const answer = {};
-  if (typeof message.value === "string") answer.value = message.value;
-  // An OMP form question (`method: "form"`, AskUserQuestion) answers with the
-  // form's fields in `data`, not `value`; OMP rejects anything else.
-  if (typeof message.data === "object" && message.data !== null && !Array.isArray(message.data)) answer.data = message.data;
-  if (typeof message.confirmed === "boolean") answer.confirmed = message.confirmed;
-  if (message.cancelled === true) answer.cancelled = true;
-  return answer;
-}
+const answerOf = approvalAnswer;
 
 function parseArgs(argv) {
   const options = {
@@ -711,7 +705,10 @@ class SessionEntry {
    * @param {{since: number, last: string}} [held]
    */
   snapshot(held) {
-    const body = deltaBody({ session: this.summary(), state: this.state, messages: this.messages, base: this.base }, held);
+    const body = {
+      ...deltaBody({ session: this.summary(), state: this.state, messages: this.messages, base: this.base }, held),
+      approvals: this.openRequests(),
+    };
     // The reply OMP is writing now: the updates that follow carry only what they add to it.
     const writing = this.streaming;
     if (writing === undefined) return body;
@@ -804,7 +801,8 @@ class SessionEntry {
       this.broadcast({ type: "event", event: event.type === "message_update" ? slimUpdate(event) : event });
     });
     this.rpc.on("approval", (request) => {
-      this.broadcast({ type: "approval", request });
+      this.broadcast({ type: "approval", request: this.phoneApproval(request),
+      });
     });
     // Answered by any client, or closed by OMP itself: every client drops its dialog.
     this.rpc.on("approval-resolved", ({ id, reason }) => {
@@ -825,9 +823,33 @@ class SessionEntry {
     this.rpc.on("protocol-error", (payload) => this.broadcast({ type: "protocol-error", ...payload }));
   }
 
+  phoneApproval(request) {
+    this.approvalViews ??= new WeakMap();
+    let view = this.approvalViews.get(request);
+    if (view === undefined) {
+      view = approvalImages(request, this.cwd, this.ompBlobDir);
+      if (view.images && this.blobDir) {
+        view = {
+          ...view,
+          images: Object.fromEntries(
+            Object.entries(view.images).map(([src, part]) => [
+              src,
+              phoneMessage({ content: [part] }, this.blobDir).content[0],
+            ]),
+          ),
+        };
+      }
+      this.approvalViews.set(request, view);
+    }
+    return view;
+  }
+
   /** Extension requests still waiting for an answer, oldest first. */
   openRequests() {
-    return this.rpc.extensionRequests instanceof Map ? [...this.rpc.extensionRequests.values()] : [];
+    return this.rpc.extensionRequests instanceof Map ? [...this.rpc.extensionRequests.values()].map((request) =>
+          this.phoneApproval(request),
+        )
+      : [];
   }
 
   /** Disconnect the phones and stop omp gracefully (see `RpcSession.close`). */
@@ -1116,6 +1138,18 @@ class Daemon {
         sendJson(res, 200, body);
         return;
       }
+      const files = /^\/sessions\/([^/]+)\/files$/.exec(url.pathname);
+      if (files !== null && req.method === "GET") {
+        const { cwd, messages } = await this.sessionMessages(decodeURIComponent(files[1]));
+        sendJson(res, 200, listSessionFiles(messages, cwd));
+        return;
+      }
+      const file = /^\/sessions\/([^/]+)\/file$/.exec(url.pathname);
+      if (file !== null && req.method === "GET") {
+        const { cwd, messages } = await this.sessionMessages(decodeURIComponent(file[1]));
+        sendSessionFile(res, messages, cwd, url.searchParams.get("path"), req.headers[RELAY_HEADER] !== undefined);
+        return;
+      }
       const answer = /^\/sessions\/([^/]+)\/answer$/.exec(url.pathname);
       if (answer !== null && req.method === "POST") {
         const body = await readBody(req);
@@ -1262,6 +1296,24 @@ class Daemon {
   }
 
   /**
+   * A session's directory and messages, for its files, without starting an
+   * omp: as `transcript` finds them (memory, the saved copy, the session file).
+   * @param {string} id
+   */
+  async sessionMessages(id) {
+    const live = this.sessions.get(id);
+    if (live !== undefined && !live.closed) return { cwd: live.cwd, messages: live.messages };
+    const known = this.known(id);
+    const file = known?.sessionFile;
+    if (known === undefined || typeof known.cwd !== "string") throw httpError(404, "unknown session");
+    const saved = this.transcripts.read(id, typeof file === "string" ? file : undefined);
+    if (saved !== undefined) return { cwd: known.cwd, messages: saved.messages };
+    const read = typeof file === "string" ? await this.fileTranscript(file) : undefined;
+    if (read === undefined) throw httpError(404, "not cached");
+    return { cwd: known.cwd, messages: read.messages };
+  }
+
+  /**
    * The messages of a session file, kept for as long as the file is unchanged:
    * reading a long session costs a scan, and the phone asks again on every open.
    * @param {string} file
@@ -1370,6 +1422,7 @@ class Daemon {
       await rpc.start();
       const entry = new SessionEntry(stored.cwd, rpc);
       entry.blobDir = this.blobDir;
+      entry.ompBlobDir = join(this.options.ompHome ?? DEFAULT_OMP_HOME, "agent", "blobs");
       await entry.hydrate(this.registry.has(id) ? dormantActivity(this.registry.get(id), this.ompSessions.get(id)) : stored.updatedAt);
       entry.id = id;
       // Idle from now for the reaper, until a phone attaches: its last activity may be long ago.
@@ -1440,7 +1493,9 @@ class Daemon {
 
   /** What this daemon knows of a session it does not run: its own, OMP's listed ones, then search results. */
   known(id) {
-    return this.registry.get(id) ?? this.ompSessions.get(id) ?? this.searchFound.get(id);
+    return (
+      this.registry.get(id) ?? this.ompSessions.get(id) ?? this.searchFound.get(id)
+    );
   }
 
   /**
@@ -1532,6 +1587,7 @@ class Daemon {
       await rpc.start();
       const entry = new SessionEntry(cwd, rpc);
       entry.blobDir = this.blobDir;
+      entry.ompBlobDir = join(this.options.ompHome ?? DEFAULT_OMP_HOME, "agent", "blobs");
       await entry.hydrate();
       if (entry.id === "") throw new Error("omp returned no session id");
       await ready?.(entry);
@@ -1597,6 +1653,11 @@ class Daemon {
           entry = live;
           if (ws.readyState !== 1) return;
           live.clients.add(ws);
+          ws.approvalDialogs = url.searchParams.get("dialogs") === "1";
+          if (ws.approvalDialogs)
+            live.rpc
+              .request?.("set_ask_dialog", { enabled: true })
+              .catch(() => undefined);
           live.idleSince = undefined;
           ws.send(JSON.stringify({ type: "snapshot", ...live.snapshot(held) }));
           // A dialog opened before this client connected (it may have come from a notification tap).
@@ -1620,6 +1681,13 @@ class Daemon {
   /** A phone left a session: it counts as idle from now, for the reaper. */
   detach(entry, ws) {
     if (!entry.clients.delete(ws)) return;
+    if (
+      ws.approvalDialogs &&
+      ![...entry.clients].some((client) => client.approvalDialogs)
+    )
+      entry.rpc
+        .request?.("set_ask_dialog", { enabled: false })
+        .catch(() => undefined);
     if (entry.clients.size === 0) entry.idleSince = Date.now();
   }
 
@@ -1650,7 +1718,9 @@ class Daemon {
         case "approval": {
           if (typeof message.id !== "string") throw new Error("missing approval id");
           entry.rpc.respondExtension(message.id, answerOf(message));
-          ws.send(JSON.stringify({ type: "accepted", command: "approval" }));
+          ws.send(JSON.stringify({ type: "accepted", command: "approval",
+              id: message.id,
+            }));
           return;
         }
         case "refresh":
@@ -1696,6 +1766,7 @@ class Daemon {
         JSON.stringify({
           type: "error",
           command: typeof message?.type === "string" ? message.type : undefined,
+          id: typeof message?.id === "string" ? message.id : undefined,
           error: error instanceof Error ? error.message : String(error),
         }),
       );
@@ -1924,7 +1995,9 @@ async function resolveIdentity(options) {
 /** 100.64.0.0/10 or a MagicDNS *.ts.net name: what the app accepts in a pairing code. */
 function isTailnetAddress(host) {
   const octets = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (octets !== null) return octets[1] === "100" && Number(octets[2]) >= 64 && Number(octets[2]) <= 127;
+  if (octets !== null) return (
+      octets[1] === "100" && Number(octets[2]) >= 64 && Number(octets[2]) <= 127
+    );
   return /\.ts\.net$/i.test(host);
 }
 

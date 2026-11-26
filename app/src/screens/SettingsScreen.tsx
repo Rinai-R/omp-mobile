@@ -1,3 +1,4 @@
+import formLicense from "../../vendor/omp-form/license.json";
 import type { ReactNode } from "react";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Alert, Linking, Switch, Text, View } from "react-native";
@@ -162,6 +163,7 @@ export function SettingsScreen({
 
         <View style={styles.gap} />
         <Group>
+          <Row title={t("approval.licenses")} onPress={() => Alert.alert("oh-my-pi · MIT", formLicense.text)} last={false} />
           <Row title={t("settings.about.app")} trailing={<Text style={styles.version}>{version}</Text>} last={false} />
           {apkUpdate.action !== undefined ? (
             <Row
